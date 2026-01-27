@@ -1,15 +1,14 @@
-import { Image as ExpoImage } from 'expo-image';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useState } from 'react';
 import { Image, Pressable, StyleSheet, useWindowDimensions } from 'react-native';
 
-import ParallaxScrollView from '@/components/parallax-scroll-view';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
 import {
   TILE_CATEGORIES,
   TILE_MANIFEST,
   type TileCategory,
 } from '@/assets/images/tiles/manifest';
+import { ThemedText } from '@/components/themed-text';
+import { ThemedView } from '@/components/themed-view';
+import { useTileGrid } from '@/hooks/use-tile-grid';
 
 const GRID_GAP = 0;
 const CONTENT_PADDING = 0;
@@ -30,162 +29,15 @@ export default function TestScreen() {
     0
   );
 
-  const gridLayout = useMemo(() => {
-    const totalTiles = tileSources.length;
-    let best = { columns: 1, rows: totalTiles, tileSize: 0 };
-
-    for (let columns = 1; columns <= totalTiles; columns += 1) {
-      const rows = Math.ceil(totalTiles / columns);
-      const widthPerTile =
-        (availableWidth - GRID_GAP * (columns - 1)) / columns;
-      const heightPerTile =
-        (availableHeight - GRID_GAP * (rows - 1)) / rows;
-      const tileSize = Math.floor(Math.min(widthPerTile, heightPerTile));
-
-      if (tileSize > best.tileSize) {
-        best = { columns, rows, tileSize };
-      }
-    }
-
-    return best;
-  }, [availableHeight, availableWidth, tileSources.length]);
-
-  const pickNewIndex = (currentIndex: number, sourcesLength: number) => {
-    if (sourcesLength <= 1) {
-      return currentIndex;
-    }
-
-    let nextIndex = currentIndex;
-    while (nextIndex === currentIndex) {
-      nextIndex = Math.floor(Math.random() * sourcesLength);
-    }
-    return nextIndex;
-  };
-
-  const pickRotation = () => {
-    const options = [0, 90, 180, 270];
-    return options[Math.floor(Math.random() * options.length)];
-  };
-
-  const buildInitialTiles = (count: number, sourcesLength: number) => {
-    if (count <= 0) {
-      return [];
-    }
-    const base = Array.from({ length: sourcesLength }, (_, index) => index);
-    const filled =
-      count <= base.length
-        ? base.slice(0, count)
-        : [
-            ...base,
-            ...Array.from({ length: count - base.length }, () =>
-              Math.floor(Math.random() * sourcesLength)
-            ),
-          ];
-    return filled.map((imageIndex) => ({
-      imageIndex,
-      rotation: pickRotation(),
-    }));
-  };
-
-  const normalizeTiles = (
-    currentTiles: Array<{ imageIndex: number; rotation: number }>,
-    cellCount: number,
-    sourcesLength: number
-  ) => {
-    if (cellCount <= 0) {
-      return [];
-    }
-    if (currentTiles.length === 0) {
-      return buildInitialTiles(cellCount, sourcesLength);
-    }
-    if (currentTiles.length === cellCount) {
-      return currentTiles;
-    }
-    if (currentTiles.length < cellCount) {
-      const next = [...currentTiles];
-      for (let i = currentTiles.length; i < cellCount; i += 1) {
-        const source = currentTiles[i % currentTiles.length];
-        next.push({ imageIndex: source.imageIndex, rotation: source.rotation });
-      }
-      return next;
-    }
-    return currentTiles.slice(0, cellCount);
-  };
-
-  const totalCells = gridLayout.rows * gridLayout.columns;
-  const [tiles, setTiles] = useState<Array<{ imageIndex: number; rotation: number }>>(() =>
-    buildInitialTiles(Math.max(totalCells, tileSources.length), tileSources.length)
-  );
-  const lastCategoryRef = useRef<TileCategory>(selectedCategory);
-  const lastPressRef = useRef<{
-    cellIndex: number;
-    imageIndex: number;
-    rotation: number;
-    time: number;
-  } | null>(null);
-  const renderTiles = useMemo(
-    () => normalizeTiles(tiles, totalCells, tileSources.length),
-    [tiles, totalCells, tileSources.length]
-  );
-
-  useEffect(() => {
-    if (lastCategoryRef.current !== selectedCategory) {
-      lastCategoryRef.current = selectedCategory;
-      setTiles(
-        buildInitialTiles(
-          Math.max(totalCells, tileSources.length),
-          tileSources.length
-        )
-      );
-    }
-  }, [selectedCategory, tileSources.length, totalCells]);
-
-  useEffect(() => {
-    setTiles((prev) => normalizeTiles(prev, totalCells, tileSources.length));
-  }, [totalCells]);
-
-  const handlePress = (cellIndex: number) => {
-    const current = renderTiles[cellIndex];
-    if (current === undefined) {
-      return;
-    }
-    const now = Date.now();
-    const cached =
-      lastPressRef.current &&
-      lastPressRef.current.cellIndex === cellIndex &&
-      now - lastPressRef.current.time < 150
-        ? lastPressRef.current
-        : null;
-
-    const nextImageIndex = cached
-      ? cached.imageIndex
-      : pickNewIndex(current.imageIndex, tileSources.length);
-    const nextRotation = cached ? cached.rotation : pickRotation();
-
-    lastPressRef.current = {
-      cellIndex,
-      imageIndex: nextImageIndex,
-      rotation: nextRotation,
-      time: now,
-    };
-    setTiles((prev) =>
-      normalizeTiles(prev, totalCells, tileSources.length).map((tile, index) =>
-        index === cellIndex
-          ? { imageIndex: nextImageIndex, rotation: nextRotation }
-          : tile
-      )
-    );
-  };
+  const { gridLayout, tiles, handlePress } = useTileGrid({
+    tileSourcesLength: tileSources.length,
+    availableWidth,
+    availableHeight,
+    gridGap: GRID_GAP,
+  });
 
   return (
-    <ParallaxScrollView
-      headerBackgroundColor={{ light: '#A1CEDC', dark: '#1D3D47' }}
-      headerImage={
-        <ExpoImage
-          source={require('@/assets/images/partial-react-logo.png')}
-          style={styles.reactLogo}
-        />
-      }>
+    <ThemedView style={styles.screen}>
       <ThemedView
         style={styles.titleContainer}
         onLayout={(event) => setTitleHeight(event.nativeEvent.layout.height)}
@@ -224,7 +76,7 @@ export default function TestScreen() {
           <ThemedView key={`row-${rowIndex}`} style={styles.row}>
             {Array.from({ length: gridLayout.columns }).map((_, columnIndex) => {
               const cellIndex = rowIndex * gridLayout.columns + columnIndex;
-              const item = renderTiles[cellIndex];
+              const item = tiles[cellIndex];
               return (
                 <Pressable
                   key={`cell-${cellIndex}`}
@@ -251,7 +103,7 @@ export default function TestScreen() {
           </ThemedView>
         ))}
       </ThemedView>
-    </ParallaxScrollView>
+    </ThemedView>
   );
 }
 
@@ -279,12 +131,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 8,
   },
-  reactLogo: {
-    height: 178,
-    width: 290,
-    bottom: 0,
-    left: 0,
-    position: 'absolute',
+  screen: {
+    flex: 1,
   },
   grid: {
     alignContent: 'flex-start',
