@@ -71,6 +71,19 @@ export const TILE_MANIFEST = {
     require('@/assets/images/tiles/shapes/triangle_06.png'),
     require('@/assets/images/tiles/shapes/triangle_07.png'),
     require('@/assets/images/tiles/shapes/triangle_08.png')
+  ],
+  "tilerTest": [
+    require('@/assets/images/tiles/tilerTest/tile_00000000.png'),
+    require('@/assets/images/tiles/tilerTest/tile_00000101.png'),
+    require('@/assets/images/tiles/tilerTest/tile_00001000.png'),
+    require('@/assets/images/tiles/tilerTest/tile_00010001.png'),
+    require('@/assets/images/tiles/tilerTest/tile_01000010.png'),
+    require('@/assets/images/tiles/tilerTest/tile_01010010.png'),
+    require('@/assets/images/tiles/tilerTest/tile_01010101.png'),
+    require('@/assets/images/tiles/tilerTest/tile_10000010.png'),
+    require('@/assets/images/tiles/tilerTest/tile_10001000.png'),
+    require('@/assets/images/tiles/tilerTest/tile_10001010.png'),
+    require('@/assets/images/tiles/tilerTest/tile_10101010.png')
   ]
 } as const;
 

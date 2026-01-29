@@ -74,6 +74,9 @@ export const useTileGrid = ({
         ? lastPressRef.current
         : null;
 
+    if (tileSourcesLength <= 0) {
+      return;
+    }
     const nextImageIndex = cached
       ? cached.imageIndex
       : pickNewIndex(current.imageIndex, tileSourcesLength);

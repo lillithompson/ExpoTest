@@ -6,6 +6,7 @@ import {
   TILE_MANIFEST,
   type TileCategory,
 } from '@/assets/images/tiles/manifest';
+import { TileSetDropdown } from '@/components/tile-set-dropdown';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { useTileGrid } from '@/hooks/use-tile-grid';
@@ -14,11 +15,11 @@ const GRID_GAP = 0;
 const CONTENT_PADDING = 0;
 const HEADER_HEIGHT = 250;
 const TITLE_SPACING = 0;
+const BLANK_TILE = require('@/assets/images/tiles/tile_blank.png');
 
 export default function TestScreen() {
   const { width, height } = useWindowDimensions();
   const [titleHeight, setTitleHeight] = useState(0);
-  const [showMenu, setShowMenu] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState<TileCategory>(
     () => TILE_CATEGORIES[0]
   );
@@ -43,31 +44,12 @@ export default function TestScreen() {
         onLayout={(event) => setTitleHeight(event.nativeEvent.layout.height)}
       >
         <ThemedText type="title">Tile Grid</ThemedText>
-        <Pressable
-          onPress={() => setShowMenu((prev) => !prev)}
-          style={styles.dropdown}
-          accessibilityRole="button"
-          accessibilityLabel="Select tile set"
-        >
-          <ThemedText type="defaultSemiBold">{selectedCategory}</ThemedText>
-        </Pressable>
+        <TileSetDropdown
+          categories={TILE_CATEGORIES}
+          selected={selectedCategory}
+          onSelect={(category) => setSelectedCategory(category as TileCategory)}
+        />
       </ThemedView>
-      {showMenu && (
-        <ThemedView style={styles.menu}>
-          {TILE_CATEGORIES.map((category) => (
-            <Pressable
-              key={category}
-              onPress={() => {
-                setSelectedCategory(category);
-                setShowMenu(false);
-              }}
-              style={styles.menuItem}
-            >
-              <ThemedText type="defaultSemiBold">{category}</ThemedText>
-            </Pressable>
-          ))}
-        </ThemedView>
-      )}
       <ThemedView
         style={[styles.grid, { height: availableHeight }]}
         accessibilityRole="grid"
@@ -89,7 +71,11 @@ export default function TestScreen() {
                   ]}
                 >
                   <Image
-                    source={tileSources[item.imageIndex]}
+                    source={
+                      item.imageIndex < 0
+                        ? BLANK_TILE
+                        : tileSources[item.imageIndex]
+                    }
                     style={[
                       styles.tileImage,
                       { transform: [{ rotate: `${item.rotation}deg` }] },
@@ -112,24 +98,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-  },
-  dropdown: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderWidth: 1,
-    borderColor: '#1f1f1f',
-    borderRadius: 6,
-  },
-  menu: {
-    borderWidth: 1,
-    borderColor: '#1f1f1f',
-    borderRadius: 6,
-    marginBottom: 8,
-    overflow: 'hidden',
-  },
-  menuItem: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
   },
   screen: {
     flex: 1,

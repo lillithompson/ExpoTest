@@ -27,22 +27,12 @@ export const pickNewIndex = (currentIndex: number, sourcesLength: number) => {
 };
 
 export const buildInitialTiles = (count: number, sourcesLength: number) => {
-  if (count <= 0 || sourcesLength <= 0) {
+  if (count <= 0) {
     return [] as Tile[];
   }
-  const base = Array.from({ length: sourcesLength }, (_, index) => index);
-  const filled =
-    count <= base.length
-      ? base.slice(0, count)
-      : [
-          ...base,
-          ...Array.from({ length: count - base.length }, () =>
-            Math.floor(Math.random() * sourcesLength)
-          ),
-        ];
-  return filled.map((imageIndex) => ({
-    imageIndex,
-    rotation: pickRotation(),
+  return Array.from({ length: count }, () => ({
+    imageIndex: -1,
+    rotation: 0,
   }));
 };
 
