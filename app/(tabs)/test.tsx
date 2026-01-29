@@ -191,9 +191,11 @@ const styles = StyleSheet.create({
   tile: {
     backgroundColor: '#000',
     position: 'relative',
+    borderRadius: 0,
   },
   tileImage: {
     width: '100%',
     height: '100%',
+    borderRadius: 0,
   },
 });
