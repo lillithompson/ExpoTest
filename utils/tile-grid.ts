@@ -1,6 +1,8 @@
 export type Tile = {
   imageIndex: number;
   rotation: number;
+  mirrorX: boolean;
+  mirrorY: boolean;
 };
 
 export type GridLayout = {
@@ -26,26 +28,28 @@ export const pickNewIndex = (currentIndex: number, sourcesLength: number) => {
   return nextIndex;
 };
 
-export const buildInitialTiles = (count: number, sourcesLength: number) => {
+export const buildInitialTiles = (count: number) => {
   if (count <= 0) {
     return [] as Tile[];
   }
   return Array.from({ length: count }, () => ({
     imageIndex: -1,
     rotation: 0,
+    mirrorX: false,
+    mirrorY: false,
   }));
 };
 
 export const normalizeTiles = (
   currentTiles: Tile[],
   cellCount: number,
-  sourcesLength: number
+  _sourcesLength: number
 ) => {
-  if (cellCount <= 0 || sourcesLength <= 0) {
+  if (cellCount <= 0) {
     return [] as Tile[];
   }
   if (currentTiles.length === 0) {
-    return buildInitialTiles(cellCount, sourcesLength);
+    return buildInitialTiles(cellCount);
   }
   if (currentTiles.length === cellCount) {
     return currentTiles;
@@ -54,7 +58,12 @@ export const normalizeTiles = (
     const next = [...currentTiles];
     for (let i = currentTiles.length; i < cellCount; i += 1) {
       const source = currentTiles[i % currentTiles.length];
-      next.push({ imageIndex: source.imageIndex, rotation: source.rotation });
+      next.push({
+        imageIndex: source.imageIndex,
+        rotation: source.rotation,
+        mirrorX: source.mirrorX,
+        mirrorY: source.mirrorY,
+      });
     }
     return next;
   }

@@ -27,14 +27,19 @@ const entries = directories.map((dirName) => {
     .filter((file) => imageExt.test(file))
     .sort();
 
-  const requires = files
-    .map((file) => `    require('@/assets/images/tiles/${dirName}/${file}')`)
+  const entries = files
+    .map(
+      (file) =>
+        `    { name: ${JSON.stringify(
+          file
+        )}, source: require('@/assets/images/tiles/${dirName}/${file}') }`
+    )
     .join(',\n');
 
-  return `  ${JSON.stringify(dirName)}: [\n${requires}\n  ]`;
+  return `  ${JSON.stringify(dirName)}: [\n${entries}\n  ]`;
 });
 
-const output = `export const TILE_MANIFEST = {\n${entries.join(',\n')}\n} as const;\n\nexport type TileCategory = keyof typeof TILE_MANIFEST;\nexport const TILE_CATEGORIES = Object.keys(TILE_MANIFEST) as TileCategory[];\n`;
+const output = `export const TILE_MANIFEST = {\n${entries.join(',\n')}\n} as const;\n\nexport type TileCategory = keyof typeof TILE_MANIFEST;\nexport type TileSource = (typeof TILE_MANIFEST)[TileCategory][number];\nexport const TILE_CATEGORIES = Object.keys(TILE_MANIFEST) as TileCategory[];\n`;
 
 fs.writeFileSync(outputPath, output, 'utf8');
 console.log(`Generated tile manifest at ${path.relative(root, outputPath)}`);
