@@ -20,6 +20,7 @@ type Params = {
   brush:
     | { mode: 'random' }
     | { mode: 'erase' }
+    | { mode: 'clone' }
     | { mode: 'fixed'; index: number; rotation: number };
   mirrorHorizontal: boolean;
   mirrorVertical: boolean;
@@ -33,6 +34,8 @@ type Result = {
   floodFill: () => void;
   floodComplete: () => void;
   resetTiles: () => void;
+  setCloneSource: (cellIndex: number) => void;
+  cloneSourceIndex: number | null;
   totalCells: number;
 };
 
@@ -69,11 +72,20 @@ export const useTileGrid = ({
     mirrorY: boolean;
     time: number;
   } | null>(null);
+  const cloneSourceRef = useRef<number | null>(null);
+  const [cloneSourceIndex, setCloneSourceIndex] = useState<number | null>(null);
+  const cloneAnchorRef = useRef<number | null>(null);
 
   const renderTiles = useMemo(
     () => normalizeTiles(tiles, totalCells, tileSourcesLength),
     [tiles, totalCells, tileSourcesLength]
   );
+
+  useEffect(() => {
+    if (brush.mode !== 'clone') {
+      cloneAnchorRef.current = null;
+    }
+  }, [brush.mode]);
 
   const tileSourceMeta = useMemo(
     () =>
@@ -409,6 +421,56 @@ export const useTileGrid = ({
     return placements;
   };
 
+  const getMirrorTargets = (cellIndex: number) => {
+    const row = Math.floor(cellIndex / gridLayout.columns);
+    const col = cellIndex % gridLayout.columns;
+    const targets = new Set<number>();
+
+    if (mirrorHorizontal) {
+      targets.add(row * gridLayout.columns + (gridLayout.columns - 1 - col));
+    }
+    if (mirrorVertical) {
+      targets.add((gridLayout.rows - 1 - row) * gridLayout.columns + col);
+    }
+    if (mirrorHorizontal && mirrorVertical) {
+      targets.add(
+        (gridLayout.rows - 1 - row) * gridLayout.columns +
+          (gridLayout.columns - 1 - col)
+      );
+    }
+
+    targets.delete(cellIndex);
+    return Array.from(targets);
+  };
+
+  const getDrivenCellIndices = () => {
+    const maxRow = mirrorVertical ? gridLayout.rows / 2 : gridLayout.rows;
+    const maxCol = mirrorHorizontal ? gridLayout.columns / 2 : gridLayout.columns;
+    const indices: number[] = [];
+    for (let row = 0; row < maxRow; row += 1) {
+      for (let col = 0; col < maxCol; col += 1) {
+        indices.push(row * gridLayout.columns + col);
+      }
+    }
+    return indices;
+  };
+
+  const applyPlacementsToArray = (
+    nextTiles: Tile[],
+    placements: Map<number, Tile>,
+    driverIndex: number
+  ) => {
+    placements.forEach((placement, index) => {
+      if (index < 0 || index >= nextTiles.length) {
+        return;
+      }
+      if (index !== driverIndex && nextTiles[index]?.imageIndex >= 0) {
+        return;
+      }
+      nextTiles[index] = placement;
+    });
+  };
+
   const applyPlacement = (cellIndex: number, placement: Tile) => {
     const placements = getMirroredPlacements(cellIndex, placement);
     setTiles((prev) =>
@@ -425,6 +487,46 @@ export const useTileGrid = ({
         rotation: 0,
         mirrorX: false,
         mirrorY: false,
+      });
+      return;
+    }
+    if (brush.mode === 'clone') {
+      const sourceIndex = cloneSourceRef.current;
+      if (sourceIndex === null) {
+        return;
+      }
+      if (!cloneAnchorRef.current && cloneAnchorRef.current !== 0) {
+        cloneAnchorRef.current = cellIndex;
+      }
+      const anchorIndex = cloneAnchorRef.current ?? cellIndex;
+      const anchorRow = Math.floor(anchorIndex / gridLayout.columns);
+      const anchorCol = anchorIndex % gridLayout.columns;
+      const sourceRow = Math.floor(sourceIndex / gridLayout.columns);
+      const sourceCol = sourceIndex % gridLayout.columns;
+      const destRow = Math.floor(cellIndex / gridLayout.columns);
+      const destCol = cellIndex % gridLayout.columns;
+      const rowOffset = destRow - anchorRow;
+      const colOffset = destCol - anchorCol;
+      const mappedRow = sourceRow + rowOffset;
+      const mappedCol = sourceCol + colOffset;
+      if (
+        mappedRow < 0 ||
+        mappedCol < 0 ||
+        mappedRow >= gridLayout.rows ||
+        mappedCol >= gridLayout.columns
+      ) {
+        return;
+      }
+      const mappedIndex = mappedRow * gridLayout.columns + mappedCol;
+      const sourceTile = renderTiles[mappedIndex];
+      if (!sourceTile) {
+        return;
+      }
+      applyPlacement(cellIndex, {
+        imageIndex: sourceTile.imageIndex,
+        rotation: sourceTile.rotation,
+        mirrorX: sourceTile.mirrorX,
+        mirrorY: sourceTile.mirrorY,
       });
       return;
     }
@@ -544,20 +646,35 @@ export const useTileGrid = ({
     if (totalCells <= 0) {
       return;
     }
+    const drivenSet = new Set(getDrivenCellIndices());
     if (brush.mode === 'random') {
-      const nextTiles = [
-        ...normalizeTiles(tiles, totalCells, tileSourcesLength),
-      ];
+      const nextTiles = [...normalizeTiles(tiles, totalCells, tileSourcesLength)];
       if (tileSourcesLength <= 0) {
         return;
       }
-      for (let index = 0; index < totalCells; index += 1) {
+      if (mirrorHorizontal || mirrorVertical) {
+        for (let index = 0; index < totalCells; index += 1) {
+          if (nextTiles[index].imageIndex >= 0) {
+            continue;
+          }
+          const targets = getMirrorTargets(index);
+          if (targets.some((target) => nextTiles[target]?.imageIndex >= 0)) {
+            drivenSet.add(index);
+          }
+        }
+      }
+      for (const index of drivenSet) {
         if (nextTiles[index].imageIndex >= 0) {
           continue;
         }
         const selection = selectCompatibleTile(index, nextTiles);
-        nextTiles[index] =
+        const placement =
           selection ?? { imageIndex: -2, rotation: 0, mirrorX: false, mirrorY: false };
+        applyPlacementsToArray(
+          nextTiles,
+          getMirroredPlacements(index, placement),
+          index
+        );
       }
       setTiles(nextTiles);
       return;
@@ -566,22 +683,46 @@ export const useTileGrid = ({
     if (fixedIndex < 0 || fixedIndex >= tileSourcesLength) {
       return;
     }
-    setTiles((prev) =>
-      normalizeTiles(prev, totalCells, tileSourcesLength).map((tile) =>
-        tile.imageIndex < 0
-          ? {
-              imageIndex: fixedIndex,
-              rotation: brush.rotation,
-              mirrorX: false,
-              mirrorY: false,
-            }
-          : tile
-      )
-    );
+    setTiles((prev) => {
+      const nextTiles = [...normalizeTiles(prev, totalCells, tileSourcesLength)];
+      if (mirrorHorizontal || mirrorVertical) {
+        for (let index = 0; index < totalCells; index += 1) {
+          if (nextTiles[index].imageIndex >= 0) {
+            continue;
+          }
+          const targets = getMirrorTargets(index);
+          if (targets.some((target) => nextTiles[target]?.imageIndex >= 0)) {
+            drivenSet.add(index);
+          }
+        }
+      }
+      for (const index of drivenSet) {
+        if (nextTiles[index].imageIndex >= 0) {
+          continue;
+        }
+        applyPlacementsToArray(
+          nextTiles,
+          getMirroredPlacements(index, {
+            imageIndex: fixedIndex,
+            rotation: brush.rotation,
+            mirrorX: false,
+            mirrorY: false,
+          }),
+          index
+        );
+      }
+      return nextTiles;
+    });
   };
 
   const resetTiles = () => {
     setTiles(buildInitialTiles(totalCells));
+  };
+
+  const setCloneSource = (cellIndex: number) => {
+    cloneSourceRef.current = cellIndex;
+    cloneAnchorRef.current = null;
+    setCloneSourceIndex(cellIndex);
   };
 
   return {
@@ -592,6 +733,8 @@ export const useTileGrid = ({
     floodFill,
     floodComplete,
     resetTiles,
+    setCloneSource,
+    cloneSourceIndex: brush.mode === 'clone' ? cloneSourceIndex : null,
     totalCells,
   };
 };

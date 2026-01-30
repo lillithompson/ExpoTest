@@ -8,6 +8,7 @@ import { type TileSource } from '@/assets/images/tiles/manifest';
 type Brush =
   | { mode: 'random' }
   | { mode: 'erase' }
+  | { mode: 'clone' }
   | { mode: 'fixed'; index: number; rotation: number };
 
 type Props = {
@@ -46,6 +47,7 @@ export function TileBrushPanel({
           {[
             { type: 'random' as const },
             { type: 'erase' as const },
+            { type: 'clone' as const },
             ...tileSources.map((tile, index) => ({
               type: 'fixed' as const,
               tile,
@@ -54,27 +56,35 @@ export function TileBrushPanel({
           ].map((entry, idx) => {
             const isRandom = entry.type === 'random';
             const isErase = entry.type === 'erase';
+            const isClone = entry.type === 'clone';
             const isSelected = isRandom
               ? selected.mode === 'random'
               : isErase
                 ? selected.mode === 'erase'
-              : selected.mode === 'fixed' && selected.index === entry.index;
+                : isClone
+                  ? selected.mode === 'clone'
+                : selected.mode === 'fixed' && selected.index === entry.index;
             const isTopRow = idx % 2 === 0;
-            const rotation = !isRandom && !isErase ? getRotation(entry.index) : 0;
+            const rotation =
+              !isRandom && !isErase && !isClone ? getRotation(entry.index) : 0;
             return (
               <Pressable
-                key={isRandom ? 'random' : isErase ? 'erase' : entry.tile.name}
+                key={
+                  isRandom ? 'random' : isErase ? 'erase' : isClone ? 'clone' : entry.tile.name
+                }
                 onPressIn={() =>
                   onSelect(
                     isRandom
                       ? { mode: 'random' }
                       : isErase
                         ? { mode: 'erase' }
+                        : isClone
+                          ? { mode: 'clone' }
                         : { mode: 'fixed', index: entry.index, rotation }
                   )
                 }
                 onLongPress={() => {
-                  if (!isRandom && !isErase) {
+                  if (!isRandom && !isErase && !isClone) {
                     onRotate(entry.index);
                   }
                 }}
@@ -90,6 +100,8 @@ export function TileBrushPanel({
                     ? 'Random brush'
                     : isErase
                       ? 'Erase brush'
+                      : isClone
+                        ? 'Clone brush'
                       : `Brush ${entry.tile.name}`
                 }
               >
@@ -100,6 +112,10 @@ export function TileBrushPanel({
                 ) : isErase ? (
                   <ThemedText type="defaultSemiBold" style={styles.labelText}>
                     Erase
+                  </ThemedText>
+                ) : isClone ? (
+                  <ThemedText type="defaultSemiBold" style={styles.labelText}>
+                    Clone
                   </ThemedText>
                 ) : (
                   <ThemedView style={styles.imageBox}>

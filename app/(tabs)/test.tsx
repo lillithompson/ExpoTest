@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { memo, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Image,
@@ -7,6 +7,7 @@ import {
   StyleSheet,
   TextInput,
   useWindowDimensions,
+  View,
 } from 'react-native';
 
 import {
@@ -21,6 +22,7 @@ import { ThemedView } from '@/components/themed-view';
 import { useTileGrid } from '@/hooks/use-tile-grid';
 import { exportTileCanvasAsPng } from '@/utils/tile-export';
 import { getTransformedConnectionsForName } from '@/utils/tile-compat';
+import { type Tile } from '@/utils/tile-grid';
 
 const GRID_GAP = 0;
 const CONTENT_PADDING = 0;
@@ -29,6 +31,82 @@ const TITLE_SPACING = 0;
 const BRUSH_PANEL_HEIGHT = 160;
 const BLANK_TILE = require('@/assets/images/tiles/tile_blank.png');
 const ERROR_TILE = require('@/assets/images/tiles/tile_error.png');
+
+type TileCellProps = {
+  cellIndex: number;
+  tileSize: number;
+  tile: Tile;
+  tileSources: typeof TILE_MANIFEST[TileCategory];
+  showDebug: boolean;
+  isCloneSource: boolean;
+};
+
+const TileCell = memo(
+  ({
+    cellIndex,
+    tileSize,
+    tile,
+    tileSources,
+    showDebug,
+    isCloneSource,
+  }: TileCellProps) => {
+    const tileName = tileSources[tile.imageIndex]?.name ?? '';
+    const connections = useMemo(
+      () =>
+        showDebug && tile.imageIndex >= 0
+          ? getTransformedConnectionsForName(
+              tileName,
+              tile.rotation,
+              tile.mirrorX,
+              tile.mirrorY
+            )
+          : null,
+      [showDebug, tile.imageIndex, tile.mirrorX, tile.mirrorY, tile.rotation, tileName]
+    );
+    const source =
+      tile.imageIndex < 0
+        ? tile.imageIndex === -2
+          ? ERROR_TILE
+          : BLANK_TILE
+        : tileSources[tile.imageIndex]?.source ?? ERROR_TILE;
+
+    return (
+      <View
+        key={`cell-${cellIndex}`}
+        accessibilityRole="button"
+        accessibilityLabel={`Tile ${cellIndex + 1}`}
+        style={[
+          styles.tile,
+          { width: tileSize, height: tileSize },
+          isCloneSource && styles.cloneSource,
+        ]}
+      >
+        <Image
+          source={source}
+          style={[
+            styles.tileImage,
+            {
+              transform: [
+                { scaleX: tile.mirrorX ? -1 : 1 },
+                { scaleY: tile.mirrorY ? -1 : 1 },
+                { rotate: `${tile.rotation}deg` },
+              ],
+            },
+          ]}
+          resizeMode="cover"
+          fadeDuration={0}
+        />
+        {showDebug && <TileDebugOverlay connections={connections} />}
+      </View>
+    );
+  },
+  (prev, next) =>
+    prev.tile === next.tile &&
+    prev.tileSize === next.tileSize &&
+    prev.showDebug === next.showDebug &&
+    prev.tileSources === next.tileSources &&
+    prev.isCloneSource === next.isCloneSource
+);
 
 export default function TestScreen() {
   const { width, height } = useWindowDimensions();
@@ -44,6 +122,7 @@ export default function TestScreen() {
   const [brush, setBrush] = useState<
     | { mode: 'random' }
     | { mode: 'erase' }
+    | { mode: 'clone' }
     | { mode: 'fixed'; index: number; rotation: number }
   >({
     mode: 'random',
@@ -67,7 +146,17 @@ export default function TestScreen() {
     0
   );
 
-  const { gridLayout, tiles, handlePress, randomFill, floodFill, floodComplete, resetTiles } = useTileGrid({
+  const {
+    gridLayout,
+    tiles,
+    handlePress,
+    randomFill,
+    floodFill,
+    floodComplete,
+    resetTiles,
+    setCloneSource,
+    cloneSourceIndex,
+  } = useTileGrid({
     tileSources,
     availableWidth,
     availableHeight,
@@ -78,6 +167,19 @@ export default function TestScreen() {
     mirrorVertical,
   });
   const lastPaintedRef = useRef<number | null>(null);
+  const lastTapRef = useRef<{ time: number; cellIndex: number } | null>(null);
+  const cloneTapTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cloneTapPendingRef = useRef<{ time: number; cellIndex: number } | null>(
+    null
+  );
+  const rowIndices = useMemo(
+    () => Array.from({ length: gridLayout.rows }, (_, index) => index),
+    [gridLayout.rows]
+  );
+  const columnIndices = useMemo(
+    () => Array.from({ length: gridLayout.columns }, (_, index) => index),
+    [gridLayout.columns]
+  );
 
   const handleDownload = async () => {
     const result = await exportTileCanvasAsPng({
@@ -135,22 +237,74 @@ export default function TestScreen() {
     return null;
   };
 
-  const handlePaintAt = (x: number, y: number) => {
+  const getCellIndexForPoint = (x: number, y: number) => {
     if (gridLayout.columns === 0 || gridLayout.rows === 0) {
-      return;
+      return null;
     }
     const tileStride = gridLayout.tileSize + GRID_GAP;
     const col = Math.floor(x / (tileStride || 1));
     const row = Math.floor(y / (tileStride || 1));
     if (col < 0 || row < 0 || col >= gridLayout.columns || row >= gridLayout.rows) {
+      return null;
+    }
+    return row * gridLayout.columns + col;
+  };
+
+  const paintCellIndex = (cellIndex: number) => {
+    if (lastPaintedRef.current === cellIndex) {
       return;
     }
-    const index = row * gridLayout.columns + col;
-    if (lastPaintedRef.current === index) {
+    lastPaintedRef.current = cellIndex;
+    handlePress(cellIndex);
+  };
+
+  const handleCloneTap = (cellIndex: number) => {
+    const now = Date.now();
+    const pending = cloneTapPendingRef.current;
+    if (
+      pending &&
+      pending.cellIndex === cellIndex &&
+      now - pending.time < 250
+    ) {
+      if (cloneTapTimeoutRef.current) {
+        clearTimeout(cloneTapTimeoutRef.current);
+        cloneTapTimeoutRef.current = null;
+      }
+      cloneTapPendingRef.current = null;
+      setCloneSource(cellIndex);
+      lastPaintedRef.current = null;
       return;
     }
-    lastPaintedRef.current = index;
-    handlePress(index);
+
+    if (cloneTapTimeoutRef.current) {
+      clearTimeout(cloneTapTimeoutRef.current);
+      cloneTapTimeoutRef.current = null;
+    }
+
+    cloneTapPendingRef.current = { time: now, cellIndex };
+    cloneTapTimeoutRef.current = setTimeout(() => {
+      cloneTapTimeoutRef.current = null;
+      cloneTapPendingRef.current = null;
+      paintCellIndex(cellIndex);
+    }, 220);
+  };
+
+  const handlePaintAt = (x: number, y: number, options?: { isDoubleTap?: boolean }) => {
+    const cellIndex = getCellIndexForPoint(x, y);
+    if (cellIndex === null) {
+      return;
+    }
+    if (options?.isDoubleTap && brush.mode === 'clone') {
+      setCloneSource(cellIndex);
+      lastPaintedRef.current = null;
+      return;
+    }
+    if (brush.mode === 'clone' && cloneTapTimeoutRef.current) {
+      clearTimeout(cloneTapTimeoutRef.current);
+      cloneTapTimeoutRef.current = null;
+      cloneTapPendingRef.current = null;
+    }
+    paintCellIndex(cellIndex);
   };
 
   return (
@@ -253,7 +407,27 @@ export default function TestScreen() {
               onResponderGrant: (event: any) => {
                 const point = getRelativePoint(event);
                 if (point) {
-                  handlePaintAt(point.x, point.y);
+                  const cellIndex = getCellIndexForPoint(point.x, point.y);
+                  if (cellIndex === null) {
+                    return;
+                  }
+                  const now = Date.now();
+                  const lastTap = lastTapRef.current;
+                  const isDoubleTap =
+                    brush.mode === 'clone' &&
+                    lastTap &&
+                    lastTap.cellIndex === cellIndex &&
+                    now - lastTap.time < 350;
+                  lastTapRef.current = { time: now, cellIndex };
+                  if (isDoubleTap) {
+                    handleCloneTap(cellIndex);
+                    return;
+                  }
+                  if (brush.mode === 'clone') {
+                    handleCloneTap(cellIndex);
+                    return;
+                  }
+                  paintCellIndex(cellIndex);
                 }
               },
               onResponderMove: (event: any) => {
@@ -273,6 +447,14 @@ export default function TestScreen() {
               onMouseDown: (event: any) => {
                 const point = getRelativePoint(event);
                 if (point) {
+                  const cellIndex = getCellIndexForPoint(point.x, point.y);
+                  if (cellIndex === null) {
+                    return;
+                  }
+                  if (brush.mode === 'clone') {
+                    handleCloneTap(cellIndex);
+                    return;
+                  }
                   handlePaintAt(point.x, point.y);
                 }
               },
@@ -312,54 +494,21 @@ export default function TestScreen() {
             )}
           </ThemedView>
         )}
-        {Array.from({ length: gridLayout.rows }).map((_, rowIndex) => (
+        {rowIndices.map((rowIndex) => (
           <ThemedView key={`row-${rowIndex}`} style={styles.row}>
-            {Array.from({ length: gridLayout.columns }).map((_, columnIndex) => {
+            {columnIndices.map((columnIndex) => {
               const cellIndex = rowIndex * gridLayout.columns + columnIndex;
               const item = tiles[cellIndex];
-              const tileName = tileSources[item.imageIndex]?.name ?? '';
-              const connections =
-                showDebug && item.imageIndex >= 0
-                  ? getTransformedConnectionsForName(
-                      tileName,
-                      item.rotation,
-                      item.mirrorX,
-                      item.mirrorY
-                    )
-                  : null;
               return (
-                <Pressable
+                <TileCell
                   key={`cell-${cellIndex}`}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Tile ${cellIndex + 1}`}
-                  style={[
-                    styles.tile,
-                    { width: gridLayout.tileSize, height: gridLayout.tileSize },
-                  ]}
-                >
-                  <Image
-                    source={
-                      item.imageIndex < 0
-                        ? item.imageIndex === -2
-                          ? ERROR_TILE
-                          : BLANK_TILE
-                        : tileSources[item.imageIndex]?.source ?? ERROR_TILE
-                    }
-                    style={[
-                      styles.tileImage,
-                      {
-                        transform: [
-                          { scaleX: item.mirrorX ? -1 : 1 },
-                          { scaleY: item.mirrorY ? -1 : 1 },
-                          { rotate: `${item.rotation}deg` },
-                        ],
-                      },
-                    ]}
-                    resizeMode="cover"
-                    fadeDuration={0}
-                  />
-                  {showDebug && <TileDebugOverlay connections={connections} />}
-                </Pressable>
+                  cellIndex={cellIndex}
+                  tileSize={gridLayout.tileSize}
+                  tile={item}
+                  tileSources={tileSources}
+                  showDebug={showDebug}
+                  isCloneSource={brush.mode === 'clone' && cloneSourceIndex === cellIndex}
+                />
               );
             })}
           </ThemedView>
@@ -511,6 +660,10 @@ const styles = StyleSheet.create({
     backgroundColor: '#000',
     position: 'relative',
     borderRadius: 0,
+  },
+  cloneSource: {
+    borderColor: '#3b82f6',
+    borderWidth: 2,
   },
   tileImage: {
     width: '100%',
