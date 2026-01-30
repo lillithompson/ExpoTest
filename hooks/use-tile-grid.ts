@@ -36,6 +36,9 @@ type Result = {
   totalCells: number;
 };
 
+const toConnectionKey = (connections: boolean[] | null) =>
+  connections ? connections.map((value) => (value ? '1' : '0')).join('') : null;
+
 export const useTileGrid = ({
   tileSources,
   availableWidth,
@@ -46,6 +49,7 @@ export const useTileGrid = ({
   mirrorHorizontal,
   mirrorVertical,
 }: Params): Result => {
+  const previousTileSourcesRef = useRef<TileSource[] | null>(null);
   const tileSourcesLength = tileSources.length;
   const totalTiles = Math.max(tileSourcesLength, Math.max(minTiles, 0));
   const gridLayout = useMemo(
@@ -300,14 +304,75 @@ export const useTileGrid = ({
   };
 
   useEffect(() => {
-    setTiles(
-      buildInitialTiles(Math.max(totalCells, totalTiles))
-    );
-  }, [totalTiles, totalCells]);
-
-  useEffect(() => {
     setTiles((prev) => normalizeTiles(prev, totalCells, tileSourcesLength));
   }, [totalCells, tileSourcesLength]);
+
+  useEffect(() => {
+    const previousSources = previousTileSourcesRef.current;
+    if (previousSources === tileSources) {
+      return;
+    }
+    previousTileSourcesRef.current = tileSources;
+    if (!previousSources) {
+      return;
+    }
+
+    if (tileSourcesLength === 0) {
+      setTiles((prev) =>
+        normalizeTiles(prev, totalCells, previousSources.length).map((tile) =>
+          tile.imageIndex >= 0 || tile.imageIndex === -2
+            ? { imageIndex: -1, rotation: 0, mirrorX: false, mirrorY: false }
+            : tile
+        )
+      );
+      return;
+    }
+
+    const nextConnections = tileSources.map((source) =>
+      parseTileConnections(source.name)
+    );
+    const nextLookup = new Map<string, number[]>();
+    nextConnections.forEach((connections, index) => {
+      const key = toConnectionKey(connections);
+      if (!key) {
+        return;
+      }
+      const existing = nextLookup.get(key);
+      if (existing) {
+        existing.push(index);
+      } else {
+        nextLookup.set(key, [index]);
+      }
+    });
+
+    setTiles((prev) =>
+      normalizeTiles(prev, totalCells, previousSources.length).map((tile) => {
+        if (tile.imageIndex === -2) {
+          return { imageIndex: -1, rotation: 0, mirrorX: false, mirrorY: false };
+        }
+        if (tile.imageIndex < 0) {
+          return tile;
+        }
+        const previousSource = previousSources[tile.imageIndex];
+        if (!previousSource) {
+          return { imageIndex: -1, rotation: 0, mirrorX: false, mirrorY: false };
+        }
+        const previousConnections = parseTileConnections(previousSource.name);
+        const previousKey = toConnectionKey(previousConnections);
+        if (!previousKey) {
+          return { imageIndex: -1, rotation: 0, mirrorX: false, mirrorY: false };
+        }
+        const candidates = nextLookup.get(previousKey);
+        if (!candidates || candidates.length === 0) {
+          return { imageIndex: -1, rotation: 0, mirrorX: false, mirrorY: false };
+        }
+        return {
+          ...tile,
+          imageIndex: candidates[0],
+        };
+      })
+    );
+  }, [tileSources]);
 
   const getMirroredPlacements = (cellIndex: number, placement: Tile) => {
     const row = Math.floor(cellIndex / gridLayout.columns);

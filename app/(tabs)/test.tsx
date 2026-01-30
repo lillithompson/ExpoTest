@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 import {
+  Alert,
   Image,
   Platform,
   Pressable,
@@ -15,10 +16,10 @@ import {
 } from '@/assets/images/tiles/manifest';
 import { TileBrushPanel } from '@/components/tile-brush-panel';
 import { TileDebugOverlay } from '@/components/tile-debug-overlay';
-import { TileSetDropdown } from '@/components/tile-set-dropdown';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { useTileGrid } from '@/hooks/use-tile-grid';
+import { exportTileCanvasAsPng } from '@/utils/tile-export';
 import { getTransformedConnectionsForName } from '@/utils/tile-compat';
 
 const GRID_GAP = 0;
@@ -35,6 +36,7 @@ export default function TestScreen() {
   const [selectedCategory, setSelectedCategory] = useState<TileCategory>(
     () => TILE_CATEGORIES[0]
   );
+  const [showTileSetOverlay, setShowTileSetOverlay] = useState(false);
   const [showDebug, setShowDebug] = useState(false);
   const [minTilesInput, setMinTilesInput] = useState('25');
   const [mirrorHorizontal, setMirrorHorizontal] = useState(false);
@@ -76,6 +78,20 @@ export default function TestScreen() {
     mirrorVertical,
   });
   const lastPaintedRef = useRef<number | null>(null);
+
+  const handleDownload = async () => {
+    const result = await exportTileCanvasAsPng({
+      tiles,
+      gridLayout,
+      tileSources,
+      gridGap: GRID_GAP,
+      blankSource: BLANK_TILE,
+      errorSource: ERROR_TILE,
+    });
+    if (!result.ok) {
+      Alert.alert('Download unavailable', result.error);
+    }
+  };
 
   const getRelativePoint = (event: any) => {
     if (isWeb) {
@@ -145,11 +161,14 @@ export default function TestScreen() {
       >
         <ThemedText type="title">Tile Grid</ThemedText>
         <ThemedView style={styles.controls}>
-          <TileSetDropdown
-            categories={TILE_CATEGORIES}
-            selected={selectedCategory}
-            onSelect={(category) => setSelectedCategory(category as TileCategory)}
-          />
+          <Pressable
+            onPress={() => setShowTileSetOverlay(true)}
+            style={styles.resetButton}
+            accessibilityRole="button"
+            accessibilityLabel="Choose tile set"
+          >
+            <ThemedText type="defaultSemiBold">{selectedCategory}</ThemedText>
+          </Pressable>
           <ThemedView style={styles.inputGroup}>
             <ThemedText type="defaultSemiBold">Min Tiles</ThemedText>
             <TextInput
@@ -183,6 +202,14 @@ export default function TestScreen() {
             accessibilityLabel="Flood complete tiles"
           >
             <ThemedText type="defaultSemiBold">Flood Complete</ThemedText>
+          </Pressable>
+          <Pressable
+            onPress={handleDownload}
+            style={styles.resetButton}
+            accessibilityRole="button"
+            accessibilityLabel="Download tile canvas"
+          >
+            <ThemedText type="defaultSemiBold">Download PNG</ThemedText>
           </Pressable>
           <Pressable
             onPress={() => setShowDebug((prev) => !prev)}
@@ -316,7 +343,7 @@ export default function TestScreen() {
                         ? item.imageIndex === -2
                           ? ERROR_TILE
                           : BLANK_TILE
-                        : tileSources[item.imageIndex]?.source
+                        : tileSources[item.imageIndex]?.source ?? ERROR_TILE
                     }
                     style={[
                       styles.tileImage,
@@ -364,6 +391,36 @@ export default function TestScreen() {
         getRotation={(index) => paletteRotations[index] ?? 0}
         height={BRUSH_PANEL_HEIGHT}
       />
+      {showTileSetOverlay && (
+        <ThemedView style={styles.overlay} accessibilityRole="dialog">
+          <Pressable
+            style={styles.overlayBackdrop}
+            onPress={() => setShowTileSetOverlay(false)}
+            accessibilityRole="button"
+            accessibilityLabel="Close tile set chooser"
+          />
+          <ThemedView style={styles.overlayPanel}>
+            <ThemedText type="title">Choose Tile Set</ThemedText>
+            <ThemedView style={styles.overlayList}>
+              {TILE_CATEGORIES.map((category) => (
+                <Pressable
+                  key={category}
+                  onPress={() => {
+                    setSelectedCategory(category);
+                    setShowTileSetOverlay(false);
+                  }}
+                  style={[
+                    styles.overlayItem,
+                    category === selectedCategory && styles.overlayItemSelected,
+                  ]}
+                >
+                  <ThemedText type="defaultSemiBold">{category}</ThemedText>
+                </Pressable>
+              ))}
+            </ThemedView>
+          </ThemedView>
+        </ThemedView>
+      )}
     </ThemedView>
   );
 }
@@ -404,6 +461,40 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#1f1f1f',
     borderRadius: 6,
+  },
+  overlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'transparent',
+  },
+  overlayBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+  },
+  overlayPanel: {
+    width: '85%',
+    maxHeight: '70%',
+    borderWidth: 1,
+    borderColor: '#1f1f1f',
+    borderRadius: 8,
+    padding: 16,
+    backgroundColor: '#fff',
+    gap: 12,
+  },
+  overlayList: {
+    gap: 8,
+  },
+  overlayItem: {
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderColor: '#1f1f1f',
+    borderRadius: 6,
+  },
+  overlayItemSelected: {
+    borderColor: '#22c55e',
   },
   screen: {
     flex: 1,

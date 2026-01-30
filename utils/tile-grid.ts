@@ -3,6 +3,9 @@ export type Tile = {
   rotation: number;
   mirrorX: boolean;
   mirrorY: boolean;
+  source?: unknown;
+  name?: string;
+  baseConnections?: boolean[] | null;
 };
 
 export type GridLayout = {
