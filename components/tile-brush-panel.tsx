@@ -8,16 +8,25 @@ import { type TileSource } from '@/assets/images/tiles/manifest';
 type Brush =
   | { mode: 'random' }
   | { mode: 'erase' }
-  | { mode: 'fixed'; index: number };
+  | { mode: 'fixed'; index: number; rotation: number };
 
 type Props = {
   tileSources: TileSource[];
   selected: Brush;
   onSelect: (brush: Brush) => void;
+  onRotate: (index: number) => void;
+  getRotation: (index: number) => number;
   height: number;
 };
 
-export function TileBrushPanel({ tileSources, selected, onSelect, height }: Props) {
+export function TileBrushPanel({
+  tileSources,
+  selected,
+  onSelect,
+  onRotate,
+  getRotation,
+  height,
+}: Props) {
   const [containerWidth, setContainerWidth] = useState(0);
   const [contentWidth, setContentWidth] = useState(0);
   const showIndicator = contentWidth > containerWidth;
@@ -51,18 +60,24 @@ export function TileBrushPanel({ tileSources, selected, onSelect, height }: Prop
                 ? selected.mode === 'erase'
               : selected.mode === 'fixed' && selected.index === entry.index;
             const isTopRow = idx % 2 === 0;
+            const rotation = !isRandom && !isErase ? getRotation(entry.index) : 0;
             return (
               <Pressable
                 key={isRandom ? 'random' : isErase ? 'erase' : entry.tile.name}
-                onPress={() =>
+                onPressIn={() =>
                   onSelect(
                     isRandom
                       ? { mode: 'random' }
                       : isErase
                         ? { mode: 'erase' }
-                      : { mode: 'fixed', index: entry.index }
+                        : { mode: 'fixed', index: entry.index, rotation }
                   )
                 }
+                onLongPress={() => {
+                  if (!isRandom && !isErase) {
+                    onRotate(entry.index);
+                  }
+                }}
                 style={[
                   styles.item,
                   !isSelected && styles.itemDimmed,
@@ -90,7 +105,7 @@ export function TileBrushPanel({ tileSources, selected, onSelect, height }: Prop
                   <ThemedView style={styles.imageBox}>
                     <Image
                       source={entry.tile.source}
-                      style={styles.image}
+                      style={[styles.image, { transform: [{ rotate: `${rotation}deg` }] }]}
                       resizeMode="cover"
                       fadeDuration={0}
                     />

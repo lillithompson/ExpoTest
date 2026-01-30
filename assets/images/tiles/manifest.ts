@@ -1,5 +1,9 @@
 export const TILE_MANIFEST = {
   "green": [
+    { name: "tileA_00000000.png", source: require('@/assets/images/tiles/green/tileA_00000000.png') },
+    { name: "tileA_00000001.png", source: require('@/assets/images/tiles/green/tileA_00000001.png') },
+    { name: "tileA_10000000.png", source: require('@/assets/images/tiles/green/tileA_10000000.png') },
+    { name: "tileB_00000000.png", source: require('@/assets/images/tiles/green/tileB_00000000.png') },
     { name: "tile_00000000.png", source: require('@/assets/images/tiles/green/tile_00000000.png') },
     { name: "tile_00000001.png", source: require('@/assets/images/tiles/green/tile_00000001.png') },
     { name: "tile_00010001.png", source: require('@/assets/images/tiles/green/tile_00010001.png') },

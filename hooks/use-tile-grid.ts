@@ -20,7 +20,9 @@ type Params = {
   brush:
     | { mode: 'random' }
     | { mode: 'erase' }
-    | { mode: 'fixed'; index: number };
+    | { mode: 'fixed'; index: number; rotation: number };
+  mirrorHorizontal: boolean;
+  mirrorVertical: boolean;
 };
 
 type Result = {
@@ -41,6 +43,8 @@ export const useTileGrid = ({
   gridGap,
   minTiles,
   brush,
+  mirrorHorizontal,
+  mirrorVertical,
 }: Params): Result => {
   const tileSourcesLength = tileSources.length;
   const totalTiles = Math.max(tileSourcesLength, Math.max(minTiles, 0));
@@ -305,27 +309,69 @@ export const useTileGrid = ({
     setTiles((prev) => normalizeTiles(prev, totalCells, tileSourcesLength));
   }, [totalCells, tileSourcesLength]);
 
+  const getMirroredPlacements = (cellIndex: number, placement: Tile) => {
+    const row = Math.floor(cellIndex / gridLayout.columns);
+    const col = cellIndex % gridLayout.columns;
+    const placements = new Map<number, Tile>();
+    placements.set(cellIndex, placement);
+
+    if (mirrorHorizontal) {
+      const index = row * gridLayout.columns + (gridLayout.columns - 1 - col);
+      placements.set(index, {
+        ...placement,
+        mirrorX: !placement.mirrorX,
+      });
+    }
+    if (mirrorVertical) {
+      const index = (gridLayout.rows - 1 - row) * gridLayout.columns + col;
+      placements.set(index, {
+        ...placement,
+        mirrorY: !placement.mirrorY,
+      });
+    }
+    if (mirrorHorizontal && mirrorVertical) {
+      const index =
+        (gridLayout.rows - 1 - row) * gridLayout.columns +
+        (gridLayout.columns - 1 - col);
+      placements.set(index, {
+        ...placement,
+        rotation: (placement.rotation + 180) % 360,
+        mirrorX: placement.mirrorX,
+        mirrorY: placement.mirrorY,
+      });
+    }
+
+    return placements;
+  };
+
+  const applyPlacement = (cellIndex: number, placement: Tile) => {
+    const placements = getMirroredPlacements(cellIndex, placement);
+    setTiles((prev) =>
+      normalizeTiles(prev, totalCells, tileSourcesLength).map((tile, index) =>
+        placements.get(index) ?? tile
+      )
+    );
+  };
+
   const handlePress = (cellIndex: number) => {
     if (brush.mode === 'erase') {
-      setTiles((prev) =>
-        normalizeTiles(prev, totalCells, tileSourcesLength).map((tile, index) =>
-          index === cellIndex
-            ? { imageIndex: -1, rotation: 0, mirrorX: false, mirrorY: false }
-            : tile
-        )
-      );
+      applyPlacement(cellIndex, {
+        imageIndex: -1,
+        rotation: 0,
+        mirrorX: false,
+        mirrorY: false,
+      });
       return;
     }
     if (brush.mode === 'fixed') {
       const fixedIndex = brush.index;
       if (fixedIndex >= 0 && fixedIndex < tileSourcesLength) {
-        setTiles((prev) =>
-          normalizeTiles(prev, totalCells, tileSourcesLength).map((tile, index) =>
-            index === cellIndex
-              ? { imageIndex: fixedIndex, rotation: 0, mirrorX: false, mirrorY: false }
-              : tile
-          )
-        );
+        applyPlacement(cellIndex, {
+          imageIndex: fixedIndex,
+          rotation: brush.rotation,
+          mirrorX: false,
+          mirrorY: false,
+        });
       }
       return;
     }
@@ -379,18 +425,12 @@ export const useTileGrid = ({
       time: now,
     };
 
-    setTiles((prev) =>
-      normalizeTiles(prev, totalCells, tileSourcesLength).map((tile, index) =>
-        index === cellIndex
-          ? {
-              imageIndex: selection.imageIndex,
-              rotation: selection.rotation,
-              mirrorX: selection.mirrorX,
-              mirrorY: selection.mirrorY,
-            }
-          : tile
-      )
-    );
+    applyPlacement(cellIndex, {
+      imageIndex: selection.imageIndex,
+      rotation: selection.rotation,
+      mirrorX: selection.mirrorX,
+      mirrorY: selection.mirrorY,
+    });
   };
 
   const randomFill = () => {
@@ -428,7 +468,7 @@ export const useTileGrid = ({
     setTiles(
       Array.from({ length: totalCells }, () => ({
         imageIndex: fixedIndex,
-        rotation: 0,
+        rotation: brush.rotation,
         mirrorX: false,
         mirrorY: false,
       }))
@@ -464,7 +504,12 @@ export const useTileGrid = ({
     setTiles((prev) =>
       normalizeTiles(prev, totalCells, tileSourcesLength).map((tile) =>
         tile.imageIndex < 0
-          ? { imageIndex: fixedIndex, rotation: 0, mirrorX: false, mirrorY: false }
+          ? {
+              imageIndex: fixedIndex,
+              rotation: brush.rotation,
+              mirrorX: false,
+              mirrorY: false,
+            }
           : tile
       )
     );

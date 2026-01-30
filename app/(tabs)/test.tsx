@@ -37,11 +37,18 @@ export default function TestScreen() {
   );
   const [showDebug, setShowDebug] = useState(false);
   const [minTilesInput, setMinTilesInput] = useState('25');
+  const [mirrorHorizontal, setMirrorHorizontal] = useState(false);
+  const [mirrorVertical, setMirrorVertical] = useState(false);
   const [brush, setBrush] = useState<
-    { mode: 'random' } | { mode: 'erase' } | { mode: 'fixed'; index: number }
+    | { mode: 'random' }
+    | { mode: 'erase' }
+    | { mode: 'fixed'; index: number; rotation: number }
   >({
     mode: 'random',
   });
+  const [paletteRotations, setPaletteRotations] = useState<Record<number, number>>(
+    {}
+  );
   const minTiles = Number.isNaN(Number(minTilesInput))
     ? 0
     : Math.max(0, Math.floor(Number(minTilesInput)));
@@ -65,6 +72,8 @@ export default function TestScreen() {
     gridGap: GRID_GAP,
     minTiles,
     brush,
+    mirrorHorizontal,
+    mirrorVertical,
   });
   const lastPaintedRef = useRef<number | null>(null);
 
@@ -185,6 +194,26 @@ export default function TestScreen() {
               {showDebug ? 'Hide Debug' : 'Show Debug'}
             </ThemedText>
           </Pressable>
+          <Pressable
+            onPress={() => setMirrorHorizontal((prev) => !prev)}
+            style={styles.resetButton}
+            accessibilityRole="button"
+            accessibilityLabel="Toggle horizontal mirror"
+          >
+            <ThemedText type="defaultSemiBold">
+              {mirrorHorizontal ? 'Mirror H: On' : 'Mirror H: Off'}
+            </ThemedText>
+          </Pressable>
+          <Pressable
+            onPress={() => setMirrorVertical((prev) => !prev)}
+            style={styles.resetButton}
+            accessibilityRole="button"
+            accessibilityLabel="Toggle vertical mirror"
+          >
+            <ThemedText type="defaultSemiBold">
+              {mirrorVertical ? 'Mirror V: On' : 'Mirror V: Off'}
+            </ThemedText>
+          </Pressable>
         </ThemedView>
       </ThemedView>
       <ThemedView
@@ -236,6 +265,26 @@ export default function TestScreen() {
               },
             })}
       >
+        {(mirrorHorizontal || mirrorVertical) && (
+          <ThemedView pointerEvents="none" style={styles.mirrorLines}>
+            {mirrorVertical && (
+              <ThemedView
+                style={[
+                  styles.mirrorLineHorizontal,
+                  { top: gridLayout.tileSize * (gridLayout.rows / 2) },
+                ]}
+              />
+            )}
+            {mirrorHorizontal && (
+              <ThemedView
+                style={[
+                  styles.mirrorLineVertical,
+                  { left: gridLayout.tileSize * (gridLayout.columns / 2) },
+                ]}
+              />
+            )}
+          </ThemedView>
+        )}
         {Array.from({ length: gridLayout.rows }).map((_, rowIndex) => (
           <ThemedView key={`row-${rowIndex}`} style={styles.row}>
             {Array.from({ length: gridLayout.columns }).map((_, columnIndex) => {
@@ -273,9 +322,9 @@ export default function TestScreen() {
                       styles.tileImage,
                       {
                         transform: [
-                          { rotate: `${item.rotation}deg` },
                           { scaleX: item.mirrorX ? -1 : 1 },
                           { scaleY: item.mirrorY ? -1 : 1 },
+                          { rotate: `${item.rotation}deg` },
                         ],
                       },
                     ]}
@@ -292,7 +341,27 @@ export default function TestScreen() {
       <TileBrushPanel
         tileSources={tileSources}
         selected={brush}
-        onSelect={setBrush}
+        onSelect={(next) => {
+          if (next.mode === 'fixed') {
+            const rotation = paletteRotations[next.index] ?? next.rotation ?? 0;
+            setBrush({ mode: 'fixed', index: next.index, rotation });
+          } else {
+            setBrush(next);
+          }
+        }}
+        onRotate={(index) =>
+          setPaletteRotations((prev) => {
+            const nextRotation = ((prev[index] ?? 0) + 90) % 360;
+            if (brush.mode === 'fixed' && brush.index === index) {
+              setBrush({ mode: 'fixed', index, rotation: nextRotation });
+            }
+            return {
+              ...prev,
+              [index]: nextRotation,
+            };
+          })
+        }
+        getRotation={(index) => paletteRotations[index] ?? 0}
         height={BRUSH_PANEL_HEIGHT}
       />
     </ThemedView>
@@ -356,5 +425,26 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
     borderRadius: 0,
+  },
+  mirrorLines: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 1,
+    backgroundColor: 'transparent',
+  },
+  mirrorLineHorizontal: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 2,
+    backgroundColor: '#3b82f6',
+  },
+  mirrorLineVertical: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    bottom: 0,
+    width: 2,
+    backgroundColor: '#3b82f6',
   },
 });

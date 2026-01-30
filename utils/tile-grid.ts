@@ -93,5 +93,12 @@ export const computeGridLayout = (
     }
   }
 
-  return best;
+  const evenColumns = best.columns % 2 === 0 ? best.columns : best.columns + 1;
+  const evenRows = best.rows % 2 === 0 ? best.rows : best.rows + 1;
+  const widthPerTile =
+    (availableWidth - gridGap * (evenColumns - 1)) / evenColumns;
+  const heightPerTile = (availableHeight - gridGap * (evenRows - 1)) / evenRows;
+  const evenTileSize = Math.floor(Math.min(widthPerTile, heightPerTile));
+
+  return { columns: evenColumns, rows: evenRows, tileSize: evenTileSize };
 };

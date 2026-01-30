@@ -9,7 +9,7 @@ export type TileConnections = [
   boolean
 ];
 
-const TILE_NAME_PATTERN = /^tile_([01]{8})\.(png|jpe?g|webp)$/i;
+const TILE_NAME_PATTERN = /^.+_([01]{8})\.(png|jpe?g|webp)$/i;
 
 export const parseTileConnections = (fileName: string) => {
   const match = fileName.match(TILE_NAME_PATTERN);
@@ -79,8 +79,8 @@ export const transformConnections = (
   mirrorY: boolean
 ) => {
   const rotationSteps = ((rotation / 90) % 4 + 4) % 4;
-  const mirrored = mirrorConnections(connections, mirrorX, mirrorY);
-  return rotateConnections(mirrored, rotationSteps);
+  const rotated = rotateConnections(connections, rotationSteps);
+  return mirrorConnections(rotated, mirrorX, mirrorY);
 };
 
 export const oppositeDirectionIndex = (index: number) => (index + 4) % 8;
