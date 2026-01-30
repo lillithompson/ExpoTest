@@ -22,6 +22,7 @@ export const TILE_MANIFEST = {
     { name: "tile_10001000.png", source: require('@/assets/images/tiles/green/tile_10001000.png') },
     { name: "tile_10001001.png", source: require('@/assets/images/tiles/green/tile_10001001.png') },
     { name: "tile_10010001.png", source: require('@/assets/images/tiles/green/tile_10010001.png') },
+    { name: "tile_10010011.png", source: require('@/assets/images/tiles/green/tile_10010011.png') },
     { name: "tile_10010101.png", source: require('@/assets/images/tiles/green/tile_10010101.png') },
     { name: "tile_10010111.png", source: require('@/assets/images/tiles/green/tile_10010111.png') },
     { name: "tile_10100000.png", source: require('@/assets/images/tiles/green/tile_10100000.png') },
@@ -113,6 +114,11 @@ export const TILE_MANIFEST = {
     { name: "triangle_06.png", source: require('@/assets/images/tiles/shapes/triangle_06.png') },
     { name: "triangle_07.png", source: require('@/assets/images/tiles/shapes/triangle_07.png') },
     { name: "triangle_08.png", source: require('@/assets/images/tiles/shapes/triangle_08.png') }
+  ],
+  "test": [
+    { name: "tile_00100001.png", source: require('@/assets/images/tiles/test/tile_00100001.png') },
+    { name: "tile_01000001.png", source: require('@/assets/images/tiles/test/tile_01000001.png') },
+    { name: "tile_10000001.png", source: require('@/assets/images/tiles/test/tile_10000001.png') }
   ],
   "tilerTest": [
     { name: "tile_00000000.png", source: require('@/assets/images/tiles/tilerTest/tile_00000000.png') },

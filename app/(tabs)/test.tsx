@@ -1,11 +1,18 @@
 import { useState } from 'react';
-import { Image, Pressable, StyleSheet, useWindowDimensions } from 'react-native';
+import {
+  Image,
+  Pressable,
+  StyleSheet,
+  TextInput,
+  useWindowDimensions,
+} from 'react-native';
 
 import {
   TILE_CATEGORIES,
   TILE_MANIFEST,
   type TileCategory,
 } from '@/assets/images/tiles/manifest';
+import { TileBrushPanel } from '@/components/tile-brush-panel';
 import { TileDebugOverlay } from '@/components/tile-debug-overlay';
 import { TileSetDropdown } from '@/components/tile-set-dropdown';
 import { ThemedText } from '@/components/themed-text';
@@ -17,6 +24,7 @@ const GRID_GAP = 0;
 const CONTENT_PADDING = 0;
 const HEADER_HEIGHT = 250;
 const TITLE_SPACING = 0;
+const BRUSH_PANEL_HEIGHT = 160;
 const BLANK_TILE = require('@/assets/images/tiles/tile_blank.png');
 const ERROR_TILE = require('@/assets/images/tiles/tile_error.png');
 
@@ -27,20 +35,34 @@ export default function TestScreen() {
     () => TILE_CATEGORIES[0]
   );
   const [showDebug, setShowDebug] = useState(false);
-  const [eraseMode, setEraseMode] = useState(false);
+  const [minTilesInput, setMinTilesInput] = useState('25');
+  const [brush, setBrush] = useState<
+    { mode: 'random' } | { mode: 'erase' } | { mode: 'fixed'; index: number }
+  >({
+    mode: 'random',
+  });
+  const minTiles = Number.isNaN(Number(minTilesInput))
+    ? 0
+    : Math.max(0, Math.floor(Number(minTilesInput)));
   const tileSources = TILE_MANIFEST[selectedCategory] ?? [];
   const availableWidth = width - CONTENT_PADDING * 2;
   const availableHeight = Math.max(
-    height - HEADER_HEIGHT - CONTENT_PADDING * 2 - TITLE_SPACING - titleHeight,
+    height -
+      HEADER_HEIGHT -
+      CONTENT_PADDING * 2 -
+      TITLE_SPACING -
+      titleHeight -
+      BRUSH_PANEL_HEIGHT,
     0
   );
 
-  const { gridLayout, tiles, handlePress, randomFill, resetTiles } = useTileGrid({
+  const { gridLayout, tiles, handlePress, randomFill, floodFill, floodComplete, resetTiles } = useTileGrid({
     tileSources,
     availableWidth,
     availableHeight,
     gridGap: GRID_GAP,
-    eraseMode,
+    minTiles,
+    brush,
   });
 
   return (
@@ -56,6 +78,16 @@ export default function TestScreen() {
             selected={selectedCategory}
             onSelect={(category) => setSelectedCategory(category as TileCategory)}
           />
+          <ThemedView style={styles.inputGroup}>
+            <ThemedText type="defaultSemiBold">Min Tiles</ThemedText>
+            <TextInput
+              style={styles.input}
+              keyboardType="number-pad"
+              value={minTilesInput}
+              onChangeText={setMinTilesInput}
+              accessibilityLabel="Minimum tiles"
+            />
+          </ThemedView>
           <Pressable
             onPress={resetTiles}
             style={styles.resetButton}
@@ -65,22 +97,20 @@ export default function TestScreen() {
             <ThemedText type="defaultSemiBold">Reset</ThemedText>
           </Pressable>
           <Pressable
-            onPress={randomFill}
+            onPress={floodFill}
             style={styles.resetButton}
             accessibilityRole="button"
-            accessibilityLabel="Random fill tiles"
+            accessibilityLabel="Flood fill tiles"
           >
-            <ThemedText type="defaultSemiBold">Random Fill</ThemedText>
+            <ThemedText type="defaultSemiBold">Flood Fill</ThemedText>
           </Pressable>
           <Pressable
-            onPress={() => setEraseMode((prev) => !prev)}
-            style={[styles.resetButton, eraseMode && styles.resetButtonActive]}
+            onPress={floodComplete}
+            style={styles.resetButton}
             accessibilityRole="button"
-            accessibilityLabel="Toggle erase mode"
+            accessibilityLabel="Flood complete tiles"
           >
-            <ThemedText type="defaultSemiBold">
-              {eraseMode ? 'Erase: On' : 'Erase: Off'}
-            </ThemedText>
+            <ThemedText type="defaultSemiBold">Flood Complete</ThemedText>
           </Pressable>
           <Pressable
             onPress={() => setShowDebug((prev) => !prev)}
@@ -152,6 +182,12 @@ export default function TestScreen() {
           </ThemedView>
         ))}
       </ThemedView>
+      <TileBrushPanel
+        tileSources={tileSources}
+        selected={brush}
+        onSelect={setBrush}
+        height={BRUSH_PANEL_HEIGHT}
+      />
     </ThemedView>
   );
 }
@@ -167,15 +203,31 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
   },
+  inputGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    borderWidth: 1,
+    borderColor: '#1f1f1f',
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  input: {
+    minWidth: 48,
+    paddingVertical: 2,
+    paddingHorizontal: 4,
+    borderWidth: 1,
+    borderColor: '#1f1f1f',
+    borderRadius: 4,
+    color: '#111',
+  },
   resetButton: {
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderWidth: 1,
     borderColor: '#1f1f1f',
     borderRadius: 6,
-  },
-  resetButtonActive: {
-    backgroundColor: '#1f1f1f',
   },
   screen: {
     flex: 1,

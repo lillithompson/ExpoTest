@@ -16,7 +16,11 @@ type Params = {
   availableWidth: number;
   availableHeight: number;
   gridGap: number;
-  eraseMode: boolean;
+  minTiles: number;
+  brush:
+    | { mode: 'random' }
+    | { mode: 'erase' }
+    | { mode: 'fixed'; index: number };
 };
 
 type Result = {
@@ -24,6 +28,8 @@ type Result = {
   tiles: Tile[];
   handlePress: (cellIndex: number) => void;
   randomFill: () => void;
+  floodFill: () => void;
+  floodComplete: () => void;
   resetTiles: () => void;
   totalCells: number;
 };
@@ -33,17 +39,19 @@ export const useTileGrid = ({
   availableWidth,
   availableHeight,
   gridGap,
-  eraseMode,
+  minTiles,
+  brush,
 }: Params): Result => {
   const tileSourcesLength = tileSources.length;
+  const totalTiles = Math.max(tileSourcesLength, Math.max(minTiles, 0));
   const gridLayout = useMemo(
     () =>
-      computeGridLayout(tileSourcesLength, availableWidth, availableHeight, gridGap),
-    [availableHeight, availableWidth, gridGap, tileSourcesLength]
+      computeGridLayout(totalTiles, availableWidth, availableHeight, gridGap),
+    [availableHeight, availableWidth, gridGap, totalTiles]
   );
   const totalCells = gridLayout.rows * gridLayout.columns;
   const [tiles, setTiles] = useState<Tile[]>(() =>
-    buildInitialTiles(Math.max(totalCells, tileSourcesLength))
+    buildInitialTiles(Math.max(totalCells, totalTiles))
   );
   const lastPressRef = useRef<{
     cellIndex: number;
@@ -289,16 +297,16 @@ export const useTileGrid = ({
 
   useEffect(() => {
     setTiles(
-      buildInitialTiles(Math.max(totalCells, tileSourcesLength))
+      buildInitialTiles(Math.max(totalCells, totalTiles))
     );
-  }, [tileSourcesLength, totalCells]);
+  }, [totalTiles, totalCells]);
 
   useEffect(() => {
     setTiles((prev) => normalizeTiles(prev, totalCells, tileSourcesLength));
   }, [totalCells, tileSourcesLength]);
 
   const handlePress = (cellIndex: number) => {
-    if (eraseMode) {
+    if (brush.mode === 'erase') {
       setTiles((prev) =>
         normalizeTiles(prev, totalCells, tileSourcesLength).map((tile, index) =>
           index === cellIndex
@@ -306,6 +314,19 @@ export const useTileGrid = ({
             : tile
         )
       );
+      return;
+    }
+    if (brush.mode === 'fixed') {
+      const fixedIndex = brush.index;
+      if (fixedIndex >= 0 && fixedIndex < tileSourcesLength) {
+        setTiles((prev) =>
+          normalizeTiles(prev, totalCells, tileSourcesLength).map((tile, index) =>
+            index === cellIndex
+              ? { imageIndex: fixedIndex, rotation: 0, mirrorX: false, mirrorY: false }
+              : tile
+          )
+        );
+      }
       return;
     }
     const current = renderTiles[cellIndex];
@@ -392,6 +413,63 @@ export const useTileGrid = ({
     setTiles(nextTiles);
   };
 
+  const floodFill = () => {
+    if (totalCells <= 0) {
+      return;
+    }
+    if (brush.mode === 'random') {
+      randomFill();
+      return;
+    }
+    const fixedIndex = brush.index;
+    if (fixedIndex < 0 || fixedIndex >= tileSourcesLength) {
+      return;
+    }
+    setTiles(
+      Array.from({ length: totalCells }, () => ({
+        imageIndex: fixedIndex,
+        rotation: 0,
+        mirrorX: false,
+        mirrorY: false,
+      }))
+    );
+  };
+
+  const floodComplete = () => {
+    if (totalCells <= 0) {
+      return;
+    }
+    if (brush.mode === 'random') {
+      const nextTiles = [
+        ...normalizeTiles(tiles, totalCells, tileSourcesLength),
+      ];
+      if (tileSourcesLength <= 0) {
+        return;
+      }
+      for (let index = 0; index < totalCells; index += 1) {
+        if (nextTiles[index].imageIndex >= 0) {
+          continue;
+        }
+        const selection = selectCompatibleTile(index, nextTiles);
+        nextTiles[index] =
+          selection ?? { imageIndex: -2, rotation: 0, mirrorX: false, mirrorY: false };
+      }
+      setTiles(nextTiles);
+      return;
+    }
+    const fixedIndex = brush.index;
+    if (fixedIndex < 0 || fixedIndex >= tileSourcesLength) {
+      return;
+    }
+    setTiles((prev) =>
+      normalizeTiles(prev, totalCells, tileSourcesLength).map((tile) =>
+        tile.imageIndex < 0
+          ? { imageIndex: fixedIndex, rotation: 0, mirrorX: false, mirrorY: false }
+          : tile
+      )
+    );
+  };
+
   const resetTiles = () => {
     setTiles(buildInitialTiles(totalCells));
   };
@@ -401,6 +479,8 @@ export const useTileGrid = ({
     tiles: renderTiles,
     handlePress,
     randomFill,
+    floodFill,
+    floodComplete,
     resetTiles,
     totalCells,
   };
