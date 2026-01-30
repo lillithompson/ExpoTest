@@ -65,6 +65,7 @@ export function TileBrushPanel({ tileSources, selected, onSelect, height }: Prop
                 }
                 style={[
                   styles.item,
+                  !isSelected && styles.itemDimmed,
                   isSelected && styles.itemSelected,
                   isTopRow ? styles.itemTop : styles.itemBottom,
                 ]}
@@ -78,9 +79,13 @@ export function TileBrushPanel({ tileSources, selected, onSelect, height }: Prop
                 }
               >
                 {isRandom ? (
-                  <ThemedText type="defaultSemiBold">Random</ThemedText>
+                  <ThemedText type="defaultSemiBold" style={styles.labelText}>
+                    Random
+                  </ThemedText>
                 ) : isErase ? (
-                  <ThemedText type="defaultSemiBold">Erase</ThemedText>
+                  <ThemedText type="defaultSemiBold" style={styles.labelText}>
+                    Erase
+                  </ThemedText>
                 ) : (
                   <ThemedView style={styles.imageBox}>
                     <Image
@@ -124,9 +129,13 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#1f1f1f',
     borderRadius: 6,
+    backgroundColor: '#000',
     alignItems: 'center',
     justifyContent: 'center',
     padding: 0,
+  },
+  itemDimmed: {
+    opacity: 0.75,
   },
   itemTop: {
     marginBottom: 1,
@@ -136,13 +145,18 @@ const styles = StyleSheet.create({
   },
   itemSelected: {
     borderColor: '#22c55e',
+    borderWidth: 4,
+    padding: 0,
   },
   imageBox: {
-    width: 64,
-    height: 64,
+    width: '100%',
+    height: '100%',
   },
   image: {
     width: '100%',
     height: '100%',
+  },
+  labelText: {
+    color: '#fff',
   },
 });

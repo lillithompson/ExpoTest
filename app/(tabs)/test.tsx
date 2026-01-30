@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import {
   Image,
+  Platform,
   Pressable,
   StyleSheet,
   TextInput,
@@ -45,6 +46,7 @@ export default function TestScreen() {
     ? 0
     : Math.max(0, Math.floor(Number(minTilesInput)));
   const tileSources = TILE_MANIFEST[selectedCategory] ?? [];
+  const isWeb = Platform.OS === 'web';
   const availableWidth = width - CONTENT_PADDING * 2;
   const availableHeight = Math.max(
     height -
@@ -64,6 +66,67 @@ export default function TestScreen() {
     minTiles,
     brush,
   });
+  const lastPaintedRef = useRef<number | null>(null);
+
+  const getRelativePoint = (event: any) => {
+    if (isWeb) {
+      const nativeEvent = event?.nativeEvent ?? event;
+      const target = event?.currentTarget;
+      if (target?.getBoundingClientRect) {
+        const rect = target.getBoundingClientRect();
+        const clientX = nativeEvent?.clientX ?? nativeEvent?.pageX ?? event?.clientX;
+        const clientY = nativeEvent?.clientY ?? nativeEvent?.pageY ?? event?.clientY;
+        if (typeof clientX === 'number' && typeof clientY === 'number') {
+          return { x: clientX - rect.left, y: clientY - rect.top };
+        }
+      }
+      return null;
+    }
+
+    const nativeEvent = event?.nativeEvent;
+    if (!nativeEvent) {
+      return null;
+    }
+    if (
+      typeof nativeEvent.locationX === 'number' &&
+      typeof nativeEvent.locationY === 'number'
+    ) {
+      return { x: nativeEvent.locationX, y: nativeEvent.locationY };
+    }
+    if (
+      typeof nativeEvent.pageX === 'number' &&
+      typeof nativeEvent.pageY === 'number' &&
+      event?.currentTarget?.measureInWindow
+    ) {
+      let point: { x: number; y: number } | null = null;
+      event.currentTarget.measureInWindow((x: number, y: number) => {
+        point = {
+          x: nativeEvent.pageX - x,
+          y: nativeEvent.pageY - y,
+        };
+      });
+      return point;
+    }
+    return null;
+  };
+
+  const handlePaintAt = (x: number, y: number) => {
+    if (gridLayout.columns === 0 || gridLayout.rows === 0) {
+      return;
+    }
+    const tileStride = gridLayout.tileSize + GRID_GAP;
+    const col = Math.floor(x / (tileStride || 1));
+    const row = Math.floor(y / (tileStride || 1));
+    if (col < 0 || row < 0 || col >= gridLayout.columns || row >= gridLayout.rows) {
+      return;
+    }
+    const index = row * gridLayout.columns + col;
+    if (lastPaintedRef.current === index) {
+      return;
+    }
+    lastPaintedRef.current = index;
+    handlePress(index);
+  };
 
   return (
     <ThemedView style={styles.screen}>
@@ -127,6 +190,51 @@ export default function TestScreen() {
       <ThemedView
         style={[styles.grid, { height: availableHeight }]}
         accessibilityRole="grid"
+        {...(!isWeb
+          ? {
+              onStartShouldSetResponderCapture: () => true,
+              onMoveShouldSetResponderCapture: () => true,
+              onResponderGrant: (event: any) => {
+                const point = getRelativePoint(event);
+                if (point) {
+                  handlePaintAt(point.x, point.y);
+                }
+              },
+              onResponderMove: (event: any) => {
+                const point = getRelativePoint(event);
+                if (point) {
+                  handlePaintAt(point.x, point.y);
+                }
+              },
+              onResponderRelease: () => {
+                lastPaintedRef.current = null;
+              },
+              onResponderTerminate: () => {
+                lastPaintedRef.current = null;
+              },
+            }
+          : {
+              onMouseDown: (event: any) => {
+                const point = getRelativePoint(event);
+                if (point) {
+                  handlePaintAt(point.x, point.y);
+                }
+              },
+              onMouseMove: (event: any) => {
+                if (event.buttons === 1) {
+                  const point = getRelativePoint(event);
+                  if (point) {
+                    handlePaintAt(point.x, point.y);
+                  }
+                }
+              },
+              onMouseLeave: () => {
+                lastPaintedRef.current = null;
+              },
+              onMouseUp: () => {
+                lastPaintedRef.current = null;
+              },
+            })}
       >
         {Array.from({ length: gridLayout.rows }).map((_, rowIndex) => (
           <ThemedView key={`row-${rowIndex}`} style={styles.row}>
@@ -146,7 +254,6 @@ export default function TestScreen() {
               return (
                 <Pressable
                   key={`cell-${cellIndex}`}
-                  onPress={() => handlePress(cellIndex)}
                   accessibilityRole="button"
                   accessibilityLabel={`Tile ${cellIndex + 1}`}
                   style={[
