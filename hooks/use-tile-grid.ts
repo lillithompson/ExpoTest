@@ -16,7 +16,7 @@ type Params = {
   availableWidth: number;
   availableHeight: number;
   gridGap: number;
-  minTiles: number;
+  preferredTileSize: number;
   brush:
     | { mode: 'random' }
     | { mode: 'erase' }
@@ -47,22 +47,20 @@ export const useTileGrid = ({
   availableWidth,
   availableHeight,
   gridGap,
-  minTiles,
+  preferredTileSize,
   brush,
   mirrorHorizontal,
   mirrorVertical,
 }: Params): Result => {
   const previousTileSourcesRef = useRef<TileSource[] | null>(null);
   const tileSourcesLength = tileSources.length;
-  const totalTiles = Math.max(tileSourcesLength, Math.max(minTiles, 0));
   const gridLayout = useMemo(
-    () =>
-      computeGridLayout(totalTiles, availableWidth, availableHeight, gridGap),
-    [availableHeight, availableWidth, gridGap, totalTiles]
+    () => computeGridLayout(availableWidth, availableHeight, gridGap, preferredTileSize),
+    [availableHeight, availableWidth, gridGap, preferredTileSize]
   );
   const totalCells = gridLayout.rows * gridLayout.columns;
   const [tiles, setTiles] = useState<Tile[]>(() =>
-    buildInitialTiles(Math.max(totalCells, totalTiles))
+    buildInitialTiles(totalCells)
   );
   const lastPressRef = useRef<{
     cellIndex: number;
@@ -80,6 +78,10 @@ export const useTileGrid = ({
     () => normalizeTiles(tiles, totalCells, tileSourcesLength),
     [tiles, totalCells, tileSourcesLength]
   );
+
+  useEffect(() => {
+    setTiles(buildInitialTiles(totalCells));
+  }, [gridLayout.columns, gridLayout.rows, totalCells]);
 
   useEffect(() => {
     if (brush.mode !== 'clone') {
@@ -624,6 +626,10 @@ export const useTileGrid = ({
     if (totalCells <= 0) {
       return;
     }
+    if (brush.mode === 'erase') {
+      setTiles(buildInitialTiles(totalCells));
+      return;
+    }
     if (brush.mode === 'random') {
       randomFill();
       return;
@@ -644,6 +650,10 @@ export const useTileGrid = ({
 
   const floodComplete = () => {
     if (totalCells <= 0) {
+      return;
+    }
+    if (brush.mode === 'erase') {
+      setTiles(buildInitialTiles(totalCells));
       return;
     }
     const drivenSet = new Set(getDrivenCellIndices());

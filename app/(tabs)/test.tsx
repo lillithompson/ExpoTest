@@ -1,14 +1,17 @@
-import { memo, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Image,
   Platform,
   Pressable,
   StyleSheet,
+  Text,
   TextInput,
   useWindowDimensions,
   View,
 } from 'react-native';
+import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 
 import {
   TILE_CATEGORIES,
@@ -26,11 +29,44 @@ import { type Tile } from '@/utils/tile-grid';
 
 const GRID_GAP = 0;
 const CONTENT_PADDING = 0;
-const HEADER_HEIGHT = 250;
+const HEADER_HEIGHT = 40;
+const TOOLBAR_BUTTON_SIZE = 32;
 const TITLE_SPACING = 0;
 const BRUSH_PANEL_HEIGHT = 160;
 const BLANK_TILE = require('@/assets/images/tiles/tile_blank.png');
 const ERROR_TILE = require('@/assets/images/tiles/tile_error.png');
+
+type ToolbarButtonProps = {
+  label: string;
+  onPress: () => void;
+  icon: React.ComponentProps<typeof MaterialCommunityIcons>['name'];
+  active?: boolean;
+};
+
+function ToolbarButton({ label, onPress, icon, active }: ToolbarButtonProps) {
+  const [hovered, setHovered] = useState(false);
+  return (
+    <Pressable
+      onPress={onPress}
+      style={[styles.resetButton, active && styles.toolbarActive]}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      onHoverIn={() => setHovered(true)}
+      onHoverOut={() => setHovered(false)}
+    >
+      <MaterialCommunityIcons
+        name={icon}
+        size={18}
+        color={active ? '#22c55e' : '#111'}
+      />
+      {Platform.OS === 'web' && hovered && (
+        <Text style={styles.tooltip} accessibilityElementsHidden>
+          {label}
+        </Text>
+      )}
+    </Pressable>
+  );
+}
 
 type TileCellProps = {
   cellIndex: number;
@@ -110,13 +146,18 @@ const TileCell = memo(
 
 export default function TestScreen() {
   const { width, height } = useWindowDimensions();
-  const [titleHeight, setTitleHeight] = useState(0);
+  const tabBarHeight = useBottomTabBarHeight?.() ?? 0;
   const [selectedCategory, setSelectedCategory] = useState<TileCategory>(
     () => TILE_CATEGORIES[0]
   );
   const [showTileSetOverlay, setShowTileSetOverlay] = useState(false);
+  const [showSettingsOverlay, setShowSettingsOverlay] = useState(false);
   const [showDebug, setShowDebug] = useState(false);
-  const [minTilesInput, setMinTilesInput] = useState('25');
+  const [preferredTileSizeInput, setPreferredTileSizeInput] = useState('45');
+  const [preferredTileSizeValue, setPreferredTileSizeValue] = useState(45);
+  const [aspectPreset, setAspectPreset] = useState<'web' | 'iphone15' | 'ipadpro'>(
+    'ipadpro'
+  );
   const [mirrorHorizontal, setMirrorHorizontal] = useState(false);
   const [mirrorVertical, setMirrorVertical] = useState(false);
   const [brush, setBrush] = useState<
@@ -130,18 +171,21 @@ export default function TestScreen() {
   const [paletteRotations, setPaletteRotations] = useState<Record<number, number>>(
     {}
   );
-  const minTiles = Number.isNaN(Number(minTilesInput))
-    ? 0
-    : Math.max(0, Math.floor(Number(minTilesInput)));
+  const preferredTileSize = preferredTileSizeValue;
   const tileSources = TILE_MANIFEST[selectedCategory] ?? [];
   const isWeb = Platform.OS === 'web';
-  const availableWidth = width - CONTENT_PADDING * 2;
+  const aspectRatio =
+    aspectPreset === 'iphone15' ? 2556 / 1179 : aspectPreset === 'ipadpro' ? 2732 / 2048 : null;
+  const contentWidth = aspectRatio ? Math.min(width, height / aspectRatio) : width;
+  const rawContentHeight = aspectRatio ? contentWidth * aspectRatio : height;
+  const contentHeight = Math.max(0, rawContentHeight - tabBarHeight);
+
+  const availableWidth = contentWidth - CONTENT_PADDING * 2;
   const availableHeight = Math.max(
-    height -
+    contentHeight -
       HEADER_HEIGHT -
       CONTENT_PADDING * 2 -
       TITLE_SPACING -
-      titleHeight -
       BRUSH_PANEL_HEIGHT,
     0
   );
@@ -161,7 +205,7 @@ export default function TestScreen() {
     availableWidth,
     availableHeight,
     gridGap: GRID_GAP,
-    minTiles,
+    preferredTileSize,
     brush,
     mirrorHorizontal,
     mirrorVertical,
@@ -172,6 +216,7 @@ export default function TestScreen() {
   const cloneTapPendingRef = useRef<{ time: number; cellIndex: number } | null>(
     null
   );
+  const preferredSizeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const rowIndices = useMemo(
     () => Array.from({ length: gridLayout.rows }, (_, index) => index),
     [gridLayout.rows]
@@ -180,6 +225,30 @@ export default function TestScreen() {
     () => Array.from({ length: gridLayout.columns }, (_, index) => index),
     [gridLayout.columns]
   );
+
+  useEffect(() => {
+    if (preferredSizeTimeoutRef.current) {
+      clearTimeout(preferredSizeTimeoutRef.current);
+    }
+    preferredSizeTimeoutRef.current = setTimeout(() => {
+      const parsed = Math.floor(Number(preferredTileSizeInput));
+      if (!Number.isNaN(parsed)) {
+        const clamped = Math.min(512, Math.max(20, parsed));
+        if (clamped !== preferredTileSizeValue) {
+          setPreferredTileSizeValue(clamped);
+        }
+        if (String(clamped) !== preferredTileSizeInput) {
+          setPreferredTileSizeInput(String(clamped));
+        }
+      }
+    }, 250);
+
+    return () => {
+      if (preferredSizeTimeoutRef.current) {
+        clearTimeout(preferredSizeTimeoutRef.current);
+      }
+    };
+  }, [preferredTileSizeInput, preferredTileSizeValue]);
 
   const handleDownload = async () => {
     const result = await exportTileCanvasAsPng({
@@ -309,267 +378,298 @@ export default function TestScreen() {
 
   return (
     <ThemedView style={styles.screen}>
-      <ThemedView
-        style={styles.titleContainer}
-        onLayout={(event) => setTitleHeight(event.nativeEvent.layout.height)}
-      >
-        <ThemedText type="title">Tile Grid</ThemedText>
-        <ThemedView style={styles.controls}>
-          <Pressable
-            onPress={() => setShowTileSetOverlay(true)}
-            style={styles.resetButton}
-            accessibilityRole="button"
-            accessibilityLabel="Choose tile set"
-          >
-            <ThemedText type="defaultSemiBold">{selectedCategory}</ThemedText>
-          </Pressable>
-          <ThemedView style={styles.inputGroup}>
-            <ThemedText type="defaultSemiBold">Min Tiles</ThemedText>
-            <TextInput
-              style={styles.input}
-              keyboardType="number-pad"
-              value={minTilesInput}
-              onChangeText={setMinTilesInput}
-              accessibilityLabel="Minimum tiles"
+        <ThemedView
+          style={[
+            styles.contentFrame,
+            { width: contentWidth, height: contentHeight },
+            aspectPreset !== 'web' && styles.contentFrameBorder,
+          ]}
+        >
+        <ThemedView style={styles.titleContainer}>
+          <ThemedView style={styles.controls}>
+            <ToolbarButton
+              label="Tile Set"
+              icon="grid"
+              onPress={() => setShowTileSetOverlay(true)}
+            />
+            <ToolbarButton label="Reset" icon="refresh" onPress={resetTiles} />
+            <ToolbarButton
+              label="Flood Fill"
+              icon="format-color-fill"
+              onPress={floodFill}
+            />
+            <ToolbarButton
+              label="Flood Complete"
+              icon="checkbox-multiple-marked"
+              onPress={floodComplete}
+            />
+            <ToolbarButton
+              label="Settings"
+              icon="cog"
+              onPress={() => setShowSettingsOverlay(true)}
+            />
+            <ToolbarButton
+              label="Mirror Horizontal"
+              icon="flip-horizontal"
+              active={mirrorHorizontal}
+              onPress={() => setMirrorHorizontal((prev) => !prev)}
+            />
+            <ToolbarButton
+              label="Mirror Vertical"
+              icon="flip-vertical"
+              active={mirrorVertical}
+              onPress={() => setMirrorVertical((prev) => !prev)}
             />
           </ThemedView>
-          <Pressable
-            onPress={resetTiles}
-            style={styles.resetButton}
-            accessibilityRole="button"
-            accessibilityLabel="Reset tiles"
-          >
-            <ThemedText type="defaultSemiBold">Reset</ThemedText>
-          </Pressable>
-          <Pressable
-            onPress={floodFill}
-            style={styles.resetButton}
-            accessibilityRole="button"
-            accessibilityLabel="Flood fill tiles"
-          >
-            <ThemedText type="defaultSemiBold">Flood Fill</ThemedText>
-          </Pressable>
-          <Pressable
-            onPress={floodComplete}
-            style={styles.resetButton}
-            accessibilityRole="button"
-            accessibilityLabel="Flood complete tiles"
-          >
-            <ThemedText type="defaultSemiBold">Flood Complete</ThemedText>
-          </Pressable>
-          <Pressable
-            onPress={handleDownload}
-            style={styles.resetButton}
-            accessibilityRole="button"
-            accessibilityLabel="Download tile canvas"
-          >
-            <ThemedText type="defaultSemiBold">Download PNG</ThemedText>
-          </Pressable>
-          <Pressable
-            onPress={() => setShowDebug((prev) => !prev)}
-            style={styles.resetButton}
-            accessibilityRole="button"
-            accessibilityLabel="Toggle debug overlay"
-          >
-            <ThemedText type="defaultSemiBold">
-              {showDebug ? 'Hide Debug' : 'Show Debug'}
-            </ThemedText>
-          </Pressable>
-          <Pressable
-            onPress={() => setMirrorHorizontal((prev) => !prev)}
-            style={styles.resetButton}
-            accessibilityRole="button"
-            accessibilityLabel="Toggle horizontal mirror"
-          >
-            <ThemedText type="defaultSemiBold">
-              {mirrorHorizontal ? 'Mirror H: On' : 'Mirror H: Off'}
-            </ThemedText>
-          </Pressable>
-          <Pressable
-            onPress={() => setMirrorVertical((prev) => !prev)}
-            style={styles.resetButton}
-            accessibilityRole="button"
-            accessibilityLabel="Toggle vertical mirror"
-          >
-            <ThemedText type="defaultSemiBold">
-              {mirrorVertical ? 'Mirror V: On' : 'Mirror V: Off'}
-            </ThemedText>
-          </Pressable>
         </ThemedView>
-      </ThemedView>
-      <ThemedView
-        style={[styles.grid, { height: availableHeight }]}
-        accessibilityRole="grid"
-        {...(!isWeb
-          ? {
-              onStartShouldSetResponderCapture: () => true,
-              onMoveShouldSetResponderCapture: () => true,
-              onResponderGrant: (event: any) => {
-                const point = getRelativePoint(event);
-                if (point) {
-                  const cellIndex = getCellIndexForPoint(point.x, point.y);
-                  if (cellIndex === null) {
-                    return;
+        <ThemedView
+          style={[styles.grid, { height: availableHeight }]}
+          accessibilityRole="grid"
+          {...(!isWeb
+            ? {
+                onStartShouldSetResponderCapture: () => true,
+                onMoveShouldSetResponderCapture: () => true,
+                onResponderGrant: (event: any) => {
+                  const point = getRelativePoint(event);
+                  if (point) {
+                    const cellIndex = getCellIndexForPoint(point.x, point.y);
+                    if (cellIndex === null) {
+                      return;
+                    }
+                    const now = Date.now();
+                    const lastTap = lastTapRef.current;
+                    const isDoubleTap =
+                      brush.mode === 'clone' &&
+                      lastTap &&
+                      lastTap.cellIndex === cellIndex &&
+                      now - lastTap.time < 350;
+                    lastTapRef.current = { time: now, cellIndex };
+                    if (isDoubleTap) {
+                      handleCloneTap(cellIndex);
+                      return;
+                    }
+                    if (brush.mode === 'clone') {
+                      handleCloneTap(cellIndex);
+                      return;
+                    }
+                    paintCellIndex(cellIndex);
                   }
-                  const now = Date.now();
-                  const lastTap = lastTapRef.current;
-                  const isDoubleTap =
-                    brush.mode === 'clone' &&
-                    lastTap &&
-                    lastTap.cellIndex === cellIndex &&
-                    now - lastTap.time < 350;
-                  lastTapRef.current = { time: now, cellIndex };
-                  if (isDoubleTap) {
-                    handleCloneTap(cellIndex);
-                    return;
-                  }
-                  if (brush.mode === 'clone') {
-                    handleCloneTap(cellIndex);
-                    return;
-                  }
-                  paintCellIndex(cellIndex);
-                }
-              },
-              onResponderMove: (event: any) => {
-                const point = getRelativePoint(event);
-                if (point) {
-                  handlePaintAt(point.x, point.y);
-                }
-              },
-              onResponderRelease: () => {
-                lastPaintedRef.current = null;
-              },
-              onResponderTerminate: () => {
-                lastPaintedRef.current = null;
-              },
-            }
-          : {
-              onMouseDown: (event: any) => {
-                const point = getRelativePoint(event);
-                if (point) {
-                  const cellIndex = getCellIndexForPoint(point.x, point.y);
-                  if (cellIndex === null) {
-                    return;
-                  }
-                  if (brush.mode === 'clone') {
-                    handleCloneTap(cellIndex);
-                    return;
-                  }
-                  handlePaintAt(point.x, point.y);
-                }
-              },
-              onMouseMove: (event: any) => {
-                if (event.buttons === 1) {
+                },
+                onResponderMove: (event: any) => {
                   const point = getRelativePoint(event);
                   if (point) {
                     handlePaintAt(point.x, point.y);
                   }
-                }
-              },
-              onMouseLeave: () => {
-                lastPaintedRef.current = null;
-              },
-              onMouseUp: () => {
-                lastPaintedRef.current = null;
-              },
-            })}
-      >
-        {(mirrorHorizontal || mirrorVertical) && (
-          <ThemedView pointerEvents="none" style={styles.mirrorLines}>
-            {mirrorVertical && (
-              <ThemedView
-                style={[
-                  styles.mirrorLineHorizontal,
-                  { top: gridLayout.tileSize * (gridLayout.rows / 2) },
-                ]}
-              />
-            )}
-            {mirrorHorizontal && (
-              <ThemedView
-                style={[
-                  styles.mirrorLineVertical,
-                  { left: gridLayout.tileSize * (gridLayout.columns / 2) },
-                ]}
-              />
-            )}
-          </ThemedView>
-        )}
-        {rowIndices.map((rowIndex) => (
-          <ThemedView key={`row-${rowIndex}`} style={styles.row}>
-            {columnIndices.map((columnIndex) => {
-              const cellIndex = rowIndex * gridLayout.columns + columnIndex;
-              const item = tiles[cellIndex];
-              return (
-                <TileCell
-                  key={`cell-${cellIndex}`}
-                  cellIndex={cellIndex}
-                  tileSize={gridLayout.tileSize}
-                  tile={item}
-                  tileSources={tileSources}
-                  showDebug={showDebug}
-                  isCloneSource={brush.mode === 'clone' && cloneSourceIndex === cellIndex}
-                />
-              );
-            })}
-          </ThemedView>
-        ))}
-      </ThemedView>
-      <TileBrushPanel
-        tileSources={tileSources}
-        selected={brush}
-        onSelect={(next) => {
-          if (next.mode === 'fixed') {
-            const rotation = paletteRotations[next.index] ?? next.rotation ?? 0;
-            setBrush({ mode: 'fixed', index: next.index, rotation });
-          } else {
-            setBrush(next);
-          }
-        }}
-        onRotate={(index) =>
-          setPaletteRotations((prev) => {
-            const nextRotation = ((prev[index] ?? 0) + 90) % 360;
-            if (brush.mode === 'fixed' && brush.index === index) {
-              setBrush({ mode: 'fixed', index, rotation: nextRotation });
-            }
-            return {
-              ...prev,
-              [index]: nextRotation,
-            };
-          })
-        }
-        getRotation={(index) => paletteRotations[index] ?? 0}
-        height={BRUSH_PANEL_HEIGHT}
-      />
-      {showTileSetOverlay && (
-        <ThemedView style={styles.overlay} accessibilityRole="dialog">
-          <Pressable
-            style={styles.overlayBackdrop}
-            onPress={() => setShowTileSetOverlay(false)}
-            accessibilityRole="button"
-            accessibilityLabel="Close tile set chooser"
-          />
-          <ThemedView style={styles.overlayPanel}>
-            <ThemedText type="title">Choose Tile Set</ThemedText>
-            <ThemedView style={styles.overlayList}>
-              {TILE_CATEGORIES.map((category) => (
-                <Pressable
-                  key={category}
-                  onPress={() => {
-                    setSelectedCategory(category);
-                    setShowTileSetOverlay(false);
-                  }}
+                },
+                onResponderRelease: () => {
+                  lastPaintedRef.current = null;
+                },
+                onResponderTerminate: () => {
+                  lastPaintedRef.current = null;
+                },
+              }
+            : {
+                onMouseDown: (event: any) => {
+                  const point = getRelativePoint(event);
+                  if (point) {
+                    const cellIndex = getCellIndexForPoint(point.x, point.y);
+                    if (cellIndex === null) {
+                      return;
+                    }
+                    if (brush.mode === 'clone') {
+                      handleCloneTap(cellIndex);
+                      return;
+                    }
+                    handlePaintAt(point.x, point.y);
+                  }
+                },
+                onMouseMove: (event: any) => {
+                  if (event.buttons === 1) {
+                    const point = getRelativePoint(event);
+                    if (point) {
+                      handlePaintAt(point.x, point.y);
+                    }
+                  }
+                },
+                onMouseLeave: () => {
+                  lastPaintedRef.current = null;
+                },
+                onMouseUp: () => {
+                  lastPaintedRef.current = null;
+                },
+              })}
+        >
+          {(mirrorHorizontal || mirrorVertical) && (
+            <ThemedView pointerEvents="none" style={styles.mirrorLines}>
+              {mirrorVertical && (
+                <ThemedView
                   style={[
-                    styles.overlayItem,
-                    category === selectedCategory && styles.overlayItemSelected,
+                    styles.mirrorLineHorizontal,
+                    { top: gridLayout.tileSize * (gridLayout.rows / 2) },
                   ]}
-                >
-                  <ThemedText type="defaultSemiBold">{category}</ThemedText>
-                </Pressable>
-              ))}
+                />
+              )}
+              {mirrorHorizontal && (
+                <ThemedView
+                  style={[
+                    styles.mirrorLineVertical,
+                    { left: gridLayout.tileSize * (gridLayout.columns / 2) },
+                  ]}
+                />
+              )}
+            </ThemedView>
+          )}
+          {rowIndices.map((rowIndex) => (
+            <ThemedView key={`row-${rowIndex}`} style={styles.row}>
+              {columnIndices.map((columnIndex) => {
+                const cellIndex = rowIndex * gridLayout.columns + columnIndex;
+                const item = tiles[cellIndex];
+                return (
+                  <TileCell
+                    key={`cell-${cellIndex}`}
+                    cellIndex={cellIndex}
+                    tileSize={gridLayout.tileSize}
+                    tile={item}
+                    tileSources={tileSources}
+                    showDebug={showDebug}
+                    isCloneSource={brush.mode === 'clone' && cloneSourceIndex === cellIndex}
+                  />
+                );
+              })}
+            </ThemedView>
+          ))}
+        </ThemedView>
+        <TileBrushPanel
+          tileSources={tileSources}
+          selected={brush}
+          onSelect={(next) => {
+            if (next.mode === 'fixed') {
+              const rotation = paletteRotations[next.index] ?? next.rotation ?? 0;
+              setBrush({ mode: 'fixed', index: next.index, rotation });
+            } else {
+              setBrush(next);
+            }
+          }}
+          onRotate={(index) =>
+            setPaletteRotations((prev) => {
+              const nextRotation = ((prev[index] ?? 0) + 90) % 360;
+              if (brush.mode === 'fixed' && brush.index === index) {
+                setBrush({ mode: 'fixed', index, rotation: nextRotation });
+              }
+              return {
+                ...prev,
+                [index]: nextRotation,
+              };
+            })
+          }
+          getRotation={(index) => paletteRotations[index] ?? 0}
+          height={BRUSH_PANEL_HEIGHT}
+        />
+        {showTileSetOverlay && (
+          <ThemedView style={styles.overlay} accessibilityRole="dialog">
+            <Pressable
+              style={styles.overlayBackdrop}
+              onPress={() => setShowTileSetOverlay(false)}
+              accessibilityRole="button"
+              accessibilityLabel="Close tile set chooser"
+            />
+            <ThemedView style={styles.overlayPanel}>
+              <ThemedText type="title">Choose Tile Set</ThemedText>
+              <ThemedView style={styles.overlayList}>
+                {TILE_CATEGORIES.map((category) => (
+                  <Pressable
+                    key={category}
+                    onPress={() => {
+                      setSelectedCategory(category);
+                      setShowTileSetOverlay(false);
+                    }}
+                    style={[
+                      styles.overlayItem,
+                      category === selectedCategory && styles.overlayItemSelected,
+                    ]}
+                  >
+                    <ThemedText type="defaultSemiBold">{category}</ThemedText>
+                  </Pressable>
+                ))}
+              </ThemedView>
             </ThemedView>
           </ThemedView>
-        </ThemedView>
-      )}
+        )}
+        {showSettingsOverlay && (
+          <ThemedView style={styles.overlay} accessibilityRole="dialog">
+            <Pressable
+              style={styles.overlayBackdrop}
+              onPress={() => setShowSettingsOverlay(false)}
+              accessibilityRole="button"
+              accessibilityLabel="Close settings"
+            />
+            <ThemedView style={styles.overlayPanel}>
+              <ThemedText type="title">Settings</ThemedText>
+              <ThemedView style={styles.inputGroup}>
+                <ThemedText type="defaultSemiBold">Preferred Tile Size</ThemedText>
+                <TextInput
+                  style={styles.input}
+                  keyboardType="number-pad"
+                  value={preferredTileSizeInput}
+                  onChangeText={setPreferredTileSizeInput}
+                  onEndEditing={() => {
+                    const parsed = Math.floor(Number(preferredTileSizeInput));
+                    if (!Number.isNaN(parsed)) {
+                      const clamped = Math.min(512, Math.max(20, parsed));
+                      setPreferredTileSizeValue(clamped);
+                      if (String(clamped) !== preferredTileSizeInput) {
+                        setPreferredTileSizeInput(String(clamped));
+                      }
+                    }
+                  }}
+                  accessibilityLabel="Preferred tile size"
+                />
+              </ThemedView>
+              <ThemedView style={styles.presetGroup}>
+                <ThemedText type="defaultSemiBold">Aspect Ratio</ThemedText>
+                <ThemedView style={styles.presetButtons}>
+                  {[
+                    { key: 'iphone15' as const, label: 'iPhone 15' },
+                    { key: 'ipadpro' as const, label: 'iPad Pro' },
+                    { key: 'web' as const, label: 'Web' },
+                  ].map((preset) => (
+                    <Pressable
+                      key={preset.key}
+                      onPress={() => setAspectPreset(preset.key)}
+                      style={[
+                        styles.resetButton,
+                        aspectPreset === preset.key && styles.overlayItemSelected,
+                      ]}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Set aspect ratio to ${preset.label}`}
+                    >
+                      <ThemedText type="defaultSemiBold">{preset.label}</ThemedText>
+                    </Pressable>
+                  ))}
+                </ThemedView>
+              </ThemedView>
+              <Pressable
+                onPress={handleDownload}
+                style={styles.resetButton}
+                accessibilityRole="button"
+                accessibilityLabel="Download tile canvas"
+              >
+                <ThemedText type="defaultSemiBold">Download PNG</ThemedText>
+              </Pressable>
+              <Pressable
+                onPress={() => setShowDebug((prev) => !prev)}
+                style={styles.resetButton}
+                accessibilityRole="button"
+                accessibilityLabel="Toggle debug overlay"
+              >
+                <ThemedText type="defaultSemiBold">
+                  {showDebug ? 'Hide Debug' : 'Show Debug'}
+                </ThemedText>
+              </Pressable>
+            </ThemedView>
+          </ThemedView>
+        )}
+      </ThemedView>
     </ThemedView>
   );
 }
@@ -579,11 +679,17 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+    height: HEADER_HEIGHT,
+    zIndex: 10,
   },
   controls: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 6,
+    flexWrap: 'wrap',
+    justifyContent: 'flex-end',
+    width: '100%',
+    overflow: 'visible',
   },
   inputGroup: {
     flexDirection: 'row',
@@ -605,11 +711,31 @@ const styles = StyleSheet.create({
     color: '#111',
   },
   resetButton: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
+    width: TOOLBAR_BUTTON_SIZE,
+    height: TOOLBAR_BUTTON_SIZE,
+    alignItems: 'center',
+    justifyContent: 'center',
     borderWidth: 1,
     borderColor: '#1f1f1f',
     borderRadius: 6,
+    position: 'relative',
+  },
+  toolbarActive: {
+    borderColor: '#22c55e',
+  },
+  tooltip: {
+    position: 'absolute',
+    bottom: -22,
+    right: 0,
+    backgroundColor: '#111',
+    color: '#fff',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    fontSize: 11,
+    zIndex: 50,
+    pointerEvents: 'none',
+    whiteSpace: 'nowrap' as never,
   },
   overlay: {
     ...StyleSheet.absoluteFillObject,
@@ -647,6 +773,22 @@ const styles = StyleSheet.create({
   },
   screen: {
     flex: 1,
+  },
+  contentFrame: {
+    alignSelf: 'center',
+    position: 'relative',
+  },
+  contentFrameBorder: {
+    borderWidth: 1,
+    borderColor: '#3b82f6',
+  },
+  presetGroup: {
+    gap: 8,
+  },
+  presetButtons: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
   },
   grid: {
     alignContent: 'flex-start',

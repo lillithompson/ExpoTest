@@ -74,34 +74,54 @@ export const normalizeTiles = (
 };
 
 export const computeGridLayout = (
-  totalTiles: number,
   availableWidth: number,
   availableHeight: number,
-  gridGap: number
+  gridGap: number,
+  preferredTileSize: number
 ): GridLayout => {
-  if (totalTiles <= 0 || availableWidth <= 0 || availableHeight <= 0) {
+  if (availableWidth <= 0 || availableHeight <= 0 || preferredTileSize <= 0) {
     return { columns: 0, rows: 0, tileSize: 0 };
   }
 
-  let best = { columns: 1, rows: totalTiles, tileSize: 0 };
+  const maxColumns = Math.max(
+    1,
+    Math.floor((availableWidth + gridGap) / (Math.max(1, preferredTileSize) + gridGap))
+  );
+  const candidates: GridLayout[] = [];
 
-  for (let columns = 1; columns <= totalTiles; columns += 1) {
-    const rows = Math.ceil(totalTiles / columns);
-    const widthPerTile = (availableWidth - gridGap * (columns - 1)) / columns;
-    const heightPerTile = (availableHeight - gridGap * (rows - 1)) / rows;
-    const tileSize = Math.floor(Math.min(widthPerTile, heightPerTile));
-
-    if (tileSize > best.tileSize) {
-      best = { columns, rows, tileSize };
+  for (let columns = 2; columns <= maxColumns; columns += 1) {
+    if (columns % 2 === 1) {
+      continue;
     }
+    const tileSize = (availableWidth - gridGap * (columns - 1)) / columns;
+    if (tileSize <= 0) {
+      continue;
+    }
+    let rows = Math.max(
+      1,
+      Math.floor((availableHeight + gridGap) / (tileSize + gridGap))
+    );
+    if (rows > 1 && rows % 2 === 1) {
+      rows -= 1;
+    }
+    if (rows < 2) {
+      continue;
+    }
+    candidates.push({ columns, rows, tileSize });
   }
 
-  const evenColumns = best.columns % 2 === 0 ? best.columns : best.columns + 1;
-  const evenRows = best.rows % 2 === 0 ? best.rows : best.rows + 1;
-  const widthPerTile =
-    (availableWidth - gridGap * (evenColumns - 1)) / evenColumns;
-  const heightPerTile = (availableHeight - gridGap * (evenRows - 1)) / evenRows;
-  const evenTileSize = Math.floor(Math.min(widthPerTile, heightPerTile));
+  if (candidates.length === 0) {
+    const columns = Math.max(1, maxColumns);
+    const tileSize = (availableWidth - gridGap * (columns - 1)) / columns;
+    const rows = Math.max(
+      1,
+      Math.floor((availableHeight + gridGap) / (tileSize + gridGap))
+    );
+    return { columns, rows, tileSize };
+  }
 
-  return { columns: evenColumns, rows: evenRows, tileSize: evenTileSize };
+  candidates.sort(
+    (a, b) => Math.abs(a.tileSize - preferredTileSize) - Math.abs(b.tileSize - preferredTileSize)
+  );
+  return candidates[0];
 };
