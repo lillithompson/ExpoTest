@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import {
   TILE_CATEGORIES,
@@ -146,7 +147,10 @@ const TileCell = memo(
 
 export default function TestScreen() {
   const { width, height } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
   const tabBarHeight = useBottomTabBarHeight?.() ?? 0;
+  const gridRef = useRef<View>(null);
+  const gridOffsetRef = useRef({ x: 0, y: 0 });
   const [selectedCategory, setSelectedCategory] = useState<TileCategory>(
     () => TILE_CATEGORIES[0]
   );
@@ -156,7 +160,7 @@ export default function TestScreen() {
   const [preferredTileSizeInput, setPreferredTileSizeInput] = useState('45');
   const [preferredTileSizeValue, setPreferredTileSizeValue] = useState(45);
   const [aspectPreset, setAspectPreset] = useState<'web' | 'iphone15' | 'ipadpro'>(
-    'ipadpro'
+    Platform.OS === 'web' ? 'web' : 'iphone15'
   );
   const [mirrorHorizontal, setMirrorHorizontal] = useState(false);
   const [mirrorVertical, setMirrorVertical] = useState(false);
@@ -176,8 +180,12 @@ export default function TestScreen() {
   const isWeb = Platform.OS === 'web';
   const aspectRatio =
     aspectPreset === 'iphone15' ? 2556 / 1179 : aspectPreset === 'ipadpro' ? 2732 / 2048 : null;
-  const contentWidth = aspectRatio ? Math.min(width, height / aspectRatio) : width;
-  const rawContentHeight = aspectRatio ? contentWidth * aspectRatio : height;
+  const safeWidth = Math.max(0, width - insets.left - insets.right);
+  const safeHeight = Math.max(0, height - insets.top - insets.bottom);
+  const contentWidth = aspectRatio
+    ? Math.min(safeWidth, safeHeight / aspectRatio)
+    : safeWidth;
+  const rawContentHeight = aspectRatio ? contentWidth * aspectRatio : safeHeight;
   const contentHeight = Math.max(0, rawContentHeight - tabBarHeight);
 
   const availableWidth = contentWidth - CONTENT_PADDING * 2;
@@ -284,24 +292,20 @@ export default function TestScreen() {
       return null;
     }
     if (
+      typeof nativeEvent.pageX === 'number' &&
+      typeof nativeEvent.pageY === 'number'
+    ) {
+      const offset = gridOffsetRef.current;
+      return {
+        x: nativeEvent.pageX - offset.x,
+        y: nativeEvent.pageY - offset.y,
+      };
+    }
+    if (
       typeof nativeEvent.locationX === 'number' &&
       typeof nativeEvent.locationY === 'number'
     ) {
       return { x: nativeEvent.locationX, y: nativeEvent.locationY };
-    }
-    if (
-      typeof nativeEvent.pageX === 'number' &&
-      typeof nativeEvent.pageY === 'number' &&
-      event?.currentTarget?.measureInWindow
-    ) {
-      let point: { x: number; y: number } | null = null;
-      event.currentTarget.measureInWindow((x: number, y: number) => {
-        point = {
-          x: nativeEvent.pageX - x,
-          y: nativeEvent.pageY - y,
-        };
-      });
-      return point;
     }
     return null;
   };
@@ -377,7 +381,17 @@ export default function TestScreen() {
   };
 
   return (
-    <ThemedView style={styles.screen}>
+    <ThemedView
+      style={[
+        styles.screen,
+        {
+          paddingTop: insets.top,
+          paddingBottom: insets.bottom,
+          paddingLeft: insets.left,
+          paddingRight: insets.right,
+        },
+      ]}
+    >
         <ThemedView
           style={[
             styles.contentFrame,
@@ -423,8 +437,22 @@ export default function TestScreen() {
           </ThemedView>
         </ThemedView>
         <ThemedView
-          style={[styles.grid, { height: availableHeight }]}
+          ref={gridRef}
+          style={[
+            styles.grid,
+            {
+              height: availableHeight,
+              width:
+                gridLayout.columns * gridLayout.tileSize +
+                GRID_GAP * Math.max(0, gridLayout.columns - 1),
+            },
+          ]}
           accessibilityRole="grid"
+          onLayout={() => {
+            gridRef.current?.measureInWindow((x: number, y: number) => {
+              gridOffsetRef.current = { x, y };
+            });
+          }}
           {...(!isWeb
             ? {
                 onStartShouldSetResponderCapture: () => true,

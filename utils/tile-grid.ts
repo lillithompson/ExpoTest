@@ -93,7 +93,8 @@ export const computeGridLayout = (
     if (columns % 2 === 1) {
       continue;
     }
-    const tileSize = (availableWidth - gridGap * (columns - 1)) / columns;
+    const rawTileSize = (availableWidth - gridGap * (columns - 1)) / columns;
+    const tileSize = Math.floor(rawTileSize);
     if (tileSize <= 0) {
       continue;
     }
@@ -112,7 +113,8 @@ export const computeGridLayout = (
 
   if (candidates.length === 0) {
     const columns = Math.max(1, maxColumns);
-    const tileSize = (availableWidth - gridGap * (columns - 1)) / columns;
+    const rawTileSize = (availableWidth - gridGap * (columns - 1)) / columns;
+    const tileSize = Math.floor(rawTileSize);
     const rows = Math.max(
       1,
       Math.floor((availableHeight + gridGap) / (tileSize + gridGap))
