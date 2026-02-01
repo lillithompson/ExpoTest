@@ -18,6 +18,8 @@ type Props = {
   onRotate: (index: number) => void;
   getRotation: (index: number) => number;
   height: number;
+  itemSize: number;
+  rowGap: number;
 };
 
 export function TileBrushPanel({
@@ -27,10 +29,13 @@ export function TileBrushPanel({
   onRotate,
   getRotation,
   height,
+  itemSize,
+  rowGap,
 }: Props) {
   const [containerWidth, setContainerWidth] = useState(0);
   const [contentWidth, setContentWidth] = useState(0);
   const showIndicator = contentWidth > containerWidth;
+  const columnHeight = itemSize * 2 + rowGap;
 
   return (
     <ThemedView
@@ -41,9 +46,12 @@ export function TileBrushPanel({
         horizontal
         showsHorizontalScrollIndicator={showIndicator}
         onContentSizeChange={(width) => setContentWidth(width)}
+        style={styles.scroll}
         contentContainerStyle={styles.content}
+        contentInset={{ top: 0, left: 0, bottom: 0, right: 0 }}
+        scrollIndicatorInsets={{ top: 0, left: 0, bottom: 0, right: 0 }}
       >
-        <ThemedView style={styles.column}>
+        <ThemedView style={[styles.column, { height: columnHeight }]}>
           {[
             { type: 'random' as const },
             { type: 'erase' as const },
@@ -90,9 +98,10 @@ export function TileBrushPanel({
                 }}
                 style={[
                   styles.item,
+                  { width: itemSize, height: itemSize },
                   !isSelected && styles.itemDimmed,
                   isSelected && styles.itemSelected,
-                  isTopRow ? styles.itemTop : styles.itemBottom,
+                  isTopRow ? { marginBottom: rowGap } : styles.itemBottom,
                 ]}
                 accessibilityRole="button"
                 accessibilityLabel={
@@ -141,22 +150,26 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderColor: '#1f1f1f',
     paddingHorizontal: 1,
-    paddingVertical: 1,
+    paddingVertical: 0,
+    backgroundColor: '#2a2a2a',
+  },
+  scroll: {
+    backgroundColor: '#2a2a2a',
   },
   content: {
     flexGrow: 1,
     justifyContent: 'center',
+    paddingVertical: 0,
+    backgroundColor: '#2a2a2a',
   },
   column: {
     flexDirection: 'column',
     flexWrap: 'wrap',
     alignContent: 'flex-start',
-    height: 144,
-    gap: 1,
+    gap: 0,
+    backgroundColor: '#2a2a2a',
   },
   item: {
-    height: 64,
-    width: 64,
     borderWidth: 1,
     borderColor: '#1f1f1f',
     borderRadius: 6,
@@ -167,9 +180,6 @@ const styles = StyleSheet.create({
   },
   itemDimmed: {
     opacity: 0.75,
-  },
-  itemTop: {
-    marginBottom: 1,
   },
   itemBottom: {
     marginTop: 0,

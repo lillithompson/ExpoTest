@@ -35,6 +35,7 @@ const HEADER_HEIGHT = 40;
 const TOOLBAR_BUTTON_SIZE = 32;
 const TITLE_SPACING = 0;
 const BRUSH_PANEL_HEIGHT = 160;
+const BRUSH_PANEL_ROW_GAP = 1;
 const BLANK_TILE = require('@/assets/images/tiles/tile_blank.png');
 const ERROR_TILE = require('@/assets/images/tiles/tile_error.png');
 
@@ -163,7 +164,7 @@ const TileCell = memo(
 export default function TestScreen() {
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
-  const tabBarHeight = useBottomTabBarHeight?.() ?? 0;
+  const tabBarHeight = 0;
   const gridRef = useRef<View>(null);
   const gridOffsetRef = useRef({ x: 0, y: 0 });
   const { settings, setSettings } = usePersistedSettings();
@@ -195,14 +196,16 @@ export default function TestScreen() {
   const preferredTileSize = settings.preferredTileSize;
   const tileSources = TILE_MANIFEST[selectedCategory] ?? [];
   const isWeb = Platform.OS === 'web';
-  const aspectRatio =
-    settings.aspectPreset === 'iphone15'
+  const shouldUseAspectRatio = isWeb;
+  const aspectRatio = shouldUseAspectRatio
+    ? settings.aspectPreset === 'iphone15'
       ? 2556 / 1179
       : settings.aspectPreset === 'ipadpro'
         ? 2732 / 2048
-        : null;
-  const safeWidth = Math.max(0, width - insets.left - insets.right);
-  const safeHeight = Math.max(0, height - insets.top - insets.bottom);
+        : null
+    : null;
+  const safeWidth = Math.max(0, width);
+  const safeHeight = Math.max(0, height - insets.top);
   const contentWidth = aspectRatio
     ? Math.min(safeWidth, safeHeight / aspectRatio)
     : safeWidth;
@@ -244,6 +247,17 @@ export default function TestScreen() {
     mirrorHorizontal: settings.mirrorHorizontal,
     mirrorVertical: settings.mirrorVertical,
   });
+  const gridHeight =
+    gridLayout.rows * gridLayout.tileSize +
+    GRID_GAP * Math.max(0, gridLayout.rows - 1);
+  const brushPanelHeight = Math.max(
+    0,
+    contentHeight - HEADER_HEIGHT - CONTENT_PADDING * 2 - TITLE_SPACING - gridHeight
+  );
+  const brushItemSize = Math.max(
+    0,
+    Math.floor((brushPanelHeight - BRUSH_PANEL_ROW_GAP) / 2)
+  );
   const lastPaintedRef = useRef<number | null>(null);
   const longPressTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const longPressTriggeredRef = useRef(false);
@@ -388,17 +402,22 @@ export default function TestScreen() {
         styles.screen,
         {
           paddingTop: insets.top,
-          paddingBottom: insets.bottom,
-          paddingLeft: insets.left,
-          paddingRight: insets.right,
+          paddingBottom: 0,
+          paddingLeft: 0,
+          paddingRight: 0,
         },
       ]}
     >
+      {insets.top > 0 && (
+        <View
+          pointerEvents="none"
+          style={[styles.statusBarBackground, { height: insets.top }]}
+        />
+      )}
         <ThemedView
           style={[
             styles.contentFrame,
             { width: contentWidth, height: contentHeight },
-            settings.aspectPreset !== 'web' && styles.contentFrameBorder,
           ]}
         >
         <ThemedView style={styles.titleContainer}>
@@ -453,7 +472,7 @@ export default function TestScreen() {
           style={[
             styles.grid,
             {
-              height: availableHeight,
+              height: gridHeight,
               width:
                 gridLayout.columns * gridLayout.tileSize +
                 GRID_GAP * Math.max(0, gridLayout.columns - 1),
@@ -630,7 +649,9 @@ export default function TestScreen() {
             })
           }
           getRotation={(index) => paletteRotations[index] ?? 0}
-          height={BRUSH_PANEL_HEIGHT}
+          height={brushPanelHeight}
+          itemSize={brushItemSize}
+          rowGap={BRUSH_PANEL_ROW_GAP}
         />
         {showTileSetOverlay && (
           <ThemedView style={styles.overlay} accessibilityRole="dialog">
@@ -866,14 +887,20 @@ const styles = StyleSheet.create({
   },
   screen: {
     flex: 1,
+    backgroundColor: '#3F3F3F',
+  },
+  statusBarBackground: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: '#fff',
+    zIndex: 5,
   },
   contentFrame: {
     alignSelf: 'center',
     position: 'relative',
-  },
-  contentFrameBorder: {
-    borderWidth: 1,
-    borderColor: '#3b82f6',
+    backgroundColor: '#3F3F3F',
   },
   presetGroup: {
     gap: 8,
@@ -886,6 +913,7 @@ const styles = StyleSheet.create({
   grid: {
     alignContent: 'flex-start',
     gap: GRID_GAP,
+    backgroundColor: '#3F3F3F',
   },
   row: {
     flexDirection: 'row',
