@@ -76,6 +76,9 @@ type TileCellProps = {
   tileSources: typeof TILE_MANIFEST[TileCategory];
   showDebug: boolean;
   isCloneSource: boolean;
+  isCloneSample: boolean;
+  isCloneTargetOrigin: boolean;
+  isCloneCursor: boolean;
 };
 
 const TileCell = memo(
@@ -86,6 +89,9 @@ const TileCell = memo(
     tileSources,
     showDebug,
     isCloneSource,
+    isCloneSample,
+    isCloneTargetOrigin,
+    isCloneCursor,
   }: TileCellProps) => {
     const tileName = tileSources[tile.imageIndex]?.name ?? '';
     const connections = useMemo(
@@ -133,6 +139,11 @@ const TileCell = memo(
           resizeMode="cover"
           fadeDuration={0}
         />
+        {isCloneTargetOrigin && (
+          <View pointerEvents="none" style={styles.cloneTargetOrigin} />
+        )}
+        {isCloneCursor && <View pointerEvents="none" style={styles.cloneCursor} />}
+        {isCloneSample && <View pointerEvents="none" style={styles.cloneSample} />}
         {showDebug && <TileDebugOverlay connections={connections} />}
       </View>
     );
@@ -142,7 +153,10 @@ const TileCell = memo(
     prev.tileSize === next.tileSize &&
     prev.showDebug === next.showDebug &&
     prev.tileSources === next.tileSources &&
-    prev.isCloneSource === next.isCloneSource
+    prev.isCloneSource === next.isCloneSource &&
+    prev.isCloneSample === next.isCloneSample &&
+    prev.isCloneTargetOrigin === next.isCloneTargetOrigin &&
+    prev.isCloneCursor === next.isCloneCursor
 );
 
 export default function TestScreen() {
@@ -206,8 +220,12 @@ export default function TestScreen() {
     floodFill,
     floodComplete,
     resetTiles,
+    clearCloneSource,
     setCloneSource,
     cloneSourceIndex,
+    cloneSampleIndex,
+    cloneAnchorIndex,
+    cloneCursorIndex,
   } = useTileGrid({
     tileSources,
     availableWidth,
@@ -219,11 +237,8 @@ export default function TestScreen() {
     mirrorVertical,
   });
   const lastPaintedRef = useRef<number | null>(null);
-  const lastTapRef = useRef<{ time: number; cellIndex: number } | null>(null);
-  const cloneTapTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const cloneTapPendingRef = useRef<{ time: number; cellIndex: number } | null>(
-    null
-  );
+  const longPressTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const longPressTriggeredRef = useRef(false);
   const preferredSizeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const rowIndices = useMemo(
     () => Array.from({ length: gridLayout.rows }, (_, index) => index),
@@ -233,6 +248,12 @@ export default function TestScreen() {
     () => Array.from({ length: gridLayout.columns }, (_, index) => index),
     [gridLayout.columns]
   );
+
+  useEffect(() => {
+    if (brush.mode !== 'clone') {
+      clearCloneSource();
+    }
+  }, [brush.mode, clearCloneSource]);
 
   useEffect(() => {
     if (preferredSizeTimeoutRef.current) {
@@ -331,51 +352,10 @@ export default function TestScreen() {
     handlePress(cellIndex);
   };
 
-  const handleCloneTap = (cellIndex: number) => {
-    const now = Date.now();
-    const pending = cloneTapPendingRef.current;
-    if (
-      pending &&
-      pending.cellIndex === cellIndex &&
-      now - pending.time < 250
-    ) {
-      if (cloneTapTimeoutRef.current) {
-        clearTimeout(cloneTapTimeoutRef.current);
-        cloneTapTimeoutRef.current = null;
-      }
-      cloneTapPendingRef.current = null;
-      setCloneSource(cellIndex);
-      lastPaintedRef.current = null;
-      return;
-    }
-
-    if (cloneTapTimeoutRef.current) {
-      clearTimeout(cloneTapTimeoutRef.current);
-      cloneTapTimeoutRef.current = null;
-    }
-
-    cloneTapPendingRef.current = { time: now, cellIndex };
-    cloneTapTimeoutRef.current = setTimeout(() => {
-      cloneTapTimeoutRef.current = null;
-      cloneTapPendingRef.current = null;
-      paintCellIndex(cellIndex);
-    }, 220);
-  };
-
-  const handlePaintAt = (x: number, y: number, options?: { isDoubleTap?: boolean }) => {
+  const handlePaintAt = (x: number, y: number) => {
     const cellIndex = getCellIndexForPoint(x, y);
     if (cellIndex === null) {
       return;
-    }
-    if (options?.isDoubleTap && brush.mode === 'clone') {
-      setCloneSource(cellIndex);
-      lastPaintedRef.current = null;
-      return;
-    }
-    if (brush.mode === 'clone' && cloneTapTimeoutRef.current) {
-      clearTimeout(cloneTapTimeoutRef.current);
-      cloneTapTimeoutRef.current = null;
-      cloneTapPendingRef.current = null;
     }
     paintCellIndex(cellIndex);
   };
@@ -464,35 +444,51 @@ export default function TestScreen() {
                     if (cellIndex === null) {
                       return;
                     }
-                    const now = Date.now();
-                    const lastTap = lastTapRef.current;
-                    const isDoubleTap =
-                      brush.mode === 'clone' &&
-                      lastTap &&
-                      lastTap.cellIndex === cellIndex &&
-                      now - lastTap.time < 350;
-                    lastTapRef.current = { time: now, cellIndex };
-                    if (isDoubleTap) {
-                      handleCloneTap(cellIndex);
-                      return;
+                    if (longPressTimeoutRef.current) {
+                      clearTimeout(longPressTimeoutRef.current);
                     }
-                    if (brush.mode === 'clone') {
-                      handleCloneTap(cellIndex);
-                      return;
+                    longPressTriggeredRef.current = false;
+                    longPressTimeoutRef.current = setTimeout(() => {
+                      longPressTriggeredRef.current = true;
+                      if (brush.mode === 'clone') {
+                        setCloneSource(cellIndex);
+                        lastPaintedRef.current = null;
+                      }
+                    }, 420);
+                    if (brush.mode !== 'clone') {
+                      paintCellIndex(cellIndex);
+                    } else if (cloneSourceIndex === null) {
+                      setCloneSource(cellIndex);
+                      lastPaintedRef.current = null;
                     }
-                    paintCellIndex(cellIndex);
                   }
                 },
                 onResponderMove: (event: any) => {
                   const point = getRelativePoint(event);
                   if (point) {
+                    if (longPressTimeoutRef.current) {
+                      clearTimeout(longPressTimeoutRef.current);
+                      longPressTimeoutRef.current = null;
+                    }
                     handlePaintAt(point.x, point.y);
                   }
                 },
                 onResponderRelease: () => {
+                  if (longPressTimeoutRef.current) {
+                    clearTimeout(longPressTimeoutRef.current);
+                    longPressTimeoutRef.current = null;
+                  }
+                  if (brush.mode === 'clone' && !longPressTriggeredRef.current) {
+                    lastPaintedRef.current = null;
+                  }
                   lastPaintedRef.current = null;
                 },
                 onResponderTerminate: () => {
+                  if (longPressTimeoutRef.current) {
+                    clearTimeout(longPressTimeoutRef.current);
+                    longPressTimeoutRef.current = null;
+                  }
+                  longPressTriggeredRef.current = false;
                   lastPaintedRef.current = null;
                 },
               }
@@ -504,8 +500,9 @@ export default function TestScreen() {
                     if (cellIndex === null) {
                       return;
                     }
-                    if (brush.mode === 'clone') {
-                      handleCloneTap(cellIndex);
+                    if (brush.mode === 'clone' && cloneSourceIndex === null) {
+                      setCloneSource(cellIndex);
+                      lastPaintedRef.current = null;
                       return;
                     }
                     handlePaintAt(point.x, point.y);
@@ -561,6 +558,13 @@ export default function TestScreen() {
                     tileSources={tileSources}
                     showDebug={showDebug}
                     isCloneSource={brush.mode === 'clone' && cloneSourceIndex === cellIndex}
+                    isCloneSample={brush.mode === 'clone' && cloneSampleIndex === cellIndex}
+                    isCloneTargetOrigin={
+                      brush.mode === 'clone' && cloneAnchorIndex === cellIndex
+                    }
+                    isCloneCursor={
+                      brush.mode === 'clone' && cloneCursorIndex === cellIndex
+                    }
                   />
                 );
               })}
@@ -571,6 +575,9 @@ export default function TestScreen() {
           tileSources={tileSources}
           selected={brush}
           onSelect={(next) => {
+            if (next.mode === 'clone') {
+              clearCloneSource();
+            }
             if (next.mode === 'fixed') {
               const rotation = paletteRotations[next.index] ?? next.rotation ?? 0;
               setBrush({ mode: 'fixed', index: next.index, rotation });
@@ -834,6 +841,21 @@ const styles = StyleSheet.create({
   cloneSource: {
     borderColor: '#3b82f6',
     borderWidth: 2,
+  },
+  cloneSample: {
+    ...StyleSheet.absoluteFillObject,
+    borderWidth: 2,
+    borderColor: 'rgba(59, 130, 246, 0.3)',
+  },
+  cloneTargetOrigin: {
+    ...StyleSheet.absoluteFillObject,
+    borderWidth: 2,
+    borderColor: '#ef4444',
+  },
+  cloneCursor: {
+    ...StyleSheet.absoluteFillObject,
+    borderWidth: 2,
+    borderColor: 'rgba(239, 68, 68, 0.3)',
   },
   tileImage: {
     width: '100%',

@@ -34,8 +34,12 @@ type Result = {
   floodFill: () => void;
   floodComplete: () => void;
   resetTiles: () => void;
+  clearCloneSource: () => void;
   setCloneSource: (cellIndex: number) => void;
   cloneSourceIndex: number | null;
+  cloneSampleIndex: number | null;
+  cloneAnchorIndex: number | null;
+  cloneCursorIndex: number | null;
   totalCells: number;
 };
 
@@ -73,6 +77,9 @@ export const useTileGrid = ({
   const cloneSourceRef = useRef<number | null>(null);
   const [cloneSourceIndex, setCloneSourceIndex] = useState<number | null>(null);
   const cloneAnchorRef = useRef<number | null>(null);
+  const [cloneSampleIndex, setCloneSampleIndex] = useState<number | null>(null);
+  const [cloneAnchorIndex, setCloneAnchorIndex] = useState<number | null>(null);
+  const [cloneCursorIndex, setCloneCursorIndex] = useState<number | null>(null);
 
   const renderTiles = useMemo(
     () => normalizeTiles(tiles, totalCells, tileSourcesLength),
@@ -83,10 +90,24 @@ export const useTileGrid = ({
     setTiles(buildInitialTiles(totalCells));
   }, [gridLayout.columns, gridLayout.rows, totalCells]);
 
+  const clearCloneSource = () => {
+    cloneAnchorRef.current = null;
+    cloneSourceRef.current = null;
+    setCloneSourceIndex(null);
+    setCloneSampleIndex(null);
+    setCloneAnchorIndex(null);
+    setCloneCursorIndex(null);
+  };
+
   useEffect(() => {
     if (brush.mode !== 'clone') {
       cloneAnchorRef.current = null;
+      setCloneSampleIndex(null);
+      setCloneAnchorIndex(null);
+      setCloneCursorIndex(null);
+      return;
     }
+    clearCloneSource();
   }, [brush.mode]);
 
   const tileSourceMeta = useMemo(
@@ -497,8 +518,13 @@ export const useTileGrid = ({
       if (sourceIndex === null) {
         return;
       }
+      if (gridLayout.rows === 0 || gridLayout.columns === 0) {
+        return;
+      }
+      setCloneCursorIndex(cellIndex);
       if (!cloneAnchorRef.current && cloneAnchorRef.current !== 0) {
         cloneAnchorRef.current = cellIndex;
+        setCloneAnchorIndex(cellIndex);
       }
       const anchorIndex = cloneAnchorRef.current ?? cellIndex;
       const anchorRow = Math.floor(anchorIndex / gridLayout.columns);
@@ -509,17 +535,14 @@ export const useTileGrid = ({
       const destCol = cellIndex % gridLayout.columns;
       const rowOffset = destRow - anchorRow;
       const colOffset = destCol - anchorCol;
-      const mappedRow = sourceRow + rowOffset;
-      const mappedCol = sourceCol + colOffset;
-      if (
-        mappedRow < 0 ||
-        mappedCol < 0 ||
-        mappedRow >= gridLayout.rows ||
-        mappedCol >= gridLayout.columns
-      ) {
-        return;
-      }
+      const mappedRow =
+        ((sourceRow + rowOffset) % gridLayout.rows + gridLayout.rows) %
+        gridLayout.rows;
+      const mappedCol =
+        ((sourceCol + colOffset) % gridLayout.columns + gridLayout.columns) %
+        gridLayout.columns;
       const mappedIndex = mappedRow * gridLayout.columns + mappedCol;
+      setCloneSampleIndex(mappedIndex);
       const sourceTile = renderTiles[mappedIndex];
       if (!sourceTile) {
         return;
@@ -733,6 +756,9 @@ export const useTileGrid = ({
     cloneSourceRef.current = cellIndex;
     cloneAnchorRef.current = null;
     setCloneSourceIndex(cellIndex);
+    setCloneSampleIndex(cellIndex);
+    setCloneAnchorIndex(null);
+    setCloneCursorIndex(null);
   };
 
   return {
@@ -743,8 +769,12 @@ export const useTileGrid = ({
     floodFill,
     floodComplete,
     resetTiles,
+    clearCloneSource,
     setCloneSource,
     cloneSourceIndex: brush.mode === 'clone' ? cloneSourceIndex : null,
+    cloneSampleIndex: brush.mode === 'clone' ? cloneSampleIndex : null,
+    cloneAnchorIndex: brush.mode === 'clone' ? cloneAnchorIndex : null,
+    cloneCursorIndex: brush.mode === 'clone' ? cloneCursorIndex : null,
     totalCells,
   };
 };
