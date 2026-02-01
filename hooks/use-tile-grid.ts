@@ -17,6 +17,7 @@ type Params = {
   availableHeight: number;
   gridGap: number;
   preferredTileSize: number;
+  allowEdgeConnections: boolean;
   brush:
     | { mode: 'random' }
     | { mode: 'erase' }
@@ -52,6 +53,7 @@ export const useTileGrid = ({
   availableHeight,
   gridGap,
   preferredTileSize,
+  allowEdgeConnections,
   brush,
   mirrorHorizontal,
   mirrorVertical,
@@ -119,6 +121,29 @@ export const useTileGrid = ({
     [tileSources]
   );
 
+  const getPairsForDirection = (index: number) => {
+    switch (index) {
+      case 0: // N
+        return [[0, 4]] as Array<[number, number]>;
+      case 1: // NE
+        return [[1, 5]] as Array<[number, number]>;
+      case 2: // E
+        return [[2, 6]] as Array<[number, number]>;
+      case 3: // SE
+        return [[3, 7]] as Array<[number, number]>;
+      case 4: // S
+        return [[4, 0]] as Array<[number, number]>;
+      case 5: // SW
+        return [[5, 1]] as Array<[number, number]>;
+      case 6: // W
+        return [[6, 2]] as Array<[number, number]>;
+      case 7: // NW
+        return [[7, 3]] as Array<[number, number]>;
+      default:
+        return [];
+    }
+  };
+
   const selectCompatibleTile = (cellIndex: number, tilesState: Tile[]) => {
     if (tileSourcesLength <= 0) {
       return null;
@@ -142,6 +167,9 @@ export const useTileGrid = ({
         const r = row + dir.dr;
         const c = col + dir.dc;
         if (r < 0 || c < 0 || r >= gridLayout.rows || c >= gridLayout.columns) {
+          if (!allowEdgeConnections) {
+            return { pairs: getPairsForDirection(index), connections: new Array(8).fill(false) };
+          }
           return null;
         }
         const neighborIndex = r * gridLayout.columns + c;
@@ -159,36 +187,7 @@ export const useTileGrid = ({
           neighborTile.mirrorX,
           neighborTile.mirrorY
         );
-        let pairs: Array<[number, number]> = [];
-        switch (index) {
-          case 0: // N
-            pairs = [[0, 4]];
-            break;
-          case 1: // NE
-            pairs = [[1, 5]];
-            break;
-          case 2: // E
-            pairs = [[2, 6]];
-            break;
-          case 3: // SE
-            pairs = [[3, 7]];
-            break;
-          case 4: // S
-            pairs = [[4, 0]];
-            break;
-          case 5: // SW
-            pairs = [[5, 1]];
-            break;
-          case 6: // W
-            pairs = [[6, 2]];
-            break;
-          case 7: // NW
-            pairs = [[7, 3]];
-            break;
-          default:
-            pairs = [];
-        }
-        return { pairs, connections: transformedNeighbor };
+        return { pairs: getPairsForDirection(index), connections: transformedNeighbor };
       })
       .filter(
         (value): value is { pairs: Array<[number, number]>; connections: boolean[] } =>
@@ -283,6 +282,11 @@ export const useTileGrid = ({
       const r = row + dir.dr;
       const c = col + dir.dc;
       if (r < 0 || c < 0 || r >= gridLayout.rows || c >= gridLayout.columns) {
+        if (!allowEdgeConnections) {
+          return getPairsForDirection(index).every(
+            ([candidateIndex]) => transformed[candidateIndex] === false
+          );
+        }
         return true;
       }
       const neighborIndex = r * gridLayout.columns + c;
@@ -301,37 +305,7 @@ export const useTileGrid = ({
         neighborTile.mirrorY
       );
 
-      let pairs: Array<[number, number]> = [];
-      switch (index) {
-        case 0:
-          pairs = [[0, 4]];
-          break;
-        case 1:
-          pairs = [[1, 5]];
-          break;
-        case 2:
-          pairs = [[2, 6]];
-          break;
-        case 3:
-          pairs = [[3, 7]];
-          break;
-        case 4:
-          pairs = [[4, 0]];
-          break;
-        case 5:
-          pairs = [[5, 1]];
-          break;
-        case 6:
-          pairs = [[6, 2]];
-          break;
-        case 7:
-          pairs = [[7, 3]];
-          break;
-        default:
-          pairs = [];
-      }
-
-      return pairs.every(
+      return getPairsForDirection(index).every(
         ([candidateIndex, neighborIndexValue]) =>
           transformed[candidateIndex] === neighborTransformed[neighborIndexValue]
       );

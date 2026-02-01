@@ -24,6 +24,7 @@ import { TileDebugOverlay } from '@/components/tile-debug-overlay';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { useTileGrid } from '@/hooks/use-tile-grid';
+import { usePersistedSettings } from '@/hooks/use-persisted-settings';
 import { exportTileCanvasAsPng } from '@/utils/tile-export';
 import { getTransformedConnectionsForName } from '@/utils/tile-compat';
 import { type Tile } from '@/utils/tile-grid';
@@ -165,19 +166,21 @@ export default function TestScreen() {
   const tabBarHeight = useBottomTabBarHeight?.() ?? 0;
   const gridRef = useRef<View>(null);
   const gridOffsetRef = useRef({ x: 0, y: 0 });
-  const [selectedCategory, setSelectedCategory] = useState<TileCategory>(
-    () => TILE_CATEGORIES[0]
-  );
+  const { settings, setSettings } = usePersistedSettings();
+  const [selectedCategory, setSelectedCategory] = useState<TileCategory>(() => {
+    const defaultCategory = TILE_CATEGORIES[0];
+    if (!settings.selectedTileCategory) {
+      return defaultCategory;
+    }
+    return TILE_CATEGORIES.includes(settings.selectedTileCategory as TileCategory)
+      ? (settings.selectedTileCategory as TileCategory)
+      : defaultCategory;
+  });
   const [showTileSetOverlay, setShowTileSetOverlay] = useState(false);
   const [showSettingsOverlay, setShowSettingsOverlay] = useState(false);
-  const [showDebug, setShowDebug] = useState(false);
-  const [preferredTileSizeInput, setPreferredTileSizeInput] = useState('45');
-  const [preferredTileSizeValue, setPreferredTileSizeValue] = useState(45);
-  const [aspectPreset, setAspectPreset] = useState<'web' | 'iphone15' | 'ipadpro'>(
-    Platform.OS === 'web' ? 'web' : 'iphone15'
+  const [preferredTileSizeInput, setPreferredTileSizeInput] = useState(
+    String(settings.preferredTileSize)
   );
-  const [mirrorHorizontal, setMirrorHorizontal] = useState(false);
-  const [mirrorVertical, setMirrorVertical] = useState(false);
   const [brush, setBrush] = useState<
     | { mode: 'random' }
     | { mode: 'erase' }
@@ -189,11 +192,15 @@ export default function TestScreen() {
   const [paletteRotations, setPaletteRotations] = useState<Record<number, number>>(
     {}
   );
-  const preferredTileSize = preferredTileSizeValue;
+  const preferredTileSize = settings.preferredTileSize;
   const tileSources = TILE_MANIFEST[selectedCategory] ?? [];
   const isWeb = Platform.OS === 'web';
   const aspectRatio =
-    aspectPreset === 'iphone15' ? 2556 / 1179 : aspectPreset === 'ipadpro' ? 2732 / 2048 : null;
+    settings.aspectPreset === 'iphone15'
+      ? 2556 / 1179
+      : settings.aspectPreset === 'ipadpro'
+        ? 2732 / 2048
+        : null;
   const safeWidth = Math.max(0, width - insets.left - insets.right);
   const safeHeight = Math.max(0, height - insets.top - insets.bottom);
   const contentWidth = aspectRatio
@@ -232,9 +239,10 @@ export default function TestScreen() {
     availableHeight,
     gridGap: GRID_GAP,
     preferredTileSize,
+    allowEdgeConnections: settings.allowEdgeConnections,
     brush,
-    mirrorHorizontal,
-    mirrorVertical,
+    mirrorHorizontal: settings.mirrorHorizontal,
+    mirrorVertical: settings.mirrorVertical,
   });
   const lastPaintedRef = useRef<number | null>(null);
   const longPressTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -250,6 +258,20 @@ export default function TestScreen() {
   );
 
   useEffect(() => {
+    if (
+      settings.selectedTileCategory &&
+      settings.selectedTileCategory !== selectedCategory &&
+      TILE_CATEGORIES.includes(settings.selectedTileCategory as TileCategory)
+    ) {
+      setSelectedCategory(settings.selectedTileCategory as TileCategory);
+    }
+  }, [selectedCategory, settings.selectedTileCategory]);
+
+  useEffect(() => {
+    setPreferredTileSizeInput(String(settings.preferredTileSize));
+  }, [settings.preferredTileSize]);
+
+  useEffect(() => {
     if (brush.mode !== 'clone') {
       clearCloneSource();
     }
@@ -263,8 +285,8 @@ export default function TestScreen() {
       const parsed = Math.floor(Number(preferredTileSizeInput));
       if (!Number.isNaN(parsed)) {
         const clamped = Math.min(512, Math.max(20, parsed));
-        if (clamped !== preferredTileSizeValue) {
-          setPreferredTileSizeValue(clamped);
+        if (clamped !== settings.preferredTileSize) {
+          setSettings((prev) => ({ ...prev, preferredTileSize: clamped }));
         }
         if (String(clamped) !== preferredTileSizeInput) {
           setPreferredTileSizeInput(String(clamped));
@@ -277,7 +299,7 @@ export default function TestScreen() {
         clearTimeout(preferredSizeTimeoutRef.current);
       }
     };
-  }, [preferredTileSizeInput, preferredTileSizeValue]);
+  }, [preferredTileSizeInput, settings.preferredTileSize, setSettings]);
 
   const handleDownload = async () => {
     const result = await exportTileCanvasAsPng({
@@ -376,7 +398,7 @@ export default function TestScreen() {
           style={[
             styles.contentFrame,
             { width: contentWidth, height: contentHeight },
-            aspectPreset !== 'web' && styles.contentFrameBorder,
+            settings.aspectPreset !== 'web' && styles.contentFrameBorder,
           ]}
         >
         <ThemedView style={styles.titleContainer}>
@@ -405,14 +427,24 @@ export default function TestScreen() {
             <ToolbarButton
               label="Mirror Horizontal"
               icon="flip-horizontal"
-              active={mirrorHorizontal}
-              onPress={() => setMirrorHorizontal((prev) => !prev)}
+              active={settings.mirrorHorizontal}
+              onPress={() =>
+                setSettings((prev) => ({
+                  ...prev,
+                  mirrorHorizontal: !prev.mirrorHorizontal,
+                }))
+              }
             />
             <ToolbarButton
               label="Mirror Vertical"
               icon="flip-vertical"
-              active={mirrorVertical}
-              onPress={() => setMirrorVertical((prev) => !prev)}
+              active={settings.mirrorVertical}
+              onPress={() =>
+                setSettings((prev) => ({
+                  ...prev,
+                  mirrorVertical: !prev.mirrorVertical,
+                }))
+              }
             />
           </ThemedView>
         </ThemedView>
@@ -524,9 +556,9 @@ export default function TestScreen() {
                 },
               })}
         >
-          {(mirrorHorizontal || mirrorVertical) && (
+          {(settings.mirrorHorizontal || settings.mirrorVertical) && (
             <ThemedView pointerEvents="none" style={styles.mirrorLines}>
-              {mirrorVertical && (
+              {settings.mirrorVertical && (
                 <ThemedView
                   style={[
                     styles.mirrorLineHorizontal,
@@ -534,7 +566,7 @@ export default function TestScreen() {
                   ]}
                 />
               )}
-              {mirrorHorizontal && (
+              {settings.mirrorHorizontal && (
                 <ThemedView
                   style={[
                     styles.mirrorLineVertical,
@@ -556,7 +588,7 @@ export default function TestScreen() {
                     tileSize={gridLayout.tileSize}
                     tile={item}
                     tileSources={tileSources}
-                    showDebug={showDebug}
+                    showDebug={settings.showDebug}
                     isCloneSource={brush.mode === 'clone' && cloneSourceIndex === cellIndex}
                     isCloneSample={brush.mode === 'clone' && cloneSampleIndex === cellIndex}
                     isCloneTargetOrigin={
@@ -616,6 +648,10 @@ export default function TestScreen() {
                     key={category}
                     onPress={() => {
                       setSelectedCategory(category);
+                      setSettings((prev) => ({
+                        ...prev,
+                        selectedTileCategory: category,
+                      }));
                       setShowTileSetOverlay(false);
                     }}
                     style={[
@@ -651,7 +687,7 @@ export default function TestScreen() {
                     const parsed = Math.floor(Number(preferredTileSizeInput));
                     if (!Number.isNaN(parsed)) {
                       const clamped = Math.min(512, Math.max(20, parsed));
-                      setPreferredTileSizeValue(clamped);
+                      setSettings((prev) => ({ ...prev, preferredTileSize: clamped }));
                       if (String(clamped) !== preferredTileSizeInput) {
                         setPreferredTileSizeInput(String(clamped));
                       }
@@ -670,10 +706,12 @@ export default function TestScreen() {
                   ].map((preset) => (
                     <Pressable
                       key={preset.key}
-                      onPress={() => setAspectPreset(preset.key)}
+                      onPress={() =>
+                        setSettings((prev) => ({ ...prev, aspectPreset: preset.key }))
+                      }
                       style={[
                         styles.resetButton,
-                        aspectPreset === preset.key && styles.overlayItemSelected,
+                        settings.aspectPreset === preset.key && styles.overlayItemSelected,
                       ]}
                       accessibilityRole="button"
                       accessibilityLabel={`Set aspect ratio to ${preset.label}`}
@@ -682,6 +720,24 @@ export default function TestScreen() {
                     </Pressable>
                   ))}
                 </ThemedView>
+              </ThemedView>
+              <ThemedView style={styles.inputGroup}>
+                <ThemedText type="defaultSemiBold">AllowEdgeConections</ThemedText>
+                <Pressable
+                  onPress={() =>
+                    setSettings((prev) => ({
+                      ...prev,
+                      allowEdgeConnections: !prev.allowEdgeConnections,
+                    }))
+                  }
+                  style={styles.resetButton}
+                  accessibilityRole="button"
+                  accessibilityLabel="Toggle edge connections"
+                >
+                  <ThemedText type="defaultSemiBold">
+                    {settings.allowEdgeConnections ? 'On' : 'Off'}
+                  </ThemedText>
+                </Pressable>
               </ThemedView>
               <Pressable
                 onPress={handleDownload}
@@ -692,13 +748,15 @@ export default function TestScreen() {
                 <ThemedText type="defaultSemiBold">Download PNG</ThemedText>
               </Pressable>
               <Pressable
-                onPress={() => setShowDebug((prev) => !prev)}
+                onPress={() =>
+                  setSettings((prev) => ({ ...prev, showDebug: !prev.showDebug }))
+                }
                 style={styles.resetButton}
                 accessibilityRole="button"
                 accessibilityLabel="Toggle debug overlay"
               >
                 <ThemedText type="defaultSemiBold">
-                  {showDebug ? 'Hide Debug' : 'Show Debug'}
+                  {settings.showDebug ? 'Hide Debug' : 'Show Debug'}
                 </ThemedText>
               </Pressable>
             </ThemedView>
