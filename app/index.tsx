@@ -31,8 +31,8 @@ import { type Tile } from '@/utils/tile-grid';
 
 const GRID_GAP = 0;
 const CONTENT_PADDING = 0;
-const HEADER_HEIGHT = 40;
-const TOOLBAR_BUTTON_SIZE = 32;
+const HEADER_HEIGHT = 50;
+const TOOLBAR_BUTTON_SIZE = 40;
 const TITLE_SPACING = 0;
 const BRUSH_PANEL_HEIGHT = 160;
 const BRUSH_PANEL_ROW_GAP = 1;
@@ -59,7 +59,7 @@ function ToolbarButton({ label, onPress, icon, active }: ToolbarButtonProps) {
     >
       <MaterialCommunityIcons
         name={icon}
-        size={18}
+        size={20}
         color={active ? '#22c55e' : '#111'}
       />
       {Platform.OS === 'web' && hovered && (
