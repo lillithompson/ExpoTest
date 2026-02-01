@@ -468,6 +468,18 @@ export const useTileGrid = ({
     });
   };
 
+  const applyPlacementsToArrayOverride = (
+    nextTiles: Tile[],
+    placements: Map<number, Tile>
+  ) => {
+    placements.forEach((placement, index) => {
+      if (index < 0 || index >= nextTiles.length) {
+        return;
+      }
+      nextTiles[index] = placement;
+    });
+  };
+
   const applyPlacement = (cellIndex: number, placement: Tile) => {
     const placements = getMirroredPlacements(cellIndex, placement);
     setTiles((prev) =>
@@ -628,11 +640,43 @@ export const useTileGrid = ({
       return;
     }
     if (brush.mode === 'random') {
+      if (mirrorHorizontal || mirrorVertical) {
+        const nextTiles = buildInitialTiles(totalCells);
+        for (const index of getDrivenCellIndices()) {
+          const selection = selectCompatibleTile(index, nextTiles);
+          const placement =
+            selection && isPlacementValid(index, selection, nextTiles)
+              ? selection
+              : { imageIndex: -2, rotation: 0, mirrorX: false, mirrorY: false };
+          applyPlacementsToArrayOverride(
+            nextTiles,
+            getMirroredPlacements(index, placement)
+          );
+        }
+        setTiles(nextTiles);
+        return;
+      }
       randomFill();
       return;
     }
     const fixedIndex = brush.index;
     if (fixedIndex < 0 || fixedIndex >= tileSourcesLength) {
+      return;
+    }
+    if (mirrorHorizontal || mirrorVertical) {
+      const nextTiles = buildInitialTiles(totalCells);
+      for (const index of getDrivenCellIndices()) {
+        applyPlacementsToArrayOverride(
+          nextTiles,
+          getMirroredPlacements(index, {
+            imageIndex: fixedIndex,
+            rotation: brush.rotation,
+            mirrorX: false,
+            mirrorY: false,
+          })
+        );
+      }
+      setTiles(nextTiles);
       return;
     }
     setTiles(
