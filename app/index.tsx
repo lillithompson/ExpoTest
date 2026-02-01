@@ -51,7 +51,7 @@ function ToolbarButton({ label, onPress, icon, active }: ToolbarButtonProps) {
   return (
     <Pressable
       onPress={onPress}
-      style={[styles.resetButton, active && styles.toolbarActive]}
+      style={styles.toolbarButton}
       accessibilityRole="button"
       accessibilityLabel={label}
       onHoverIn={() => setHovered(true)}
@@ -59,8 +59,8 @@ function ToolbarButton({ label, onPress, icon, active }: ToolbarButtonProps) {
     >
       <MaterialCommunityIcons
         name={icon}
-        size={20}
-        color={active ? '#22c55e' : '#111'}
+        size={28}
+        color={active ? '#22c55e' : 'rgba(42, 42, 42, 0.8)'}
       />
       {Platform.OS === 'web' && hovered && (
         <Text style={styles.tooltip} accessibilityElementsHidden>
@@ -429,13 +429,8 @@ export default function TestScreen() {
             />
             <ToolbarButton label="Reset" icon="refresh" onPress={resetTiles} />
             <ToolbarButton
-              label="Flood Fill"
-              icon="format-color-fill"
-              onPress={floodFill}
-            />
-            <ToolbarButton
               label="Flood Complete"
-              icon="checkbox-multiple-marked"
+              icon="format-color-fill"
               onPress={floodComplete}
             />
             <ToolbarButton
@@ -799,7 +794,7 @@ const styles = StyleSheet.create({
   controls: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 2,
     flexWrap: 'wrap',
     justifyContent: 'flex-end',
     width: '100%',
@@ -834,8 +829,12 @@ const styles = StyleSheet.create({
     borderRadius: 6,
     position: 'relative',
   },
-  toolbarActive: {
-    borderColor: '#22c55e',
+  toolbarButton: {
+    width: TOOLBAR_BUTTON_SIZE,
+    height: TOOLBAR_BUTTON_SIZE,
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'relative',
   },
   tooltip: {
     position: 'absolute',
