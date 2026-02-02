@@ -7,7 +7,7 @@ const path = require('path');
 const root = process.cwd();
 const tilesDir = path.join(root, 'assets', 'images', 'tiles');
 const outputPath = path.join(tilesDir, 'manifest.ts');
-const imageExt = /\.(png|jpg|jpeg|webp)$/i;
+const imageExt = /\.(png|jpg|jpeg|webp|svg)$/i;
 
 if (!fs.existsSync(tilesDir)) {
   console.error('Tiles directory not found:', tilesDir);

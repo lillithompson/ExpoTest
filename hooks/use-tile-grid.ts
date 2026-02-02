@@ -112,8 +112,8 @@ export const useTileGrid = ({
   );
 
   useEffect(() => {
-    setTiles(buildInitialTiles(totalCells));
-  }, [gridLayout.columns, gridLayout.rows, totalCells]);
+    setTiles((prev) => (prev.length === totalCells ? prev : buildInitialTiles(totalCells)));
+  }, [totalCells]);
 
   const clearCloneSource = () => {
     cloneAnchorRef.current = null;

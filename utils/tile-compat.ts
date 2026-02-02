@@ -9,7 +9,7 @@ export type TileConnections = [
   boolean
 ];
 
-const TILE_NAME_PATTERN = /^.+_([01]{8})\.(png|jpe?g|webp)$/i;
+const TILE_NAME_PATTERN = /^.+_([01]{8})\.(png|jpe?g|webp|svg)$/i;
 
 export const parseTileConnections = (fileName: string) => {
   const match = fileName.match(TILE_NAME_PATTERN);

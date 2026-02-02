@@ -1,8 +1,9 @@
 import { useRef, useState } from 'react';
-import { Image, Pressable, ScrollView, StyleSheet } from 'react-native';
+import { Pressable, ScrollView, StyleSheet } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { TileAsset } from '@/components/tile-asset';
 import { type TileSource } from '@/assets/images/tiles/manifest';
 
 type Brush =
@@ -148,8 +149,9 @@ export function TileBrushPanel({
                   </ThemedText>
                 ) : (
                   <ThemedView style={styles.imageBox}>
-                    <Image
+                    <TileAsset
                       source={entry.tile.source}
+                      name={entry.tile.name}
                       style={[
                         styles.image,
                         {
@@ -160,7 +162,6 @@ export function TileBrushPanel({
                         },
                       ]}
                       resizeMode="cover"
-                      fadeDuration={0}
                     />
                   </ThemedView>
                 )}

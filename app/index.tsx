@@ -1,7 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
-  Image,
   Platform,
   Pressable,
   ScrollView,
@@ -24,6 +23,7 @@ import {
 } from '@/assets/images/tiles/manifest';
 import { TileBrushPanel } from '@/components/tile-brush-panel';
 import { TileDebugOverlay } from '@/components/tile-debug-overlay';
+import { TileAsset } from '@/components/tile-asset';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { useTileGrid } from '@/hooks/use-tile-grid';
@@ -44,8 +44,8 @@ const FILE_GRID_COLUMNS_MOBILE = 3;
 const FILE_GRID_SIDE_PADDING = 12;
 const FILE_GRID_GAP = 12;
 const DEFAULT_CATEGORY = TILE_CATEGORIES[0];
-const BLANK_TILE = require('@/assets/images/tiles/tile_blank.png');
-const ERROR_TILE = require('@/assets/images/tiles/tile_error.png');
+const BLANK_TILE = require('@/assets/images/tiles/tile_blank.svg');
+const ERROR_TILE = require('@/assets/images/tiles/tile_error.svg');
 
 type ToolbarButtonProps = {
   label: string;
@@ -150,8 +150,9 @@ const TileCell = memo(
           isCloneSource && styles.cloneSource,
         ]}
       >
-        <Image
+        <TileAsset
           source={source}
+          name={tileName}
           style={[
             styles.tileImage,
             {
@@ -163,7 +164,6 @@ const TileCell = memo(
             },
           ]}
           resizeMode="cover"
-          fadeDuration={0}
         />
         {isCloneTargetOrigin && (
           <View pointerEvents="none" style={styles.cloneTargetOrigin} />
@@ -721,11 +721,11 @@ export default function TestScreen() {
                   ]}
                 >
                   {file.thumbnailUri ? (
-                    <Image
+                    <TileAsset
                       source={{ uri: file.thumbnailUri }}
+                      name="thumbnail.png"
                       style={styles.fileThumbImage}
                       resizeMode="cover"
-                      fadeDuration={0}
                     />
                   ) : (
                     <ThemedView style={styles.fileThumbGrid}>
@@ -747,8 +747,9 @@ export default function TestScreen() {
                                 style={styles.fileThumbCell}
                               >
                                 {source && (
-                                  <Image
+                                  <TileAsset
                                     source={source}
+                                    name={sources[tile.imageIndex]?.name}
                                     style={[
                                       styles.fileThumbImage,
                                       {
@@ -760,7 +761,6 @@ export default function TestScreen() {
                                       },
                                     ]}
                                     resizeMode="cover"
-                                    fadeDuration={0}
                                   />
                                 )}
                               </ThemedView>
@@ -830,8 +830,9 @@ export default function TestScreen() {
                                 ]}
                               >
                                 {source && (
-                                  <Image
+                                  <TileAsset
                                     source={source}
+                                    name={sources[tile.imageIndex]?.name}
                                     style={[
                                       styles.captureImage,
                                       {
