@@ -694,7 +694,9 @@ export default function TestScreen() {
           contentContainerStyle={styles.fileGrid}
           showsVerticalScrollIndicator
         >
-          {files.map((file) => {
+          {[...files]
+            .sort((a, b) => b.updatedAt - a.updatedAt)
+            .map((file) => {
             const sources = TILE_MANIFEST[file.category] ?? [];
             const thumbAspect =
               file.grid.columns > 0 && file.grid.rows > 0

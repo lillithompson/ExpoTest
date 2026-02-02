@@ -146,10 +146,18 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
 
   const setActive = useCallback(
     (id: string) => {
+      const now = Date.now();
+      setFiles((prev) => {
+        const next = prev.map((file) =>
+          file.id === id ? { ...file, updatedAt: now } : file
+        );
+        void persistFiles(next, id);
+        return next;
+      });
       setActiveFileId(id);
       void AsyncStorage.setItem(ACTIVE_KEY, id);
     },
-    []
+    [persistFiles]
   );
 
   const createFile = useCallback(
