@@ -7,6 +7,8 @@ import { SvgUri, SvgXml } from 'react-native-svg';
 type Props = {
   source: unknown;
   name?: string;
+  strokeColor?: string;
+  strokeWidth?: number;
   style?: ImageProps['style'];
   resizeMode?: ImageProps['resizeMode'];
   onLoad?: () => void;
@@ -38,19 +40,104 @@ const resolveSourceUri = (source: unknown) => {
   return null;
 };
 
-export function TileAsset({ source, name, style, resizeMode, onLoad }: Props) {
+const applySvgOverrides = (xml: string, strokeColor?: string, strokeWidth?: number) => {
+  let next = xml;
+  const applyInlineOverrides = (input: string) => {
+    const tagRegex =
+      /<(path|rect|circle|line|polyline|polygon|ellipse)([^>]*?)(\/?)>/gi;
+    return input.replace(tagRegex, (_match, tagName, attrs, selfClosing) => {
+      let nextAttrs = attrs;
+      if (strokeColor) {
+        if (/stroke=/.test(nextAttrs)) {
+          nextAttrs = nextAttrs.replace(
+            /stroke="(?!none)[^"]*"/gi,
+            `stroke="${strokeColor}"`
+          );
+          nextAttrs = nextAttrs.replace(
+            /stroke='(?!none)[^']*'/gi,
+            `stroke='${strokeColor}'`
+          );
+        } else {
+          nextAttrs += ` stroke="${strokeColor}"`;
+        }
+      }
+      if (strokeWidth !== undefined) {
+        if (/stroke-width=/.test(nextAttrs)) {
+          nextAttrs = nextAttrs.replace(
+            /stroke-width="[^"]*"/gi,
+            `stroke-width="${strokeWidth}"`
+          );
+          nextAttrs = nextAttrs.replace(
+            /stroke-width='[^']*'/gi,
+            `stroke-width='${strokeWidth}'`
+          );
+        } else {
+          nextAttrs += ` stroke-width="${strokeWidth}"`;
+        }
+      }
+      const closing = selfClosing === '/' ? ' />' : '>';
+      return `<${tagName}${nextAttrs}${closing}`;
+    });
+  };
+
+  if (strokeColor) {
+    next = next.replace(/stroke="(?!none)[^"]*"/gi, `stroke="${strokeColor}"`);
+    next = next.replace(/stroke='(?!none)[^']*'/gi, `stroke='${strokeColor}'`);
+    if (!/stroke\s*=/.test(next)) {
+      next = next.replace(/<svg\b([^>]*)>/i, `<svg$1 stroke="${strokeColor}">`);
+    }
+  }
+  if (strokeWidth !== undefined) {
+    next = next.replace(/stroke-width="[^"]*"/gi, `stroke-width="${strokeWidth}"`);
+    next = next.replace(/stroke-width='[^']*'/gi, `stroke-width='${strokeWidth}'`);
+    if (!/stroke-width\s*=/.test(next)) {
+      next = next.replace(/<svg\b([^>]*)>/i, `<svg$1 stroke-width="${strokeWidth}">`);
+    }
+  }
+  if (strokeColor || strokeWidth !== undefined) {
+    const overrideRules = [
+      strokeColor ? `stroke: ${strokeColor} !important;` : '',
+      strokeWidth !== undefined
+        ? `stroke-width: ${strokeWidth} !important; vector-effect: non-scaling-stroke;`
+        : '',
+    ]
+      .filter(Boolean)
+      .join(' ');
+    const overrideStyle = `<style data-tile-overrides="true">* { ${overrideRules} }</style>`;
+    next = next.replace(/<style data-tile-overrides="true">[\s\S]*?<\/style>/i, '');
+    next = next.replace(/<svg\b([^>]*)>/i, `<svg$1>${overrideStyle}`);
+    next = applyInlineOverrides(next);
+  }
+  return next;
+};
+
+const stripOuterBorder = (xml: string) => {
+  return xml.replace(/<rect\b[^>]*(x=["']0\.5["']|y=["']0\.5["'])[^>]*\/?>/gi, '');
+};
+
+export function TileAsset({
+  source,
+  name,
+  strokeColor,
+  strokeWidth,
+  style,
+  resizeMode,
+  onLoad,
+}: Props) {
   const uri = useMemo(() => resolveSourceUri(source), [source]);
   const isSvg =
     (name ?? '').toLowerCase().endsWith('.svg') ||
     (uri ?? '').toLowerCase().includes('.svg');
   const [svgUri, setSvgUri] = useState<string | null>(null);
   const [svgXml, setSvgXml] = useState<string | null>(null);
+  const [svgXmlWithOverrides, setSvgXmlWithOverrides] = useState<string | null>(null);
   const loadCalledRef = useRef(false);
 
   useEffect(() => {
     if (!isSvg) {
       setSvgUri(null);
       setSvgXml(null);
+      setSvgXmlWithOverrides(null);
       return;
     }
     let cancelled = false;
@@ -58,14 +145,40 @@ export function TileAsset({ source, name, style, resizeMode, onLoad }: Props) {
       if (uri) {
         if (!cancelled) {
           setSvgUri(uri);
-          if (Platform.OS !== 'web') {
+          if (Platform.OS === 'web') {
+            try {
+              const response = await fetch(uri);
+              const xml = await response.text();
+              if (!cancelled) {
+                setSvgXml(xml);
+              }
+            } catch {
+              // ignore, fall back to uri rendering
+            }
+          } else {
             try {
               const xml = await FileSystem.readAsStringAsync(uri);
               if (!cancelled) {
                 setSvgXml(xml);
               }
             } catch {
-              // ignore, fall back to uri rendering
+              if (typeof source === 'number') {
+                try {
+                  const asset = Asset.fromModule(source);
+                  if (!asset.downloaded) {
+                    await asset.downloadAsync();
+                  }
+                  const resolved = asset.localUri ?? asset.uri ?? null;
+                  if (resolved) {
+                    const xml = await FileSystem.readAsStringAsync(resolved);
+                    if (!cancelled) {
+                      setSvgXml(xml);
+                    }
+                  }
+                } catch {
+                  // ignore, fall back to uri rendering
+                }
+              }
             }
           }
         }
@@ -79,14 +192,26 @@ export function TileAsset({ source, name, style, resizeMode, onLoad }: Props) {
         if (!cancelled) {
           const resolved = asset.localUri ?? asset.uri ?? null;
           setSvgUri(resolved);
-          if (resolved && Platform.OS !== 'web') {
-            try {
-              const xml = await FileSystem.readAsStringAsync(resolved);
-              if (!cancelled) {
-                setSvgXml(xml);
+          if (resolved) {
+            if (Platform.OS === 'web') {
+              try {
+                const response = await fetch(resolved);
+                const xml = await response.text();
+                if (!cancelled) {
+                  setSvgXml(xml);
+                }
+              } catch {
+                // ignore, fall back to uri rendering
               }
-            } catch {
-              // ignore, fall back to uri rendering
+            } else {
+              try {
+                const xml = await FileSystem.readAsStringAsync(resolved);
+                if (!cancelled) {
+                  setSvgXml(xml);
+                }
+              } catch {
+                // ignore, fall back to uri rendering
+              }
             }
           }
         }
@@ -99,6 +224,15 @@ export function TileAsset({ source, name, style, resizeMode, onLoad }: Props) {
   }, [isSvg, source, uri]);
 
   useEffect(() => {
+    if (!svgXml) {
+      setSvgXmlWithOverrides(null);
+      return;
+    }
+    const stripped = stripOuterBorder(svgXml);
+    setSvgXmlWithOverrides(applySvgOverrides(stripped, strokeColor, strokeWidth));
+  }, [svgXml, strokeColor, strokeWidth]);
+
+  useEffect(() => {
     if (!isSvg || !onLoad || !svgUri || loadCalledRef.current) {
       return;
     }
@@ -107,10 +241,20 @@ export function TileAsset({ source, name, style, resizeMode, onLoad }: Props) {
   }, [isSvg, onLoad, svgUri]);
 
   if (isSvg && svgUri) {
-    if (Platform.OS !== 'web' && svgXml) {
-      return <SvgXml xml={svgXml} width="100%" height="100%" style={style as any} />;
+    if (svgXmlWithOverrides) {
+      return (
+        <SvgXml xml={svgXmlWithOverrides} width="100%" height="100%" style={style as any} />
+      );
     }
-    return <SvgUri uri={svgUri} width="100%" height="100%" style={style as any} />;
+    return (
+      <SvgUri
+        uri={svgUri}
+        width="100%"
+        height="100%"
+        style={style as any}
+        color={strokeColor}
+      />
+    );
   }
   if (isSvg) {
     return null;

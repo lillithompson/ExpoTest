@@ -101,6 +101,8 @@ type TileCellProps = {
   tile: Tile;
   tileSources: typeof TILE_MANIFEST[TileCategory];
   showDebug: boolean;
+  strokeColor: string;
+  strokeWidth: number;
   isCloneSource: boolean;
   isCloneSample: boolean;
   isCloneTargetOrigin: boolean;
@@ -114,6 +116,8 @@ const TileCell = memo(
     tile,
     tileSources,
     showDebug,
+    strokeColor,
+    strokeWidth,
     isCloneSource,
     isCloneSample,
     isCloneTargetOrigin,
@@ -153,6 +157,8 @@ const TileCell = memo(
         <TileAsset
           source={source}
           name={tileName}
+          strokeColor={strokeColor}
+          strokeWidth={strokeWidth}
           style={[
             styles.tileImage,
             {
@@ -178,6 +184,8 @@ const TileCell = memo(
     prev.tile === next.tile &&
     prev.tileSize === next.tileSize &&
     prev.showDebug === next.showDebug &&
+    prev.strokeColor === next.strokeColor &&
+    prev.strokeWidth === next.strokeWidth &&
     prev.tileSources === next.tileSources &&
     prev.isCloneSource === next.isCloneSource &&
     prev.isCloneSample === next.isCloneSample &&
@@ -194,7 +202,7 @@ export default function TestScreen() {
   const [selectedCategory, setSelectedCategory] = useState<TileCategory>(
     () => DEFAULT_CATEGORY
   );
-  const [showTileSetOverlay, setShowTileSetOverlay] = useState(false);
+  const [showFileSettingsOverlay, setShowFileSettingsOverlay] = useState(false);
   const [showSettingsOverlay, setShowSettingsOverlay] = useState(false);
   const [showNewFileModal, setShowNewFileModal] = useState(false);
   const [fileMenuTargetId, setFileMenuTargetId] = useState<string | null>(null);
@@ -254,6 +262,8 @@ export default function TestScreen() {
   } = useTileFiles(DEFAULT_CATEGORY);
 
   const fileTileSize = activeFile?.preferredTileSize ?? settings.preferredTileSize;
+  const activeLineWidth = activeFile?.lineWidth ?? 1;
+  const activeLineColor = activeFile?.lineColor ?? '#ffffff';
 
   const {
     gridLayout,
@@ -346,8 +356,25 @@ export default function TestScreen() {
       return;
     }
     lastLoadedFileRef.current = activeFile.id;
-    if (activeFile.category !== selectedCategory) {
-      setSelectedCategory(activeFile.category);
+    const resolvedCategory = TILE_MANIFEST[activeFile.category]
+      ? activeFile.category
+      : DEFAULT_CATEGORY;
+    if (resolvedCategory !== activeFile.category) {
+      upsertActiveFile({
+        tiles: activeFile.tiles,
+        gridLayout: {
+          rows: activeFile.grid.rows,
+          columns: activeFile.grid.columns,
+          tileSize: activeFile.preferredTileSize,
+        },
+        category: resolvedCategory,
+        preferredTileSize: activeFile.preferredTileSize,
+        lineWidth: activeLineWidth,
+        lineColor: activeLineColor,
+      });
+    }
+    if (resolvedCategory !== selectedCategory) {
+      setSelectedCategory(resolvedCategory);
     }
     pendingRestoreRef.current = {
       fileId: activeFile.id,
@@ -355,7 +382,7 @@ export default function TestScreen() {
       rows: activeFile.grid.rows,
       columns: activeFile.grid.columns,
       preferredTileSize: activeFile.preferredTileSize,
-      category: activeFile.category,
+      category: resolvedCategory,
     };
     setHydrating(true);
     if (pendingSwitchRef.current === activeFile.id) {
@@ -1080,9 +1107,9 @@ export default function TestScreen() {
             />
             <ThemedView style={styles.controls}>
             <ToolbarButton
-              label="Tile Set"
-              icon="grid"
-              onPress={() => setShowTileSetOverlay(true)}
+              label="File Settings"
+              icon="tune-vertical-variant"
+              onPress={() => setShowFileSettingsOverlay(true)}
             />
             <ToolbarButton label="Reset" icon="refresh" onPress={resetTiles} />
             <ToolbarButton
@@ -1256,6 +1283,8 @@ export default function TestScreen() {
                     tile={item}
                     tileSources={tileSources}
                     showDebug={settings.showDebug}
+                    strokeColor={activeLineColor}
+                    strokeWidth={activeLineWidth}
                     isCloneSource={brush.mode === 'clone' && cloneSourceIndex === cellIndex}
                     isCloneSample={brush.mode === 'clone' && cloneSampleIndex === cellIndex}
                     isCloneTargetOrigin={
@@ -1325,16 +1354,18 @@ export default function TestScreen() {
           itemSize={brushItemSize}
           rowGap={BRUSH_PANEL_ROW_GAP}
         />
-        {showTileSetOverlay && (
+        {showFileSettingsOverlay && (
           <ThemedView style={styles.overlay} accessibilityRole="dialog">
             <Pressable
               style={styles.overlayBackdrop}
-              onPress={() => setShowTileSetOverlay(false)}
+              onPress={() => setShowFileSettingsOverlay(false)}
               accessibilityRole="button"
-              accessibilityLabel="Close tile set chooser"
+              accessibilityLabel="Close file settings"
             />
             <ThemedView style={styles.overlayPanel}>
-              <ThemedText type="title">Choose Tile Set</ThemedText>
+              <ThemedText type="title">File Settings</ThemedText>
+              <ThemedView style={styles.sectionGroup}>
+                <ThemedText type="defaultSemiBold">Tile Set</ThemedText>
               <ThemedView style={styles.overlayList}>
                 {TILE_CATEGORIES.map((category) => (
                   <Pressable
@@ -1347,9 +1378,11 @@ export default function TestScreen() {
                           gridLayout,
                           category,
                           preferredTileSize: fileTileSize,
+                          lineWidth: activeLineWidth,
+                          lineColor: activeLineColor,
                         });
                       }
-                      setShowTileSetOverlay(false);
+                      setShowFileSettingsOverlay(false);
                     }}
                     style={[
                       styles.overlayItem,
@@ -1359,6 +1392,70 @@ export default function TestScreen() {
                     <ThemedText type="defaultSemiBold">{category}</ThemedText>
                   </Pressable>
                 ))}
+              </ThemedView>
+              </ThemedView>
+              <ThemedView style={styles.sectionGroup}>
+                <ThemedText type="defaultSemiBold">Line Width</ThemedText>
+                <ThemedView style={styles.inlineOptions}>
+                  {[0.5, 1, 1.5, 2, 3, 4].map((value) => (
+                    <Pressable
+                      key={`line-width-${value}`}
+                      onPress={() => {
+                        if (!activeFileId) {
+                          return;
+                        }
+                        upsertActiveFile({
+                          tiles,
+                          gridLayout,
+                          category: selectedCategory,
+                          preferredTileSize: fileTileSize,
+                          lineWidth: value,
+                          lineColor: activeLineColor,
+                        });
+                      }}
+                      style={[
+                        styles.resetButton,
+                        activeLineWidth === value && styles.overlayItemSelected,
+                      ]}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Set line width to ${value}`}
+                    >
+                      <ThemedText type="defaultSemiBold">{value}</ThemedText>
+                    </Pressable>
+                  ))}
+                </ThemedView>
+              </ThemedView>
+              <ThemedView style={styles.sectionGroup}>
+                <ThemedText type="defaultSemiBold">Line Color</ThemedText>
+                <ThemedView style={styles.inlineOptions}>
+                  {['#ffffff', '#d1d5db', '#9ca3af', '#1f2937', '#0f172a'].map(
+                    (value) => (
+                      <Pressable
+                        key={`line-color-${value}`}
+                        onPress={() => {
+                          if (!activeFileId) {
+                            return;
+                          }
+                          upsertActiveFile({
+                            tiles,
+                            gridLayout,
+                            category: selectedCategory,
+                            preferredTileSize: fileTileSize,
+                            lineWidth: activeLineWidth,
+                            lineColor: value,
+                          });
+                        }}
+                        style={[
+                          styles.colorSwatch,
+                          { backgroundColor: value },
+                          activeLineColor === value && styles.colorSwatchSelected,
+                        ]}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Set line color to ${value}`}
+                      />
+                    )
+                  )}
+                </ThemedView>
               </ThemedView>
             </ThemedView>
           </ThemedView>
@@ -1521,6 +1618,25 @@ const styles = StyleSheet.create({
   },
   overlayList: {
     gap: 8,
+  },
+  sectionGroup: {
+    gap: 8,
+  },
+  inlineOptions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  colorSwatch: {
+    width: 32,
+    height: 32,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#1f1f1f',
+  },
+  colorSwatchSelected: {
+    borderColor: '#22c55e',
+    borderWidth: 2,
   },
   overlayItem: {
     paddingVertical: 10,

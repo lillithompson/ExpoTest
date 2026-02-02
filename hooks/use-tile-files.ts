@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { type TileCategory } from '@/assets/images/tiles/manifest';
+import { TILE_CATEGORIES, type TileCategory } from '@/assets/images/tiles/manifest';
 import { renderTileCanvasToDataUrl } from '@/utils/tile-export';
 import { type GridLayout, type Tile } from '@/utils/tile-grid';
 
@@ -12,6 +12,8 @@ export type TileFile = {
   grid: { rows: number; columns: number };
   category: TileCategory;
   preferredTileSize: number;
+  lineWidth: number;
+  lineColor: string;
   thumbnailUri: string | null;
   updatedAt: number;
 };
@@ -29,6 +31,8 @@ const defaultFile = (category: TileCategory): TileFile => ({
   grid: { rows: 0, columns: 0 },
   category,
   preferredTileSize: 45,
+  lineWidth: 1,
+  lineColor: '#ffffff',
   thumbnailUri: null,
   updatedAt: Date.now(),
 });
@@ -52,14 +56,18 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
           return;
         }
         const fallbackCategory = defaultCategoryRef.current;
+        const isValidCategory = (value: unknown): value is TileCategory =>
+          typeof value === 'string' && (TILE_CATEGORIES as string[]).includes(value);
         const parsed = filesRaw
           ? (JSON.parse(filesRaw) as Array<Partial<TileFile>>).map((file) => ({
               id: file.id ?? createId(),
               name: file.name ?? 'Canvas',
               tiles: file.tiles ?? [],
               grid: file.grid ?? { rows: 0, columns: 0 },
-              category: (file.category ?? fallbackCategory) as TileCategory,
+              category: isValidCategory(file.category) ? file.category : fallbackCategory,
               preferredTileSize: file.preferredTileSize ?? 45,
+              lineWidth: file.lineWidth ?? 1,
+              lineColor: file.lineColor ?? '#ffffff',
               thumbnailUri: file.thumbnailUri ?? null,
               updatedAt: file.updatedAt ?? Date.now(),
             }))
@@ -115,6 +123,8 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
       gridLayout: GridLayout;
       category: TileCategory;
       preferredTileSize: number;
+      lineWidth?: number;
+      lineColor?: string;
       thumbnailUri?: string | null;
     }) => {
       if (!activeFileId) {
@@ -129,6 +139,10 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
                 grid: { rows: payload.gridLayout.rows, columns: payload.gridLayout.columns },
                 category: payload.category,
                 preferredTileSize: payload.preferredTileSize,
+                lineWidth:
+                  payload.lineWidth !== undefined ? payload.lineWidth : file.lineWidth,
+                lineColor:
+                  payload.lineColor !== undefined ? payload.lineColor : file.lineColor,
                 thumbnailUri:
                   payload.thumbnailUri !== undefined
                     ? payload.thumbnailUri
@@ -167,11 +181,13 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
         name: `Canvas ${Date.now()}`,
         tiles: [],
         grid: { rows: 0, columns: 0 },
-        category,
-        preferredTileSize,
-        thumbnailUri: null,
-        updatedAt: Date.now(),
-      };
+      category,
+      preferredTileSize,
+      lineWidth: 1,
+      lineColor: '#ffffff',
+      thumbnailUri: null,
+      updatedAt: Date.now(),
+    };
       setFiles((prev) => {
         const next = [nextFile, ...prev];
         void persistFiles(next, nextFile.id);
