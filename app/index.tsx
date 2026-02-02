@@ -7,7 +7,6 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   useWindowDimensions,
   View,
 } from 'react-native';
@@ -198,10 +197,9 @@ export default function TestScreen() {
   });
   const [showTileSetOverlay, setShowTileSetOverlay] = useState(false);
   const [showSettingsOverlay, setShowSettingsOverlay] = useState(false);
+  const [showNewFileModal, setShowNewFileModal] = useState(false);
   const [fileMenuTargetId, setFileMenuTargetId] = useState<string | null>(null);
-  const [preferredTileSizeInput, setPreferredTileSizeInput] = useState(
-    String(settings.preferredTileSize)
-  );
+  const NEW_FILE_TILE_SIZES = [25, 50, 75, 100, 150, 200] as const;
   const [viewMode, setViewMode] = useState<'modify' | 'file'>('file');
   const [brush, setBrush] = useState<
     | { mode: 'random' }
@@ -215,7 +213,6 @@ export default function TestScreen() {
     {}
   );
   const [paletteMirrors, setPaletteMirrors] = useState<Record<number, boolean>>({});
-  const preferredTileSize = settings.preferredTileSize;
   const tileSources = TILE_MANIFEST[selectedCategory] ?? [];
   const isWeb = Platform.OS === 'web';
   const shouldUseAspectRatio = isWeb;
@@ -256,6 +253,8 @@ export default function TestScreen() {
     ready,
   } = useTileFiles(selectedCategory);
 
+  const fileTileSize = activeFile?.preferredTileSize ?? settings.preferredTileSize;
+
   const {
     gridLayout,
     tiles,
@@ -274,7 +273,7 @@ export default function TestScreen() {
     availableWidth,
     availableHeight,
     gridGap: GRID_GAP,
-    preferredTileSize,
+    preferredTileSize: fileTileSize,
     allowEdgeConnections: settings.allowEdgeConnections,
     brush,
     mirrorHorizontal: settings.mirrorHorizontal,
@@ -294,7 +293,6 @@ export default function TestScreen() {
   const lastPaintedRef = useRef<number | null>(null);
   const longPressTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const longPressTriggeredRef = useRef(false);
-  const preferredSizeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastLoadedFileRef = useRef<string | null>(null);
   const isHydratingFileRef = useRef(false);
@@ -325,38 +323,10 @@ export default function TestScreen() {
   }, [selectedCategory, settings.selectedTileCategory]);
 
   useEffect(() => {
-    setPreferredTileSizeInput(String(settings.preferredTileSize));
-  }, [settings.preferredTileSize]);
-
-  useEffect(() => {
     if (brush.mode !== 'clone') {
       clearCloneSource();
     }
   }, [brush.mode, clearCloneSource]);
-
-  useEffect(() => {
-    if (preferredSizeTimeoutRef.current) {
-      clearTimeout(preferredSizeTimeoutRef.current);
-    }
-    preferredSizeTimeoutRef.current = setTimeout(() => {
-      const parsed = Math.floor(Number(preferredTileSizeInput));
-      if (!Number.isNaN(parsed)) {
-        const clamped = Math.min(512, Math.max(20, parsed));
-        if (clamped !== settings.preferredTileSize) {
-          setSettings((prev) => ({ ...prev, preferredTileSize: clamped }));
-        }
-        if (String(clamped) !== preferredTileSizeInput) {
-          setPreferredTileSizeInput(String(clamped));
-        }
-      }
-    }, 250);
-
-    return () => {
-      if (preferredSizeTimeoutRef.current) {
-        clearTimeout(preferredSizeTimeoutRef.current);
-      }
-    };
-  }, [preferredTileSizeInput, settings.preferredTileSize, setSettings]);
 
   useEffect(() => {
     if (!ready || !activeFile) {
@@ -369,12 +339,6 @@ export default function TestScreen() {
     if (activeFile.category !== selectedCategory) {
       setSelectedCategory(activeFile.category);
     }
-    if (activeFile.preferredTileSize !== settings.preferredTileSize) {
-      setSettings((prev) => ({
-        ...prev,
-        preferredTileSize: activeFile.preferredTileSize,
-      }));
-    }
     pendingRestoreRef.current = {
       fileId: activeFile.id,
       tiles: activeFile.tiles,
@@ -383,31 +347,22 @@ export default function TestScreen() {
       preferredTileSize: activeFile.preferredTileSize,
     };
     isHydratingFileRef.current = true;
-  }, [activeFile, ready, selectedCategory, settings.preferredTileSize, setSettings]);
+  }, [activeFile, ready, selectedCategory]);
 
   useEffect(() => {
     const pending = pendingRestoreRef.current;
     if (!pending || activeFileId !== pending.fileId) {
       return;
     }
-    if (settings.preferredTileSize !== pending.preferredTileSize) {
-      return;
-    }
     const gridMatches =
       pending.rows === gridLayout.rows && pending.columns === gridLayout.columns;
     const allowFallback = pending.rows === 0 || pending.columns === 0;
-    if (gridMatches || allowFallback || pending.tiles.length > 0) {
+    if (gridLayout.tileSize > 0 && (gridMatches || allowFallback || pending.tiles.length > 0)) {
       loadTiles(pending.tiles);
       pendingRestoreRef.current = null;
       isHydratingFileRef.current = false;
     }
-  }, [
-    activeFileId,
-    gridLayout.columns,
-    gridLayout.rows,
-    settings.preferredTileSize,
-    loadTiles,
-  ]);
+  }, [activeFileId, gridLayout.tileSize, gridLayout.columns, gridLayout.rows, loadTiles]);
 
   useEffect(() => {
     if (!ready || !activeFileId) {
@@ -435,7 +390,7 @@ export default function TestScreen() {
           tiles,
           gridLayout,
           category: selectedCategory,
-          preferredTileSize: settings.preferredTileSize,
+          preferredTileSize: fileTileSize,
           thumbnailUri,
         });
       })();
@@ -445,15 +400,7 @@ export default function TestScreen() {
         clearTimeout(saveTimeoutRef.current);
       }
     };
-  }, [
-    tiles,
-    gridLayout,
-    selectedCategory,
-    settings.preferredTileSize,
-    ready,
-    activeFileId,
-    upsertActiveFile,
-  ]);
+  }, [tiles, gridLayout, selectedCategory, fileTileSize, ready, activeFileId, upsertActiveFile]);
 
   const handleDownload = async () => {
     const result = await exportTileCanvasAsPng({
@@ -557,7 +504,7 @@ export default function TestScreen() {
       tiles,
       gridLayout,
       category: selectedCategory,
-      preferredTileSize: settings.preferredTileSize,
+      preferredTileSize: fileTileSize,
       thumbnailUri,
     });
   };
@@ -571,12 +518,6 @@ export default function TestScreen() {
     lastLoadedFileRef.current = file.id;
     if (file.category !== selectedCategory) {
       setSelectedCategory(file.category);
-    }
-    if (file.preferredTileSize !== settings.preferredTileSize) {
-      setSettings((prev) => ({
-        ...prev,
-        preferredTileSize: file.preferredTileSize,
-      }));
     }
     pendingRestoreRef.current = {
       fileId: file.id,
@@ -627,19 +568,7 @@ export default function TestScreen() {
               icon="plus"
               color="#fff"
               onPress={() => {
-                const newId = createFile(selectedCategory, settings.preferredTileSize);
-                if (newId) {
-                  lastLoadedFileRef.current = newId;
-                  pendingRestoreRef.current = {
-                    fileId: newId,
-                    tiles: [],
-                    rows: 0,
-                    columns: 0,
-                    preferredTileSize: settings.preferredTileSize,
-                  };
-                  isHydratingFileRef.current = true;
-                }
-                setViewMode('modify');
+                setShowNewFileModal(true);
               }}
             />
             <ToolbarButton
@@ -770,6 +699,47 @@ export default function TestScreen() {
             </ThemedView>
           </ThemedView>
         )}
+        {showNewFileModal && (
+          <ThemedView style={styles.overlay} accessibilityRole="dialog">
+            <Pressable
+              style={styles.overlayBackdrop}
+              onPress={() => setShowNewFileModal(false)}
+              accessibilityRole="button"
+              accessibilityLabel="Close new file options"
+            />
+            <ThemedView style={styles.newFilePanel}>
+              <ThemedText type="title">New File Tile Size</ThemedText>
+              <ThemedView style={styles.newFileGrid}>
+                {NEW_FILE_TILE_SIZES.map((size) => (
+                  <Pressable
+                    key={`new-file-size-${size}`}
+                    onPress={() => {
+                      const newId = createFile(selectedCategory, size);
+                      if (newId) {
+                        lastLoadedFileRef.current = newId;
+                        pendingRestoreRef.current = {
+                          fileId: newId,
+                          tiles: [],
+                          rows: 0,
+                          columns: 0,
+                          preferredTileSize: size,
+                        };
+                        isHydratingFileRef.current = true;
+                      }
+                      setShowNewFileModal(false);
+                      setViewMode('modify');
+                    }}
+                    style={styles.newFileButton}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Create file with tile size ${size}`}
+                  >
+                    <ThemedText type="defaultSemiBold">{size}</ThemedText>
+                  </Pressable>
+                ))}
+              </ThemedView>
+            </ThemedView>
+          </ThemedView>
+        )}
         {showSettingsOverlay && (
           <ThemedView style={styles.overlay} accessibilityRole="dialog">
             <Pressable
@@ -780,26 +750,6 @@ export default function TestScreen() {
             />
             <ThemedView style={styles.overlayPanel}>
               <ThemedText type="title">Settings</ThemedText>
-              <ThemedView style={styles.inputGroup}>
-                <ThemedText type="defaultSemiBold">Preferred Tile Size</ThemedText>
-                <TextInput
-                  style={styles.input}
-                  keyboardType="number-pad"
-                  value={preferredTileSizeInput}
-                  onChangeText={setPreferredTileSizeInput}
-                  onEndEditing={() => {
-                    const parsed = Math.floor(Number(preferredTileSizeInput));
-                    if (!Number.isNaN(parsed)) {
-                      const clamped = Math.min(512, Math.max(20, parsed));
-                      setSettings((prev) => ({ ...prev, preferredTileSize: clamped }));
-                      if (String(clamped) !== preferredTileSizeInput) {
-                        setPreferredTileSizeInput(String(clamped));
-                      }
-                    }
-                  }}
-                  accessibilityLabel="Preferred tile size"
-                />
-              </ThemedView>
               <ThemedView style={styles.presetGroup}>
                 <ThemedText type="defaultSemiBold">Aspect Ratio</ThemedText>
                 <ThemedView style={styles.presetButtons}>
@@ -1196,26 +1146,6 @@ export default function TestScreen() {
             />
             <ThemedView style={styles.overlayPanel}>
               <ThemedText type="title">Settings</ThemedText>
-              <ThemedView style={styles.inputGroup}>
-                <ThemedText type="defaultSemiBold">Preferred Tile Size</ThemedText>
-                <TextInput
-                  style={styles.input}
-                  keyboardType="number-pad"
-                  value={preferredTileSizeInput}
-                  onChangeText={setPreferredTileSizeInput}
-                  onEndEditing={() => {
-                    const parsed = Math.floor(Number(preferredTileSizeInput));
-                    if (!Number.isNaN(parsed)) {
-                      const clamped = Math.min(512, Math.max(20, parsed));
-                      setSettings((prev) => ({ ...prev, preferredTileSize: clamped }));
-                      if (String(clamped) !== preferredTileSizeInput) {
-                        setPreferredTileSizeInput(String(clamped));
-                      }
-                    }
-                  }}
-                  accessibilityLabel="Preferred tile size"
-                />
-              </ThemedView>
               <ThemedView style={styles.presetGroup}>
                 <ThemedText type="defaultSemiBold">Aspect Ratio</ThemedText>
                 <ThemedView style={styles.presetButtons}>
@@ -1491,6 +1421,30 @@ const styles = StyleSheet.create({
   },
   fileMenuDeleteText: {
     color: '#dc2626',
+  },
+  newFilePanel: {
+    width: 260,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#1f1f1f',
+    backgroundColor: '#fff',
+    padding: 16,
+    gap: 12,
+  },
+  newFileGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    justifyContent: 'space-between',
+  },
+  newFileButton: {
+    width: '30%',
+    paddingVertical: 10,
+    borderWidth: 1,
+    borderColor: '#1f1f1f',
+    borderRadius: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   contentFrame: {
     alignSelf: 'center',
