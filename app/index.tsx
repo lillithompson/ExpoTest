@@ -1,5 +1,6 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Alert,
   Image,
   Platform,
   Pressable,
@@ -9,6 +10,9 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
+import * as FileSystem from 'expo-file-system';
+import * as Sharing from 'expo-sharing';
+import ViewShot from 'react-native-view-shot';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -26,7 +30,7 @@ import { usePersistedSettings } from '@/hooks/use-persisted-settings';
 import { useTileFiles } from '@/hooks/use-tile-files';
 import { renderTileCanvasToDataUrl } from '@/utils/tile-export';
 import { getTransformedConnectionsForName } from '@/utils/tile-compat';
-import { type Tile } from '@/utils/tile-grid';
+import { normalizeTiles, type Tile } from '@/utils/tile-grid';
 
 const GRID_GAP = 0;
 const CONTENT_PADDING = 0;
@@ -198,6 +202,11 @@ export default function TestScreen() {
   const [showSettingsOverlay, setShowSettingsOverlay] = useState(false);
   const [showNewFileModal, setShowNewFileModal] = useState(false);
   const [fileMenuTargetId, setFileMenuTargetId] = useState<string | null>(null);
+  const [downloadTargetId, setDownloadTargetId] = useState<string | null>(null);
+  const [isDownloading, setIsDownloading] = useState(false);
+  const [showDownloadOverlay, setShowDownloadOverlay] = useState(false);
+  const [downloadRenderKey, setDownloadRenderKey] = useState(0);
+  const [downloadLoadedCount, setDownloadLoadedCount] = useState(0);
   const NEW_FILE_TILE_SIZES = [25, 50, 75, 100, 150, 200] as const;
   const [viewMode, setViewMode] = useState<'modify' | 'file'>('file');
   const [brush, setBrush] = useState<
@@ -296,6 +305,9 @@ export default function TestScreen() {
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastLoadedFileRef = useRef<string | null>(null);
   const isHydratingFileRef = useRef(false);
+  const viewShotRef = useRef<ViewShot>(null);
+  const downloadTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const downloadExpectedRef = useRef(0);
   const pendingRestoreRef = useRef<{
     fileId: string;
     tiles: Tile[];
@@ -310,6 +322,10 @@ export default function TestScreen() {
   const columnIndices = useMemo(
     () => Array.from({ length: gridLayout.columns }, (_, index) => index),
     [gridLayout.columns]
+  );
+  const downloadTargetFile = useMemo(
+    () => files.find((file) => file.id === downloadTargetId) ?? null,
+    [files, downloadTargetId]
   );
 
   useEffect(() => {
@@ -495,6 +511,105 @@ export default function TestScreen() {
     });
   };
 
+  useEffect(() => {
+    if (!downloadTargetFile) {
+      return;
+    }
+    if (Platform.OS === 'web') {
+      return;
+    }
+    if (downloadTargetFile.grid.rows <= 0 || downloadTargetFile.grid.columns <= 0) {
+      setDownloadTargetId(null);
+      return;
+    }
+    setDownloadLoadedCount(0);
+    const sources = TILE_MANIFEST[downloadTargetFile.category] ?? [];
+    const total = downloadTargetFile.grid.rows * downloadTargetFile.grid.columns;
+    const normalized = normalizeTiles(downloadTargetFile.tiles, total, sources.length);
+    const expected = normalized.filter(
+      (tile) => tile && tile.imageIndex >= 0 && sources[tile.imageIndex]?.source
+    ).length;
+    downloadExpectedRef.current = expected;
+    setDownloadRenderKey((prev) => prev + 1);
+    setShowDownloadOverlay(true);
+  }, [downloadTargetFile]);
+
+  useEffect(() => {
+    if (!downloadTargetFile || isDownloading || Platform.OS === 'web') {
+      return;
+    }
+    const captureAndShare = async () => {
+      const canShare = await Sharing.isAvailableAsync();
+      if (!canShare) {
+        Alert.alert('Download unavailable', 'Sharing is not available on this device.');
+        return false;
+      }
+      for (let attempt = 0; attempt < 6; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 120));
+        const uri = await viewShotRef.current?.capture?.({
+          format: 'png',
+          quality: 1,
+          result: 'tmpfile',
+        });
+        if (uri) {
+          const safeName = downloadTargetFile.name.replace(/[^\w-]+/g, '_');
+          const target = `${FileSystem.cacheDirectory}${safeName}.png`;
+          await FileSystem.copyAsync({ from: uri, to: target });
+          await Sharing.shareAsync(target);
+          return true;
+        }
+      }
+      Alert.alert('Download failed', 'Unable to capture the canvas image.');
+      return false;
+    };
+
+    const expected = downloadExpectedRef.current;
+    const loaded = downloadLoadedCount;
+    const trigger = expected === 0 || loaded >= expected;
+    if (!trigger) {
+      if (downloadTimeoutRef.current) {
+        clearTimeout(downloadTimeoutRef.current);
+      }
+      downloadTimeoutRef.current = setTimeout(() => {
+        setIsDownloading(true);
+        void (async () => {
+          try {
+            await captureAndShare();
+          } finally {
+            setIsDownloading(false);
+            setDownloadTargetId(null);
+            setShowDownloadOverlay(false);
+          }
+        })();
+      }, 1500);
+      return () => {
+        if (downloadTimeoutRef.current) {
+          clearTimeout(downloadTimeoutRef.current);
+          downloadTimeoutRef.current = null;
+        }
+      };
+    }
+    setIsDownloading(true);
+    const timer = setTimeout(() => {
+      void (async () => {
+        try {
+          await captureAndShare();
+        } finally {
+          setIsDownloading(false);
+          setDownloadTargetId(null);
+          setShowDownloadOverlay(false);
+        }
+      })();
+    }, 200);
+    return () => {
+      clearTimeout(timer);
+      if (downloadTimeoutRef.current) {
+        clearTimeout(downloadTimeoutRef.current);
+        downloadTimeoutRef.current = null;
+      }
+    };
+  }, [downloadTargetFile, isDownloading, downloadRenderKey, downloadLoadedCount]);
+
   const openFileInModifyView = async (fileId: string) => {
     await persistActiveFileNow();
     const file = files.find((entry) => entry.id === fileId);
@@ -649,6 +764,150 @@ export default function TestScreen() {
             );
           })}
         </ScrollView>
+        {downloadTargetFile && Platform.OS !== 'web' && showDownloadOverlay && (
+          <ThemedView style={styles.overlay} accessibilityRole="dialog">
+            <View style={styles.overlayBackdrop} />
+          <ThemedView style={styles.downloadPanel}>
+              <ViewShot
+                ref={viewShotRef}
+                collapsable={false}
+                key={`download-shot-${downloadRenderKey}`}
+                options={{ format: 'png', quality: 1 }}
+                style={[
+                  styles.downloadPreview,
+                  {
+                    width:
+                      downloadTargetFile.grid.columns *
+                      downloadTargetFile.preferredTileSize,
+                    height:
+                      downloadTargetFile.grid.rows * downloadTargetFile.preferredTileSize,
+                  },
+                ]}
+              >
+                {(() => {
+                  const sources = TILE_MANIFEST[downloadTargetFile.category] ?? [];
+                  const total =
+                    downloadTargetFile.grid.rows * downloadTargetFile.grid.columns;
+                  const tiles = normalizeTiles(
+                    downloadTargetFile.tiles,
+                    total,
+                    sources.length
+                  );
+                  return Array.from(
+                    { length: downloadTargetFile.grid.rows },
+                    (_, rowIndex) => (
+                      <View key={`capture-row-${rowIndex}`} style={styles.captureRow}>
+                        {Array.from(
+                          { length: downloadTargetFile.grid.columns },
+                          (_, colIndex) => {
+                            const index =
+                              rowIndex * downloadTargetFile.grid.columns + colIndex;
+                            const tile = tiles[index];
+                            const source =
+                              tile && tile.imageIndex >= 0
+                                ? sources[tile.imageIndex]?.source
+                                : null;
+                            return (
+                              <View
+                                key={`capture-cell-${index}`}
+                                style={[
+                                  styles.captureCell,
+                                  {
+                                    width: downloadTargetFile.preferredTileSize,
+                                    height: downloadTargetFile.preferredTileSize,
+                                  },
+                                ]}
+                              >
+                                {source && (
+                                  <Image
+                                    source={source}
+                                    style={[
+                                      styles.captureImage,
+                                      {
+                                        transform: [
+                                          { scaleX: tile?.mirrorX ? -1 : 1 },
+                                          { scaleY: tile?.mirrorY ? -1 : 1 },
+                                          { rotate: `${tile?.rotation ?? 0}deg` },
+                                        ],
+                                      },
+                                    ]}
+                                    resizeMode="cover"
+                                    onLoad={() => {
+                                      setDownloadLoadedCount((count) => count + 1);
+                                    }}
+                                  />
+                                )}
+                              </View>
+                            );
+                          }
+                        )}
+                      </View>
+                    )
+                  );
+                })()}
+              </ViewShot>
+              <ThemedView style={styles.downloadActions}>
+                <Pressable
+                  style={styles.downloadActionButton}
+                  onPress={() => {
+                    setShowDownloadOverlay(false);
+                    setDownloadTargetId(null);
+                  }}
+                  accessibilityRole="button"
+                  accessibilityLabel="Cancel download"
+                >
+                  <ThemedText type="defaultSemiBold" style={styles.downloadCancelText}>
+                    Cancel
+                  </ThemedText>
+                </Pressable>
+                <Pressable
+                  style={[styles.downloadActionButton, styles.downloadPrimaryButton]}
+                  onPress={() => {
+                    setIsDownloading(true);
+                    void (async () => {
+                      try {
+                        const canShare = await Sharing.isAvailableAsync();
+                        if (!canShare) {
+                          Alert.alert(
+                            'Download unavailable',
+                            'Sharing is not available on this device.'
+                          );
+                          return;
+                        }
+                        const uri = await viewShotRef.current?.capture?.({
+                          format: 'png',
+                          quality: 1,
+                          result: 'tmpfile',
+                        });
+                        if (!uri) {
+                          Alert.alert('Download failed', 'Unable to capture the canvas image.');
+                          return;
+                        }
+                        const safeName = downloadTargetFile.name.replace(/[^\w-]+/g, '_');
+                        const target = `${FileSystem.cacheDirectory}${safeName}.png`;
+                        await FileSystem.copyAsync({ from: uri, to: target });
+                        await Sharing.shareAsync(target);
+                      } finally {
+                        setIsDownloading(false);
+                        setDownloadTargetId(null);
+                        setShowDownloadOverlay(false);
+                      }
+                    })();
+                  }}
+                  accessibilityRole="button"
+                  accessibilityLabel="Download now"
+                >
+                  <ThemedText
+                    type="defaultSemiBold"
+                    style={[styles.downloadActionText, styles.downloadPrimaryText]}
+                  >
+                    Download
+                  </ThemedText>
+                </Pressable>
+              </ThemedView>
+            </ThemedView>
+          </ThemedView>
+        )}
         {fileMenuTargetId && (
           <ThemedView style={styles.overlay} accessibilityRole="dialog">
             <Pressable
@@ -663,8 +922,12 @@ export default function TestScreen() {
                 onPress={() => {
                   const file = files.find((entry) => entry.id === fileMenuTargetId);
                   if (file) {
-                    const sources = TILE_MANIFEST[file.category] ?? [];
-                    void downloadFile(file, sources);
+                    if (Platform.OS === 'web') {
+                      const sources = TILE_MANIFEST[file.category] ?? [];
+                      void downloadFile(file, sources);
+                    } else {
+                      setDownloadTargetId(file.id);
+                    }
                   }
                   setFileMenuTargetId(null);
                 }}
@@ -1417,6 +1680,61 @@ const styles = StyleSheet.create({
   },
   fileMenuDeleteText: {
     color: '#dc2626',
+  },
+  downloadPanel: {
+    borderRadius: 12,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    padding: 12,
+    gap: 12,
+    alignItems: 'center',
+  },
+  downloadPreview: {
+    backgroundColor: '#000',
+  },
+  downloadActions: {
+    flexDirection: 'row',
+    gap: 8,
+    justifyContent: 'space-between',
+    width: '100%',
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    paddingVertical: 8,
+    paddingHorizontal: 6,
+    borderRadius: 10,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.18)',
+  },
+  downloadActionButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    backgroundColor: 'transparent',
+    minWidth: 72,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  downloadPrimaryButton: {
+    backgroundColor: 'transparent',
+  },
+  downloadActionText: {
+    color: '#fff',
+  },
+  downloadCancelText: {
+    color: '#9ca3af',
+  },
+  downloadPrimaryText: {
+    color: '#fff',
+    fontWeight: '400',
+  },
+  captureRow: {
+    flexDirection: 'row',
+  },
+  captureCell: {
+    width: '100%',
+    height: '100%',
+  },
+  captureImage: {
+    width: '100%',
+    height: '100%',
   },
   newFilePanel: {
     width: 260,
