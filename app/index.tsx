@@ -6,6 +6,7 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   useWindowDimensions,
   View,
@@ -1041,36 +1042,26 @@ export default function TestScreen() {
                   ))}
                 </ThemedView>
               </ThemedView>
-              <ThemedView style={styles.inputGroup}>
+              <ThemedView style={styles.toggleRow}>
                 <ThemedText type="defaultSemiBold">AllowEdgeConections</ThemedText>
-                <Pressable
-                  onPress={() =>
-                    setSettings((prev) => ({
-                      ...prev,
-                      allowEdgeConnections: !prev.allowEdgeConnections,
-                    }))
+                <Switch
+                  value={settings.allowEdgeConnections}
+                  onValueChange={(value) =>
+                    setSettings((prev) => ({ ...prev, allowEdgeConnections: value }))
                   }
-                  style={styles.resetButton}
-                  accessibilityRole="button"
                   accessibilityLabel="Toggle edge connections"
-                >
-                  <ThemedText type="defaultSemiBold">
-                    {settings.allowEdgeConnections ? 'On' : 'Off'}
-                  </ThemedText>
-                </Pressable>
+                />
               </ThemedView>
-              <Pressable
-                onPress={() =>
-                  setSettings((prev) => ({ ...prev, showDebug: !prev.showDebug }))
-                }
-                style={styles.resetButton}
-                accessibilityRole="button"
-                accessibilityLabel="Toggle debug overlay"
-              >
-                <ThemedText type="defaultSemiBold">
-                  {settings.showDebug ? 'Hide Debug' : 'Show Debug'}
-                </ThemedText>
-              </Pressable>
+              <ThemedView style={styles.toggleRow}>
+                <ThemedText type="defaultSemiBold">Show Debug</ThemedText>
+                <Switch
+                  value={settings.showDebug}
+                  onValueChange={(value) =>
+                    setSettings((prev) => ({ ...prev, showDebug: value }))
+                  }
+                  accessibilityLabel="Toggle debug overlay"
+                />
+              </ThemedView>
             </ThemedView>
           </ThemedView>
         )}
@@ -1433,23 +1424,15 @@ export default function TestScreen() {
                   ))}
                 </ThemedView>
               </ThemedView>
-              <ThemedView style={styles.inputGroup}>
+              <ThemedView style={styles.toggleRow}>
                 <ThemedText type="defaultSemiBold">AllowEdgeConections</ThemedText>
-                <Pressable
-                  onPress={() =>
-                    setSettings((prev) => ({
-                      ...prev,
-                      allowEdgeConnections: !prev.allowEdgeConnections,
-                    }))
+                <Switch
+                  value={settings.allowEdgeConnections}
+                  onValueChange={(value) =>
+                    setSettings((prev) => ({ ...prev, allowEdgeConnections: value }))
                   }
-                  style={styles.resetButton}
-                  accessibilityRole="button"
                   accessibilityLabel="Toggle edge connections"
-                >
-                  <ThemedText type="defaultSemiBold">
-                    {settings.allowEdgeConnections ? 'On' : 'Off'}
-                  </ThemedText>
-                </Pressable>
+                />
               </ThemedView>
               <Pressable
                 onPress={handleDownload}
@@ -1459,18 +1442,16 @@ export default function TestScreen() {
               >
                 <ThemedText type="defaultSemiBold">Download PNG</ThemedText>
               </Pressable>
-              <Pressable
-                onPress={() =>
-                  setSettings((prev) => ({ ...prev, showDebug: !prev.showDebug }))
-                }
-                style={styles.resetButton}
-                accessibilityRole="button"
-                accessibilityLabel="Toggle debug overlay"
-              >
-                <ThemedText type="defaultSemiBold">
-                  {settings.showDebug ? 'Hide Debug' : 'Show Debug'}
-                </ThemedText>
-              </Pressable>
+              <ThemedView style={styles.toggleRow}>
+                <ThemedText type="defaultSemiBold">Show Debug</ThemedText>
+                <Switch
+                  value={settings.showDebug}
+                  onValueChange={(value) =>
+                    setSettings((prev) => ({ ...prev, showDebug: value }))
+                  }
+                  accessibilityLabel="Toggle debug overlay"
+                />
+              </ThemedView>
             </ThemedView>
           </ThemedView>
         )}
@@ -1512,6 +1493,12 @@ const styles = StyleSheet.create({
     borderRadius: 6,
     paddingHorizontal: 8,
     paddingVertical: 4,
+  },
+  toggleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
   },
   input: {
     minWidth: 48,
