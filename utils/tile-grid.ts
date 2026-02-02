@@ -127,3 +127,19 @@ export const computeGridLayout = (
   );
   return candidates[0];
 };
+
+export const computeFixedGridLayout = (
+  availableWidth: number,
+  availableHeight: number,
+  gridGap: number,
+  rows: number,
+  columns: number
+): GridLayout => {
+  if (availableWidth <= 0 || availableHeight <= 0 || rows <= 0 || columns <= 0) {
+    return { columns, rows, tileSize: 0 };
+  }
+  const maxTileWidth = (availableWidth - gridGap * Math.max(0, columns - 1)) / columns;
+  const maxTileHeight = (availableHeight - gridGap * Math.max(0, rows - 1)) / rows;
+  const tileSize = Math.max(0, Math.floor(Math.min(maxTileWidth, maxTileHeight)));
+  return { columns, rows, tileSize };
+};

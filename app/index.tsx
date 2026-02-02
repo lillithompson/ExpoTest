@@ -220,14 +220,8 @@ export default function TestScreen() {
   const [paletteMirrors, setPaletteMirrors] = useState<Record<number, boolean>>({});
   const tileSources = TILE_MANIFEST[selectedCategory] ?? [];
   const isWeb = Platform.OS === 'web';
-  const shouldUseAspectRatio = isWeb;
-  const aspectRatio = shouldUseAspectRatio
-    ? settings.aspectPreset === 'iphone15'
-      ? 2556 / 1179
-      : settings.aspectPreset === 'ipadpro'
-        ? 2732 / 2048
-        : null
-    : null;
+  const shouldUseAspectRatio = false;
+  const aspectRatio = null;
   const safeWidth = Math.max(0, width);
   const safeHeight = Math.max(0, height - insets.top);
   const contentWidth = aspectRatio
@@ -282,6 +276,8 @@ export default function TestScreen() {
     preferredTileSize: fileTileSize,
     allowEdgeConnections: settings.allowEdgeConnections,
     suspendRemap: isHydratingFile,
+    fixedRows: activeFile?.grid.rows ?? 0,
+    fixedColumns: activeFile?.grid.columns ?? 0,
     brush,
     mirrorHorizontal: settings.mirrorHorizontal,
     mirrorVertical: settings.mirrorVertical,
@@ -1017,31 +1013,6 @@ export default function TestScreen() {
             />
             <ThemedView style={styles.overlayPanel}>
               <ThemedText type="title">Settings</ThemedText>
-              <ThemedView style={styles.presetGroup}>
-                <ThemedText type="defaultSemiBold">Aspect Ratio</ThemedText>
-                <ThemedView style={styles.presetButtons}>
-                  {[
-                    { key: 'iphone15' as const, label: 'iPhone 15' },
-                    { key: 'ipadpro' as const, label: 'iPad Pro' },
-                    { key: 'web' as const, label: 'Web' },
-                  ].map((preset) => (
-                    <Pressable
-                      key={preset.key}
-                      onPress={() =>
-                        setSettings((prev) => ({ ...prev, aspectPreset: preset.key }))
-                      }
-                      style={[
-                        styles.resetButton,
-                        settings.aspectPreset === preset.key && styles.overlayItemSelected,
-                      ]}
-                      accessibilityRole="button"
-                      accessibilityLabel={`Set aspect ratio to ${preset.label}`}
-                    >
-                      <ThemedText type="defaultSemiBold">{preset.label}</ThemedText>
-                    </Pressable>
-                  ))}
-                </ThemedView>
-              </ThemedView>
               <ThemedView style={styles.toggleRow}>
                 <ThemedText type="defaultSemiBold">AllowEdgeConections</ThemedText>
                 <Switch
@@ -1399,31 +1370,6 @@ export default function TestScreen() {
             />
             <ThemedView style={styles.overlayPanel}>
               <ThemedText type="title">Settings</ThemedText>
-              <ThemedView style={styles.presetGroup}>
-                <ThemedText type="defaultSemiBold">Aspect Ratio</ThemedText>
-                <ThemedView style={styles.presetButtons}>
-                  {[
-                    { key: 'iphone15' as const, label: 'iPhone 15' },
-                    { key: 'ipadpro' as const, label: 'iPad Pro' },
-                    { key: 'web' as const, label: 'Web' },
-                  ].map((preset) => (
-                    <Pressable
-                      key={preset.key}
-                      onPress={() =>
-                        setSettings((prev) => ({ ...prev, aspectPreset: preset.key }))
-                      }
-                      style={[
-                        styles.resetButton,
-                        settings.aspectPreset === preset.key && styles.overlayItemSelected,
-                      ]}
-                      accessibilityRole="button"
-                      accessibilityLabel={`Set aspect ratio to ${preset.label}`}
-                    >
-                      <ThemedText type="defaultSemiBold">{preset.label}</ThemedText>
-                    </Pressable>
-                  ))}
-                </ThemedView>
-              </ThemedView>
               <ThemedView style={styles.toggleRow}>
                 <ThemedText type="defaultSemiBold">AllowEdgeConections</ThemedText>
                 <Switch
@@ -1757,14 +1703,6 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
     position: 'relative',
     backgroundColor: '#3F3F3F',
-  },
-  presetGroup: {
-    gap: 8,
-  },
-  presetButtons: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
   },
   grid: {
     alignContent: 'flex-start',

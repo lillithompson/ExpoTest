@@ -4,6 +4,7 @@ import { type TileSource } from '@/assets/images/tiles/manifest';
 import { parseTileConnections, transformConnections } from '@/utils/tile-compat';
 import {
   buildInitialTiles,
+  computeFixedGridLayout,
   computeGridLayout,
   normalizeTiles,
   pickRotation,
@@ -19,6 +20,8 @@ type Params = {
   preferredTileSize: number;
   allowEdgeConnections: boolean;
   suspendRemap?: boolean;
+  fixedRows?: number;
+  fixedColumns?: number;
   brush:
     | { mode: 'random' }
     | { mode: 'erase' }
@@ -57,16 +60,33 @@ export const useTileGrid = ({
   preferredTileSize,
   allowEdgeConnections,
   suspendRemap = false,
+  fixedRows,
+  fixedColumns,
   brush,
   mirrorHorizontal,
   mirrorVertical,
 }: Params): Result => {
   const previousTileSourcesRef = useRef<TileSource[] | null>(null);
   const tileSourcesLength = tileSources.length;
-  const gridLayout = useMemo(
-    () => computeGridLayout(availableWidth, availableHeight, gridGap, preferredTileSize),
-    [availableHeight, availableWidth, gridGap, preferredTileSize]
-  );
+  const gridLayout = useMemo(() => {
+    if (fixedRows && fixedColumns) {
+      return computeFixedGridLayout(
+        availableWidth,
+        availableHeight,
+        gridGap,
+        fixedRows,
+        fixedColumns
+      );
+    }
+    return computeGridLayout(availableWidth, availableHeight, gridGap, preferredTileSize);
+  }, [
+    availableHeight,
+    availableWidth,
+    gridGap,
+    preferredTileSize,
+    fixedRows,
+    fixedColumns,
+  ]);
   const totalCells = gridLayout.rows * gridLayout.columns;
   const [tiles, setTiles] = useState<Tile[]>(() =>
     buildInitialTiles(totalCells)

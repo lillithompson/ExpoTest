@@ -1,10 +1,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Platform } from 'react-native';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 export type AppSettings = {
   preferredTileSize: number;
-  aspectPreset: 'web' | 'iphone15' | 'ipadpro';
   showDebug: boolean;
   allowEdgeConnections: boolean;
   mirrorHorizontal: boolean;
@@ -15,7 +13,6 @@ const STORAGE_KEY = 'tile-settings-v1';
 
 const getDefaultSettings = (): AppSettings => ({
   preferredTileSize: 45,
-  aspectPreset: Platform.OS === 'web' ? 'web' : 'iphone15',
   showDebug: false,
   allowEdgeConnections: true,
   mirrorHorizontal: false,
