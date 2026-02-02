@@ -295,6 +295,14 @@ export default function TestScreen() {
   const preferredSizeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastLoadedFileRef = useRef<string | null>(null);
+  const isHydratingFileRef = useRef(false);
+  const pendingRestoreRef = useRef<{
+    fileId: string;
+    tiles: Tile[];
+    rows: number;
+    columns: number;
+    preferredTileSize: number;
+  } | null>(null);
   const rowIndices = useMemo(
     () => Array.from({ length: gridLayout.rows }, (_, index) => index),
     [gridLayout.rows]
@@ -359,13 +367,52 @@ export default function TestScreen() {
     if (activeFile.category !== selectedCategory) {
       setSelectedCategory(activeFile.category);
     }
-    if (activeFile.tiles.length > 0) {
-      loadTiles(activeFile.tiles);
+    if (activeFile.preferredTileSize !== settings.preferredTileSize) {
+      setSettings((prev) => ({
+        ...prev,
+        preferredTileSize: activeFile.preferredTileSize,
+      }));
     }
-  }, [activeFile, ready, selectedCategory, loadTiles]);
+    pendingRestoreRef.current = {
+      fileId: activeFile.id,
+      tiles: activeFile.tiles,
+      rows: activeFile.grid.rows,
+      columns: activeFile.grid.columns,
+      preferredTileSize: activeFile.preferredTileSize,
+    };
+    isHydratingFileRef.current = true;
+  }, [activeFile, ready, selectedCategory, settings.preferredTileSize, setSettings]);
+
+  useEffect(() => {
+    const pending = pendingRestoreRef.current;
+    if (!pending || activeFileId !== pending.fileId) {
+      return;
+    }
+    if (settings.preferredTileSize !== pending.preferredTileSize) {
+      return;
+    }
+    const gridMatches =
+      pending.rows === gridLayout.rows && pending.columns === gridLayout.columns;
+    const allowFallback = pending.rows === 0 || pending.columns === 0;
+    if (gridMatches || allowFallback || pending.tiles.length > 0) {
+      loadTiles(pending.tiles);
+      pendingRestoreRef.current = null;
+      isHydratingFileRef.current = false;
+    }
+  }, [
+    activeFileId,
+    gridLayout.columns,
+    gridLayout.rows,
+    settings.preferredTileSize,
+    loadTiles,
+  ]);
 
   useEffect(() => {
     if (!ready || !activeFileId) {
+      return;
+    }
+    const pending = pendingRestoreRef.current;
+    if (isHydratingFileRef.current || (pending && pending.fileId === activeFileId)) {
       return;
     }
     if (saveTimeoutRef.current) {
@@ -380,11 +427,13 @@ export default function TestScreen() {
           gridGap: GRID_GAP,
           blankSource: BLANK_TILE,
           errorSource: ERROR_TILE,
+          maxDimension: 192,
         });
         upsertActiveFile({
           tiles,
           gridLayout,
           category: selectedCategory,
+          preferredTileSize: settings.preferredTileSize,
           thumbnailUri,
         });
       })();
@@ -394,7 +443,15 @@ export default function TestScreen() {
         clearTimeout(saveTimeoutRef.current);
       }
     };
-  }, [tiles, gridLayout, selectedCategory, ready, activeFileId, upsertActiveFile]);
+  }, [
+    tiles,
+    gridLayout,
+    selectedCategory,
+    settings.preferredTileSize,
+    ready,
+    activeFileId,
+    upsertActiveFile,
+  ]);
 
   const handleDownload = async () => {
     const result = await exportTileCanvasAsPng({
@@ -477,6 +534,60 @@ export default function TestScreen() {
     paintCellIndex(cellIndex);
   };
 
+  const persistActiveFileNow = async () => {
+    if (!ready || !activeFileId) {
+      return;
+    }
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+      saveTimeoutRef.current = null;
+    }
+    const thumbnailUri = await renderTileCanvasToDataUrl({
+      tiles,
+      gridLayout,
+      tileSources,
+      gridGap: GRID_GAP,
+      blankSource: BLANK_TILE,
+      errorSource: ERROR_TILE,
+      maxDimension: 192,
+    });
+    upsertActiveFile({
+      tiles,
+      gridLayout,
+      category: selectedCategory,
+      preferredTileSize: settings.preferredTileSize,
+      thumbnailUri,
+    });
+  };
+
+  const openFileInModifyView = async (fileId: string) => {
+    await persistActiveFileNow();
+    const file = files.find((entry) => entry.id === fileId);
+    if (!file) {
+      return;
+    }
+    lastLoadedFileRef.current = file.id;
+    if (file.category !== selectedCategory) {
+      setSelectedCategory(file.category);
+    }
+    if (file.preferredTileSize !== settings.preferredTileSize) {
+      setSettings((prev) => ({
+        ...prev,
+        preferredTileSize: file.preferredTileSize,
+      }));
+    }
+    pendingRestoreRef.current = {
+      fileId: file.id,
+      tiles: file.tiles,
+      rows: file.grid.rows,
+      columns: file.grid.columns,
+      preferredTileSize: file.preferredTileSize,
+    };
+    isHydratingFileRef.current = true;
+    setActive(file.id);
+    setViewMode('modify');
+  };
+
   if (viewMode === 'file') {
     const fileCardWidth = isWeb
       ? 120
@@ -510,7 +621,18 @@ export default function TestScreen() {
           </ThemedText>
           <Pressable
             onPress={() => {
-              createFile(selectedCategory);
+              const newId = createFile(selectedCategory, settings.preferredTileSize);
+              if (newId) {
+                lastLoadedFileRef.current = newId;
+                pendingRestoreRef.current = {
+                  fileId: newId,
+                  tiles: [],
+                  rows: 0,
+                  columns: 0,
+                  preferredTileSize: settings.preferredTileSize,
+                };
+                isHydratingFileRef.current = true;
+              }
               setViewMode('modify');
             }}
             style={styles.fileAddButton}
@@ -536,8 +658,7 @@ export default function TestScreen() {
                 key={file.id}
                 style={[styles.fileCard, { width: fileCardWidth }]}
                 onPress={() => {
-                  setActive(file.id);
-                  setViewMode('modify');
+                  void openFileInModifyView(file.id);
                 }}
                 onLongPress={() => setFileMenuTargetId(file.id)}
                 delayLongPress={320}
@@ -555,6 +676,7 @@ export default function TestScreen() {
                       source={{ uri: file.thumbnailUri }}
                       style={styles.fileThumbImage}
                       resizeMode="cover"
+                      fadeDuration={0}
                     />
                   ) : (
                     <ThemedView style={styles.fileThumbGrid}>
@@ -589,6 +711,7 @@ export default function TestScreen() {
                                       },
                                     ]}
                                     resizeMode="cover"
+                                    fadeDuration={0}
                                   />
                                 )}
                               </ThemedView>
@@ -669,7 +792,15 @@ export default function TestScreen() {
         >
         <ThemedView style={styles.titleContainer}>
           <ThemedView style={styles.headerRow}>
-            <NavButton label="< File" onPress={() => setViewMode('file')} />
+            <NavButton
+              label="< File"
+              onPress={() => {
+                void (async () => {
+                  await persistActiveFileNow();
+                  setViewMode('file');
+                })();
+              }}
+            />
             <ThemedView style={styles.controls}>
             <ToolbarButton
               label="Tile Set"

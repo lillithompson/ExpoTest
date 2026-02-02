@@ -88,7 +88,8 @@ export const renderTileCanvasToDataUrl = async ({
   gridGap,
   blankSource,
   errorSource,
-}: Omit<ExportParams, 'fileName'>): Promise<string | null> => {
+  maxDimension = 256,
+}: Omit<ExportParams, 'fileName'> & { maxDimension?: number }): Promise<string | null> => {
   if (Platform.OS !== 'web') {
     return null;
   }
@@ -163,6 +164,21 @@ export const renderTileCanvasToDataUrl = async ({
       gridLayout.tileSize
     );
     ctx.restore();
+  }
+
+  if (maxDimension > 0) {
+    const scale = Math.min(1, maxDimension / Math.max(totalWidth, totalHeight));
+    if (scale < 1) {
+      const thumbCanvas = document.createElement('canvas');
+      thumbCanvas.width = Math.max(1, Math.floor(totalWidth * scale));
+      thumbCanvas.height = Math.max(1, Math.floor(totalHeight * scale));
+      const thumbCtx = thumbCanvas.getContext('2d');
+      if (thumbCtx) {
+        thumbCtx.imageSmoothingEnabled = false;
+        thumbCtx.drawImage(canvas, 0, 0, thumbCanvas.width, thumbCanvas.height);
+        return thumbCanvas.toDataURL('image/png');
+      }
+    }
   }
 
   return canvas.toDataURL('image/png');

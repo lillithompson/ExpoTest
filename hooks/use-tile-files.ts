@@ -10,6 +10,7 @@ export type TileFile = {
   tiles: Tile[];
   grid: { rows: number; columns: number };
   category: TileCategory;
+  preferredTileSize: number;
   thumbnailUri: string | null;
   updatedAt: number;
 };
@@ -26,6 +27,7 @@ const defaultFile = (category: TileCategory): TileFile => ({
   tiles: [],
   grid: { rows: 0, columns: 0 },
   category,
+  preferredTileSize: 45,
   thumbnailUri: null,
   updatedAt: Date.now(),
 });
@@ -47,7 +49,18 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
         if (!mounted) {
           return;
         }
-        const parsed = filesRaw ? (JSON.parse(filesRaw) as TileFile[]) : [];
+        const parsed = filesRaw
+          ? (JSON.parse(filesRaw) as Array<Partial<TileFile>>).map((file) => ({
+              id: file.id ?? createId(),
+              name: file.name ?? 'Canvas',
+              tiles: file.tiles ?? [],
+              grid: file.grid ?? { rows: 0, columns: 0 },
+              category: (file.category ?? defaultCategory) as TileCategory,
+              preferredTileSize: file.preferredTileSize ?? 45,
+              thumbnailUri: file.thumbnailUri ?? null,
+              updatedAt: file.updatedAt ?? Date.now(),
+            }))
+          : [];
         const activeId = activeRaw || null;
         if (parsed.length === 0) {
           const initial = defaultFile(defaultCategory);
@@ -98,6 +111,7 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
       tiles: Tile[];
       gridLayout: GridLayout;
       category: TileCategory;
+      preferredTileSize: number;
       thumbnailUri?: string | null;
     }) => {
       if (!activeFileId) {
@@ -111,6 +125,7 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
                 tiles: payload.tiles,
                 grid: { rows: payload.gridLayout.rows, columns: payload.gridLayout.columns },
                 category: payload.category,
+                preferredTileSize: payload.preferredTileSize,
                 thumbnailUri:
                   payload.thumbnailUri !== undefined
                     ? payload.thumbnailUri
@@ -135,13 +150,14 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
   );
 
   const createFile = useCallback(
-    (category: TileCategory) => {
+    (category: TileCategory, preferredTileSize = 45) => {
       const nextFile: TileFile = {
         id: createId(),
         name: `Canvas ${Date.now()}`,
         tiles: [],
         grid: { rows: 0, columns: 0 },
         category,
+        preferredTileSize,
         thumbnailUri: null,
         updatedAt: Date.now(),
       };
