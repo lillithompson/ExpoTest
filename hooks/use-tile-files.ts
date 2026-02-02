@@ -2,6 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { type TileCategory } from '@/assets/images/tiles/manifest';
+import { renderTileCanvasToDataUrl } from '@/utils/tile-export';
 import { type GridLayout, type Tile } from '@/utils/tile-grid';
 
 export type TileFile = {
@@ -197,15 +198,42 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
     [persistFiles]
   );
 
+  const downloadFile = useCallback(
+    async (file: TileFile, tileSources: { source: unknown }[]) => {
+      const dataUrl = await renderTileCanvasToDataUrl({
+        tiles: file.tiles,
+        gridLayout: {
+          rows: file.grid.rows,
+          columns: file.grid.columns,
+          tileSize: file.preferredTileSize,
+        },
+        tileSources: tileSources as any,
+        gridGap: 0,
+        blankSource: null,
+        errorSource: null,
+        maxDimension: 0,
+      });
+      if (!dataUrl || typeof document === 'undefined') {
+        return;
+      }
+      const link = document.createElement('a');
+      link.href = dataUrl;
+      link.download = `${file.name}.png`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    },
+    []
+  );
+
   const deleteFile = useCallback(
     (id: string) => {
       setFiles((prev) => {
         const remaining = prev.filter((file) => file.id !== id);
         if (remaining.length === 0) {
-          const initial = defaultFile(defaultCategory);
-          setActiveFileId(initial.id);
-          void persistFiles([initial], initial.id);
-          return [initial];
+          setActiveFileId(null);
+          void persistFiles([], null);
+          return [];
         }
         const nextActive =
           activeFileId === id ? remaining[0].id : activeFileId ?? remaining[0].id;
@@ -229,6 +257,7 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
     setActive,
     createFile,
     duplicateFile,
+    downloadFile,
     deleteFile,
     upsertActiveFile,
     ready,

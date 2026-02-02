@@ -1,6 +1,5 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Alert,
   Image,
   Platform,
   Pressable,
@@ -25,7 +24,7 @@ import { ThemedView } from '@/components/themed-view';
 import { useTileGrid } from '@/hooks/use-tile-grid';
 import { usePersistedSettings } from '@/hooks/use-persisted-settings';
 import { useTileFiles } from '@/hooks/use-tile-files';
-import { exportTileCanvasAsPng, renderTileCanvasToDataUrl } from '@/utils/tile-export';
+import { renderTileCanvasToDataUrl } from '@/utils/tile-export';
 import { getTransformedConnectionsForName } from '@/utils/tile-compat';
 import { type Tile } from '@/utils/tile-grid';
 
@@ -248,6 +247,7 @@ export default function TestScreen() {
     setActive,
     createFile,
     duplicateFile,
+    downloadFile,
     deleteFile,
     upsertActiveFile,
     ready,
@@ -401,20 +401,6 @@ export default function TestScreen() {
       }
     };
   }, [tiles, gridLayout, selectedCategory, fileTileSize, ready, activeFileId, upsertActiveFile]);
-
-  const handleDownload = async () => {
-    const result = await exportTileCanvasAsPng({
-      tiles,
-      gridLayout,
-      tileSources,
-      gridGap: GRID_GAP,
-      blankSource: BLANK_TILE,
-      errorSource: ERROR_TILE,
-    });
-    if (!result.ok) {
-      Alert.alert('Download unavailable', result.error);
-    }
-  };
 
   const getRelativePoint = (event: any) => {
     if (isWeb) {
@@ -675,6 +661,21 @@ export default function TestScreen() {
               <Pressable
                 style={styles.fileMenuButton}
                 onPress={() => {
+                  const file = files.find((entry) => entry.id === fileMenuTargetId);
+                  if (file) {
+                    const sources = TILE_MANIFEST[file.category] ?? [];
+                    void downloadFile(file, sources);
+                  }
+                  setFileMenuTargetId(null);
+                }}
+                accessibilityRole="button"
+                accessibilityLabel="Download file"
+              >
+                <ThemedText type="defaultSemiBold">Download</ThemedText>
+              </Pressable>
+              <Pressable
+                style={styles.fileMenuButton}
+                onPress={() => {
                   duplicateFile(fileMenuTargetId);
                   setFileMenuTargetId(null);
                 }}
@@ -684,7 +685,7 @@ export default function TestScreen() {
                 <ThemedText type="defaultSemiBold">Duplicate</ThemedText>
               </Pressable>
               <Pressable
-                style={styles.fileMenuButton}
+                style={[styles.fileMenuButton, styles.fileMenuButtonLast]}
                 onPress={() => {
                   deleteFile(fileMenuTargetId);
                   setFileMenuTargetId(null);
@@ -793,14 +794,6 @@ export default function TestScreen() {
                   </ThemedText>
                 </Pressable>
               </ThemedView>
-              <Pressable
-                onPress={handleDownload}
-                style={styles.resetButton}
-                accessibilityRole="button"
-                accessibilityLabel="Download tile canvas"
-              >
-                <ThemedText type="defaultSemiBold">Download PNG</ThemedText>
-              </Pressable>
               <Pressable
                 onPress={() =>
                   setSettings((prev) => ({ ...prev, showDebug: !prev.showDebug }))
@@ -1418,6 +1411,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     borderBottomWidth: 1,
     borderBottomColor: '#e5e7eb',
+  },
+  fileMenuButtonLast: {
+    borderBottomWidth: 0,
   },
   fileMenuDeleteText: {
     color: '#dc2626',
