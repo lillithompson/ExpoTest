@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Image, Pressable, ScrollView, StyleSheet } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
@@ -9,14 +9,16 @@ type Brush =
   | { mode: 'random' }
   | { mode: 'erase' }
   | { mode: 'clone' }
-  | { mode: 'fixed'; index: number; rotation: number };
+  | { mode: 'fixed'; index: number; rotation: number; mirrorX: boolean };
 
 type Props = {
   tileSources: TileSource[];
   selected: Brush;
   onSelect: (brush: Brush) => void;
   onRotate: (index: number) => void;
+  onMirror: (index: number) => void;
   getRotation: (index: number) => number;
+  getMirror: (index: number) => boolean;
   height: number;
   itemSize: number;
   rowGap: number;
@@ -27,7 +29,9 @@ export function TileBrushPanel({
   selected,
   onSelect,
   onRotate,
+  onMirror,
   getRotation,
+  getMirror,
   height,
   itemSize,
   rowGap,
@@ -36,6 +40,7 @@ export function TileBrushPanel({
   const [contentWidth, setContentWidth] = useState(0);
   const showIndicator = contentWidth > containerWidth;
   const columnHeight = itemSize * 2 + rowGap;
+  const lastTapRef = useRef<{ time: number; index: number } | null>(null);
 
   return (
     <ThemedView
@@ -71,10 +76,12 @@ export function TileBrushPanel({
                 ? selected.mode === 'erase'
                 : isClone
                   ? selected.mode === 'clone'
-                : selected.mode === 'fixed' && selected.index === entry.index;
+                  : selected.mode === 'fixed' && selected.index === entry.index;
             const isTopRow = idx % 2 === 0;
             const rotation =
               !isRandom && !isErase && !isClone ? getRotation(entry.index) : 0;
+            const mirrorX =
+              !isRandom && !isErase && !isClone ? getMirror(entry.index) : false;
             return (
               <Pressable
                 key={
@@ -88,9 +95,22 @@ export function TileBrushPanel({
                         ? { mode: 'erase' }
                         : isClone
                           ? { mode: 'clone' }
-                        : { mode: 'fixed', index: entry.index, rotation }
+                          : { mode: 'fixed', index: entry.index, rotation, mirrorX }
                   )
                 }
+                onPress={() => {
+                  if (isRandom || isErase || isClone) {
+                    return;
+                  }
+                  const now = Date.now();
+                  const lastTap = lastTapRef.current;
+                  if (lastTap && lastTap.index === entry.index && now - lastTap.time < 260) {
+                    onMirror(entry.index);
+                    lastTapRef.current = null;
+                  } else {
+                    lastTapRef.current = { time: now, index: entry.index };
+                  }
+                }}
                 onLongPress={() => {
                   if (!isRandom && !isErase && !isClone) {
                     onRotate(entry.index);
@@ -130,7 +150,15 @@ export function TileBrushPanel({
                   <ThemedView style={styles.imageBox}>
                     <Image
                       source={entry.tile.source}
-                      style={[styles.image, { transform: [{ rotate: `${rotation}deg` }] }]}
+                      style={[
+                        styles.image,
+                        {
+                          transform: [
+                            { scaleX: mirrorX ? -1 : 1 },
+                            { rotate: `${rotation}deg` },
+                          ],
+                        },
+                      ]}
                       resizeMode="cover"
                       fadeDuration={0}
                     />

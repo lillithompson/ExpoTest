@@ -48,9 +48,10 @@ type ToolbarButtonProps = {
   onPress: () => void;
   icon: React.ComponentProps<typeof MaterialCommunityIcons>['name'];
   active?: boolean;
+  color?: string;
 };
 
-function ToolbarButton({ label, onPress, icon, active }: ToolbarButtonProps) {
+function ToolbarButton({ label, onPress, icon, active, color }: ToolbarButtonProps) {
   const [hovered, setHovered] = useState(false);
   return (
     <Pressable
@@ -64,7 +65,7 @@ function ToolbarButton({ label, onPress, icon, active }: ToolbarButtonProps) {
       <MaterialCommunityIcons
         name={icon}
         size={28}
-        color={active ? '#22c55e' : 'rgba(42, 42, 42, 0.8)'}
+        color={color ?? (active ? '#22c55e' : 'rgba(42, 42, 42, 0.8)')}
       />
       {Platform.OS === 'web' && hovered && (
         <Text style={styles.tooltip} accessibilityElementsHidden>
@@ -206,13 +207,14 @@ export default function TestScreen() {
     | { mode: 'random' }
     | { mode: 'erase' }
     | { mode: 'clone' }
-    | { mode: 'fixed'; index: number; rotation: number }
+    | { mode: 'fixed'; index: number; rotation: number; mirrorX: boolean }
   >({
     mode: 'random',
   });
   const [paletteRotations, setPaletteRotations] = useState<Record<number, number>>(
     {}
   );
+  const [paletteMirrors, setPaletteMirrors] = useState<Record<number, boolean>>({});
   const preferredTileSize = settings.preferredTileSize;
   const tileSources = TILE_MANIFEST[selectedCategory] ?? [];
   const isWeb = Platform.OS === 'web';
@@ -619,28 +621,34 @@ export default function TestScreen() {
           <ThemedText type="title" style={styles.fileTitle}>
             File
           </ThemedText>
-          <Pressable
-            onPress={() => {
-              const newId = createFile(selectedCategory, settings.preferredTileSize);
-              if (newId) {
-                lastLoadedFileRef.current = newId;
-                pendingRestoreRef.current = {
-                  fileId: newId,
-                  tiles: [],
-                  rows: 0,
-                  columns: 0,
-                  preferredTileSize: settings.preferredTileSize,
-                };
-                isHydratingFileRef.current = true;
-              }
-              setViewMode('modify');
-            }}
-            style={styles.fileAddButton}
-            accessibilityRole="button"
-            accessibilityLabel="Create new tile canvas file"
-          >
-            <MaterialCommunityIcons name="plus" size={24} color="#d1d5db" />
-          </Pressable>
+          <ThemedView style={styles.fileHeaderActions}>
+            <ToolbarButton
+              label="Create new tile canvas file"
+              icon="plus"
+              color="#fff"
+              onPress={() => {
+                const newId = createFile(selectedCategory, settings.preferredTileSize);
+                if (newId) {
+                  lastLoadedFileRef.current = newId;
+                  pendingRestoreRef.current = {
+                    fileId: newId,
+                    tiles: [],
+                    rows: 0,
+                    columns: 0,
+                    preferredTileSize: settings.preferredTileSize,
+                  };
+                  isHydratingFileRef.current = true;
+                }
+                setViewMode('modify');
+              }}
+            />
+            <ToolbarButton
+              label="Open settings"
+              icon="cog"
+              color="#fff"
+              onPress={() => setShowSettingsOverlay(true)}
+            />
+          </ThemedView>
         </ThemedView>
         <ScrollView
           style={styles.fileScroll}
@@ -762,6 +770,102 @@ export default function TestScreen() {
             </ThemedView>
           </ThemedView>
         )}
+        {showSettingsOverlay && (
+          <ThemedView style={styles.overlay} accessibilityRole="dialog">
+            <Pressable
+              style={styles.overlayBackdrop}
+              onPress={() => setShowSettingsOverlay(false)}
+              accessibilityRole="button"
+              accessibilityLabel="Close settings"
+            />
+            <ThemedView style={styles.overlayPanel}>
+              <ThemedText type="title">Settings</ThemedText>
+              <ThemedView style={styles.inputGroup}>
+                <ThemedText type="defaultSemiBold">Preferred Tile Size</ThemedText>
+                <TextInput
+                  style={styles.input}
+                  keyboardType="number-pad"
+                  value={preferredTileSizeInput}
+                  onChangeText={setPreferredTileSizeInput}
+                  onEndEditing={() => {
+                    const parsed = Math.floor(Number(preferredTileSizeInput));
+                    if (!Number.isNaN(parsed)) {
+                      const clamped = Math.min(512, Math.max(20, parsed));
+                      setSettings((prev) => ({ ...prev, preferredTileSize: clamped }));
+                      if (String(clamped) !== preferredTileSizeInput) {
+                        setPreferredTileSizeInput(String(clamped));
+                      }
+                    }
+                  }}
+                  accessibilityLabel="Preferred tile size"
+                />
+              </ThemedView>
+              <ThemedView style={styles.presetGroup}>
+                <ThemedText type="defaultSemiBold">Aspect Ratio</ThemedText>
+                <ThemedView style={styles.presetButtons}>
+                  {[
+                    { key: 'iphone15' as const, label: 'iPhone 15' },
+                    { key: 'ipadpro' as const, label: 'iPad Pro' },
+                    { key: 'web' as const, label: 'Web' },
+                  ].map((preset) => (
+                    <Pressable
+                      key={preset.key}
+                      onPress={() =>
+                        setSettings((prev) => ({ ...prev, aspectPreset: preset.key }))
+                      }
+                      style={[
+                        styles.resetButton,
+                        settings.aspectPreset === preset.key && styles.overlayItemSelected,
+                      ]}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Set aspect ratio to ${preset.label}`}
+                    >
+                      <ThemedText type="defaultSemiBold">{preset.label}</ThemedText>
+                    </Pressable>
+                  ))}
+                </ThemedView>
+              </ThemedView>
+              <ThemedView style={styles.inputGroup}>
+                <ThemedText type="defaultSemiBold">AllowEdgeConections</ThemedText>
+                <Pressable
+                  onPress={() =>
+                    setSettings((prev) => ({
+                      ...prev,
+                      allowEdgeConnections: !prev.allowEdgeConnections,
+                    }))
+                  }
+                  style={styles.resetButton}
+                  accessibilityRole="button"
+                  accessibilityLabel="Toggle edge connections"
+                >
+                  <ThemedText type="defaultSemiBold">
+                    {settings.allowEdgeConnections ? 'On' : 'Off'}
+                  </ThemedText>
+                </Pressable>
+              </ThemedView>
+              <Pressable
+                onPress={handleDownload}
+                style={styles.resetButton}
+                accessibilityRole="button"
+                accessibilityLabel="Download tile canvas"
+              >
+                <ThemedText type="defaultSemiBold">Download PNG</ThemedText>
+              </Pressable>
+              <Pressable
+                onPress={() =>
+                  setSettings((prev) => ({ ...prev, showDebug: !prev.showDebug }))
+                }
+                style={styles.resetButton}
+                accessibilityRole="button"
+                accessibilityLabel="Toggle debug overlay"
+              >
+                <ThemedText type="defaultSemiBold">
+                  {settings.showDebug ? 'Hide Debug' : 'Show Debug'}
+                </ThemedText>
+              </Pressable>
+            </ThemedView>
+          </ThemedView>
+        )}
       </ThemedView>
     );
   }
@@ -793,7 +897,7 @@ export default function TestScreen() {
         <ThemedView style={styles.titleContainer}>
           <ThemedView style={styles.headerRow}>
             <NavButton
-              label="< File"
+              label="< Modify"
               onPress={() => {
                 void (async () => {
                   await persistActiveFileNow();
@@ -812,11 +916,6 @@ export default function TestScreen() {
               label="Flood Complete"
               icon="format-color-fill"
               onPress={floodComplete}
-            />
-            <ToolbarButton
-              label="Settings"
-              icon="cog"
-              onPress={() => setShowSettingsOverlay(true)}
             />
             <ToolbarButton
               label="Mirror Horizontal"
@@ -1007,7 +1106,8 @@ export default function TestScreen() {
             }
             if (next.mode === 'fixed') {
               const rotation = paletteRotations[next.index] ?? next.rotation ?? 0;
-              setBrush({ mode: 'fixed', index: next.index, rotation });
+              const mirrorX = paletteMirrors[next.index] ?? next.mirrorX ?? false;
+              setBrush({ mode: 'fixed', index: next.index, rotation, mirrorX });
             } else {
               setBrush(next);
             }
@@ -1016,7 +1116,12 @@ export default function TestScreen() {
             setPaletteRotations((prev) => {
               const nextRotation = ((prev[index] ?? 0) + 90) % 360;
               if (brush.mode === 'fixed' && brush.index === index) {
-                setBrush({ mode: 'fixed', index, rotation: nextRotation });
+                setBrush({
+                  mode: 'fixed',
+                  index,
+                  rotation: nextRotation,
+                  mirrorX: brush.mirrorX,
+                });
               }
               return {
                 ...prev,
@@ -1024,7 +1129,25 @@ export default function TestScreen() {
               };
             })
           }
+          onMirror={(index) =>
+            setPaletteMirrors((prev) => {
+              const nextMirror = !(prev[index] ?? false);
+              if (brush.mode === 'fixed' && brush.index === index) {
+                setBrush({
+                  mode: 'fixed',
+                  index,
+                  rotation: brush.rotation,
+                  mirrorX: nextMirror,
+                });
+              }
+              return {
+                ...prev,
+                [index]: nextMirror,
+              };
+            })
+          }
           getRotation={(index) => paletteRotations[index] ?? 0}
+          getMirror={(index) => paletteMirrors[index] ?? false}
           height={brushPanelHeight}
           itemSize={brushItemSize}
           rowGap={BRUSH_PANEL_ROW_GAP}
@@ -1223,6 +1346,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     position: 'relative',
+    backgroundColor: 'transparent',
   },
   navButton: {
     paddingHorizontal: 8,
@@ -1300,6 +1424,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     backgroundColor: '#2a2a2a',
   },
+  fileHeaderActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: 'transparent',
+  },
   fileTitle: {
     color: '#fff',
   },
@@ -1308,6 +1438,7 @@ const styles = StyleSheet.create({
     height: 32,
     alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor: 'transparent',
   },
   fileScroll: {
     flex: 1,

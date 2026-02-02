@@ -22,7 +22,7 @@ type Params = {
     | { mode: 'random' }
     | { mode: 'erase' }
     | { mode: 'clone' }
-    | { mode: 'fixed'; index: number; rotation: number };
+    | { mode: 'fixed'; index: number; rotation: number; mirrorX: boolean };
   mirrorHorizontal: boolean;
   mirrorVertical: boolean;
 };
@@ -548,7 +548,7 @@ export const useTileGrid = ({
         applyPlacement(cellIndex, {
           imageIndex: fixedIndex,
           rotation: brush.rotation,
-          mirrorX: false,
+          mirrorX: brush.mirrorX,
           mirrorY: false,
         });
       }
@@ -672,7 +672,7 @@ export const useTileGrid = ({
           getMirroredPlacements(index, {
             imageIndex: fixedIndex,
             rotation: brush.rotation,
-            mirrorX: false,
+            mirrorX: brush.mirrorX,
             mirrorY: false,
           })
         );
