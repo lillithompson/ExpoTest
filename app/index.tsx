@@ -4,13 +4,13 @@ import {
   Image,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
   useWindowDimensions,
   View,
 } from 'react-native';
-import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -25,7 +25,8 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { useTileGrid } from '@/hooks/use-tile-grid';
 import { usePersistedSettings } from '@/hooks/use-persisted-settings';
-import { exportTileCanvasAsPng } from '@/utils/tile-export';
+import { useTileFiles } from '@/hooks/use-tile-files';
+import { exportTileCanvasAsPng, renderTileCanvasToDataUrl } from '@/utils/tile-export';
 import { getTransformedConnectionsForName } from '@/utils/tile-compat';
 import { type Tile } from '@/utils/tile-grid';
 
@@ -36,6 +37,9 @@ const TOOLBAR_BUTTON_SIZE = 40;
 const TITLE_SPACING = 0;
 const BRUSH_PANEL_HEIGHT = 160;
 const BRUSH_PANEL_ROW_GAP = 1;
+const FILE_GRID_COLUMNS_MOBILE = 3;
+const FILE_GRID_SIDE_PADDING = 12;
+const FILE_GRID_GAP = 12;
 const BLANK_TILE = require('@/assets/images/tiles/tile_blank.png');
 const ERROR_TILE = require('@/assets/images/tiles/tile_error.png');
 
@@ -67,6 +71,21 @@ function ToolbarButton({ label, onPress, icon, active }: ToolbarButtonProps) {
           {label}
         </Text>
       )}
+    </Pressable>
+  );
+}
+
+type NavButtonProps = {
+  label: string;
+  onPress: () => void;
+};
+
+function NavButton({ label, onPress }: NavButtonProps) {
+  return (
+    <Pressable onPress={onPress} style={styles.navButton} accessibilityRole="button">
+      <ThemedText type="defaultSemiBold" style={styles.navButtonText}>
+        {label}
+      </ThemedText>
     </Pressable>
   );
 }
@@ -164,7 +183,6 @@ const TileCell = memo(
 export default function TestScreen() {
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
-  const tabBarHeight = 0;
   const gridRef = useRef<View>(null);
   const gridOffsetRef = useRef({ x: 0, y: 0 });
   const { settings, setSettings } = usePersistedSettings();
@@ -179,9 +197,11 @@ export default function TestScreen() {
   });
   const [showTileSetOverlay, setShowTileSetOverlay] = useState(false);
   const [showSettingsOverlay, setShowSettingsOverlay] = useState(false);
+  const [fileMenuTargetId, setFileMenuTargetId] = useState<string | null>(null);
   const [preferredTileSizeInput, setPreferredTileSizeInput] = useState(
     String(settings.preferredTileSize)
   );
+  const [viewMode, setViewMode] = useState<'modify' | 'file'>('file');
   const [brush, setBrush] = useState<
     | { mode: 'random' }
     | { mode: 'erase' }
@@ -210,7 +230,7 @@ export default function TestScreen() {
     ? Math.min(safeWidth, safeHeight / aspectRatio)
     : safeWidth;
   const rawContentHeight = aspectRatio ? contentWidth * aspectRatio : safeHeight;
-  const contentHeight = Math.max(0, rawContentHeight - tabBarHeight);
+  const contentHeight = Math.max(0, rawContentHeight);
 
   const availableWidth = contentWidth - CONTENT_PADDING * 2;
   const availableHeight = Math.max(
@@ -223,13 +243,24 @@ export default function TestScreen() {
   );
 
   const {
+    files,
+    activeFile,
+    activeFileId,
+    setActive,
+    createFile,
+    duplicateFile,
+    deleteFile,
+    upsertActiveFile,
+    ready,
+  } = useTileFiles(selectedCategory);
+
+  const {
     gridLayout,
     tiles,
     handlePress,
-    randomFill,
-    floodFill,
     floodComplete,
     resetTiles,
+    loadTiles,
     clearCloneSource,
     setCloneSource,
     cloneSourceIndex,
@@ -262,6 +293,8 @@ export default function TestScreen() {
   const longPressTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const longPressTriggeredRef = useRef(false);
   const preferredSizeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastLoadedFileRef = useRef<string | null>(null);
   const rowIndices = useMemo(
     () => Array.from({ length: gridLayout.rows }, (_, index) => index),
     [gridLayout.rows]
@@ -314,6 +347,54 @@ export default function TestScreen() {
       }
     };
   }, [preferredTileSizeInput, settings.preferredTileSize, setSettings]);
+
+  useEffect(() => {
+    if (!ready || !activeFile) {
+      return;
+    }
+    if (lastLoadedFileRef.current === activeFile.id) {
+      return;
+    }
+    lastLoadedFileRef.current = activeFile.id;
+    if (activeFile.category !== selectedCategory) {
+      setSelectedCategory(activeFile.category);
+    }
+    if (activeFile.tiles.length > 0) {
+      loadTiles(activeFile.tiles);
+    }
+  }, [activeFile, ready, selectedCategory, loadTiles]);
+
+  useEffect(() => {
+    if (!ready || !activeFileId) {
+      return;
+    }
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+    }
+    saveTimeoutRef.current = setTimeout(() => {
+      void (async () => {
+        const thumbnailUri = await renderTileCanvasToDataUrl({
+          tiles,
+          gridLayout,
+          tileSources,
+          gridGap: GRID_GAP,
+          blankSource: BLANK_TILE,
+          errorSource: ERROR_TILE,
+        });
+        upsertActiveFile({
+          tiles,
+          gridLayout,
+          category: selectedCategory,
+          thumbnailUri,
+        });
+      })();
+    }, 150);
+    return () => {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+      }
+    };
+  }, [tiles, gridLayout, selectedCategory, ready, activeFileId, upsertActiveFile]);
 
   const handleDownload = async () => {
     const result = await exportTileCanvasAsPng({
@@ -396,6 +477,172 @@ export default function TestScreen() {
     paintCellIndex(cellIndex);
   };
 
+  if (viewMode === 'file') {
+    const fileCardWidth = isWeb
+      ? 120
+      : Math.floor(
+          (contentWidth -
+            FILE_GRID_SIDE_PADDING * 2 -
+            FILE_GRID_GAP * (FILE_GRID_COLUMNS_MOBILE - 1)) /
+            FILE_GRID_COLUMNS_MOBILE
+        );
+    return (
+      <ThemedView
+        style={[
+          styles.screen,
+          {
+            paddingTop: insets.top,
+            paddingBottom: 0,
+            paddingLeft: 0,
+            paddingRight: 0,
+          },
+        ]}
+      >
+        {insets.top > 0 && (
+          <View
+            pointerEvents="none"
+            style={[styles.statusBarBackground, { height: insets.top }]}
+          />
+        )}
+        <ThemedView style={styles.fileHeader}>
+          <ThemedText type="title" style={styles.fileTitle}>
+            File
+          </ThemedText>
+          <Pressable
+            onPress={() => {
+              createFile(selectedCategory);
+              setViewMode('modify');
+            }}
+            style={styles.fileAddButton}
+            accessibilityRole="button"
+            accessibilityLabel="Create new tile canvas file"
+          >
+            <MaterialCommunityIcons name="plus" size={24} color="#d1d5db" />
+          </Pressable>
+        </ThemedView>
+        <ScrollView
+          style={styles.fileScroll}
+          contentContainerStyle={styles.fileGrid}
+          showsVerticalScrollIndicator
+        >
+          {files.map((file) => {
+            const sources = TILE_MANIFEST[file.category] ?? [];
+            const thumbAspect =
+              file.grid.columns > 0 && file.grid.rows > 0
+                ? file.grid.columns / file.grid.rows
+                : 1;
+            return (
+              <Pressable
+                key={file.id}
+                style={[styles.fileCard, { width: fileCardWidth }]}
+                onPress={() => {
+                  setActive(file.id);
+                  setViewMode('modify');
+                }}
+                onLongPress={() => setFileMenuTargetId(file.id)}
+                delayLongPress={320}
+                accessibilityRole="button"
+                accessibilityLabel={`Open ${file.name}`}
+              >
+                <ThemedView
+                  style={[
+                    styles.fileThumb,
+                    { width: fileCardWidth, aspectRatio: thumbAspect },
+                  ]}
+                >
+                  {file.thumbnailUri ? (
+                    <Image
+                      source={{ uri: file.thumbnailUri }}
+                      style={styles.fileThumbImage}
+                      resizeMode="cover"
+                    />
+                  ) : (
+                    <ThemedView style={styles.fileThumbGrid}>
+                      {Array.from({ length: file.grid.rows }, (_, rowIndex) => (
+                        <ThemedView
+                          key={`row-${file.id}-${rowIndex}`}
+                          style={styles.fileThumbRow}
+                        >
+                          {Array.from({ length: file.grid.columns }, (_, colIndex) => {
+                            const index = rowIndex * file.grid.columns + colIndex;
+                            const tile = file.tiles[index];
+                            const source =
+                              tile && tile.imageIndex >= 0
+                                ? sources[tile.imageIndex]?.source
+                                : null;
+                            return (
+                              <ThemedView
+                                key={`cell-${file.id}-${index}`}
+                                style={styles.fileThumbCell}
+                              >
+                                {source && (
+                                  <Image
+                                    source={source}
+                                    style={[
+                                      styles.fileThumbImage,
+                                      {
+                                        transform: [
+                                          { scaleX: tile?.mirrorX ? -1 : 1 },
+                                          { scaleY: tile?.mirrorY ? -1 : 1 },
+                                          { rotate: `${tile?.rotation ?? 0}deg` },
+                                        ],
+                                      },
+                                    ]}
+                                    resizeMode="cover"
+                                  />
+                                )}
+                              </ThemedView>
+                            );
+                          })}
+                        </ThemedView>
+                      ))}
+                    </ThemedView>
+                  )}
+                </ThemedView>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+        {fileMenuTargetId && (
+          <ThemedView style={styles.overlay} accessibilityRole="dialog">
+            <Pressable
+              style={styles.overlayBackdrop}
+              onPress={() => setFileMenuTargetId(null)}
+              accessibilityRole="button"
+              accessibilityLabel="Close file options"
+            />
+            <ThemedView style={styles.fileMenuPanel}>
+              <Pressable
+                style={styles.fileMenuButton}
+                onPress={() => {
+                  duplicateFile(fileMenuTargetId);
+                  setFileMenuTargetId(null);
+                }}
+                accessibilityRole="button"
+                accessibilityLabel="Duplicate file"
+              >
+                <ThemedText type="defaultSemiBold">Duplicate</ThemedText>
+              </Pressable>
+              <Pressable
+                style={styles.fileMenuButton}
+                onPress={() => {
+                  deleteFile(fileMenuTargetId);
+                  setFileMenuTargetId(null);
+                }}
+                accessibilityRole="button"
+                accessibilityLabel="Delete file"
+              >
+                <ThemedText type="defaultSemiBold" style={styles.fileMenuDeleteText}>
+                  Delete
+                </ThemedText>
+              </Pressable>
+            </ThemedView>
+          </ThemedView>
+        )}
+      </ThemedView>
+    );
+  }
+
   return (
     <ThemedView
       style={[
@@ -421,7 +668,9 @@ export default function TestScreen() {
           ]}
         >
         <ThemedView style={styles.titleContainer}>
-          <ThemedView style={styles.controls}>
+          <ThemedView style={styles.headerRow}>
+            <NavButton label="< File" onPress={() => setViewMode('file')} />
+            <ThemedView style={styles.controls}>
             <ToolbarButton
               label="Tile Set"
               icon="grid"
@@ -460,6 +709,7 @@ export default function TestScreen() {
                 }))
               }
             />
+            </ThemedView>
           </ThemedView>
         </ThemedView>
         <ThemedView
@@ -791,13 +1041,20 @@ const styles = StyleSheet.create({
     height: HEADER_HEIGHT,
     zIndex: 10,
   },
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    width: '100%',
+    paddingHorizontal: 6,
+  },
   controls: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 2,
-    flexWrap: 'wrap',
+    flexWrap: 'nowrap',
     justifyContent: 'flex-end',
-    width: '100%',
+    flex: 1,
     overflow: 'visible',
   },
   inputGroup: {
@@ -835,6 +1092,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     position: 'relative',
+  },
+  navButton: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  navButtonText: {
+    color: '#2a2a2a',
+    fontSize: 14,
   },
   tooltip: {
     position: 'absolute',
@@ -895,6 +1160,75 @@ const styles = StyleSheet.create({
     right: 0,
     backgroundColor: '#fff',
     zIndex: 5,
+  },
+  fileHeader: {
+    height: HEADER_HEIGHT,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 12,
+    backgroundColor: '#2a2a2a',
+  },
+  fileTitle: {
+    color: '#fff',
+  },
+  fileAddButton: {
+    width: 32,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  fileScroll: {
+    flex: 1,
+  },
+  fileGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: FILE_GRID_GAP,
+    paddingHorizontal: FILE_GRID_SIDE_PADDING,
+    paddingTop: 8,
+    paddingBottom: 12,
+  },
+  fileCard: {
+    alignItems: 'center',
+  },
+  fileThumb: {
+    borderWidth: 1,
+    borderColor: '#1f1f1f',
+    backgroundColor: '#111',
+    padding: 4,
+  },
+  fileThumbGrid: {
+    flex: 1,
+  },
+  fileThumbRow: {
+    flexDirection: 'row',
+    flex: 1,
+  },
+  fileThumbCell: {
+    flex: 1,
+    backgroundColor: '#000',
+  },
+  fileThumbImage: {
+    width: '100%',
+    height: '100%',
+  },
+  fileMenuPanel: {
+    width: 220,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#1f1f1f',
+    backgroundColor: '#fff',
+    overflow: 'hidden',
+  },
+  fileMenuButton: {
+    paddingVertical: 14,
+    paddingHorizontal: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e5e7eb',
+  },
+  fileMenuDeleteText: {
+    color: '#dc2626',
   },
   contentFrame: {
     alignSelf: 'center',

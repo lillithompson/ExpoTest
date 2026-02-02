@@ -60,14 +60,43 @@ export const exportTileCanvasAsPng = async ({
   errorSource,
   fileName = 'tile-canvas.png',
 }: ExportParams): Promise<ExportResult> => {
+  const dataUrl = await renderTileCanvasToDataUrl({
+    tiles,
+    gridLayout,
+    tileSources,
+    gridGap,
+    blankSource,
+    errorSource,
+  });
+  if (!dataUrl) {
+    return { ok: false, error: 'Unable to render canvas preview.' };
+  }
+  const link = document.createElement('a');
+  link.href = dataUrl;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+
+  return { ok: true };
+};
+
+export const renderTileCanvasToDataUrl = async ({
+  tiles,
+  gridLayout,
+  tileSources,
+  gridGap,
+  blankSource,
+  errorSource,
+}: Omit<ExportParams, 'fileName'>): Promise<string | null> => {
   if (Platform.OS !== 'web') {
-    return { ok: false, error: 'Downloads are supported on web only.' };
+    return null;
   }
   if (typeof document === 'undefined') {
-    return { ok: false, error: 'No DOM available to render the canvas.' };
+    return null;
   }
   if (gridLayout.columns <= 0 || gridLayout.rows <= 0 || gridLayout.tileSize <= 0) {
-    return { ok: false, error: 'The Tile Canvas is empty.' };
+    return null;
   }
 
   const totalWidth =
@@ -82,7 +111,7 @@ export const exportTileCanvasAsPng = async ({
   canvas.height = totalHeight;
   const ctx = canvas.getContext('2d');
   if (!ctx) {
-    return { ok: false, error: 'Unable to create a drawing context.' };
+    return null;
   }
 
   const uriCache = new Map<string, HTMLImageElement>();
@@ -136,13 +165,5 @@ export const exportTileCanvasAsPng = async ({
     ctx.restore();
   }
 
-  const dataUrl = canvas.toDataURL('image/png');
-  const link = document.createElement('a');
-  link.href = dataUrl;
-  link.download = fileName;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-
-  return { ok: true };
+  return canvas.toDataURL('image/png');
 };

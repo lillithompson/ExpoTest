@@ -35,6 +35,7 @@ type Result = {
   floodFill: () => void;
   floodComplete: () => void;
   resetTiles: () => void;
+  loadTiles: (nextTiles: Tile[]) => void;
   clearCloneSource: () => void;
   setCloneSource: (cellIndex: number) => void;
   cloneSourceIndex: number | null;
@@ -770,6 +771,10 @@ export const useTileGrid = ({
     setTiles(buildInitialTiles(totalCells));
   };
 
+  const loadTiles = (nextTiles: Tile[]) => {
+    setTiles(normalizeTiles(nextTiles, totalCells, tileSourcesLength));
+  };
+
   const setCloneSource = (cellIndex: number) => {
     cloneSourceRef.current = cellIndex;
     cloneAnchorRef.current = null;
@@ -787,6 +792,7 @@ export const useTileGrid = ({
     floodFill,
     floodComplete,
     resetTiles,
+    loadTiles,
     clearCloneSource,
     setCloneSource,
     cloneSourceIndex: brush.mode === 'clone' ? cloneSourceIndex : null,
