@@ -10,6 +10,7 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
+import Slider from '@react-native-community/slider';
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import ViewShot from 'react-native-view-shot';
@@ -46,6 +47,26 @@ const FILE_GRID_GAP = 12;
 const DEFAULT_CATEGORY = TILE_CATEGORIES[0];
 const BLANK_TILE = require('@/assets/images/tiles/tile_blank.svg');
 const ERROR_TILE = require('@/assets/images/tiles/tile_error.svg');
+const clamp = (value: number, min: number, max: number) =>
+  Math.min(max, Math.max(min, value));
+const hexToRgb = (value: string) => {
+  const safeValue = typeof value === 'string' ? value : '#ffffff';
+  const normalized = safeValue.replace('#', '');
+  if (normalized.length !== 6) {
+    return { r: 255, g: 255, b: 255 };
+  }
+  const r = parseInt(normalized.slice(0, 2), 16);
+  const g = parseInt(normalized.slice(2, 4), 16);
+  const b = parseInt(normalized.slice(4, 6), 16);
+  if (Number.isNaN(r) || Number.isNaN(g) || Number.isNaN(b)) {
+    return { r: 255, g: 255, b: 255 };
+  }
+  return { r, g, b };
+};
+const rgbToHex = (r: number, g: number, b: number) =>
+  `#${[r, g, b]
+    .map((channel) => clamp(Math.round(channel), 0, 255).toString(16).padStart(2, '0'))
+    .join('')}`;
 
 type ToolbarButtonProps = {
   label: string;
@@ -157,8 +178,20 @@ const TileCell = memo(
         <TileAsset
           source={source}
           name={tileName}
-          strokeColor={strokeColor}
-          strokeWidth={strokeWidth}
+          strokeColor={
+            tile.imageIndex >= 0
+              ? strokeColor
+              : tile.imageIndex === -2
+                ? '#ffffff'
+                : '#ffffff'
+          }
+          strokeWidth={
+            tile.imageIndex >= 0
+              ? strokeWidth
+              : tile.imageIndex === -2
+                ? 4
+                : 0.6
+          }
           style={[
             styles.tileImage,
             {
@@ -262,8 +295,12 @@ export default function TestScreen() {
   } = useTileFiles(DEFAULT_CATEGORY);
 
   const fileTileSize = activeFile?.preferredTileSize ?? settings.preferredTileSize;
-  const activeLineWidth = activeFile?.lineWidth ?? 1;
+  const activeLineWidth = activeFile?.lineWidth ?? 10;
   const activeLineColor = activeFile?.lineColor ?? '#ffffff';
+  const { r: activeRed, g: activeGreen, b: activeBlue } = useMemo(
+    () => hexToRgb(activeLineColor),
+    [activeLineColor]
+  );
 
   const {
     gridLayout,
@@ -436,6 +473,8 @@ export default function TestScreen() {
           gridGap: GRID_GAP,
           blankSource: BLANK_TILE,
           errorSource: ERROR_TILE,
+          lineColor: activeLineColor,
+          lineWidth: activeLineWidth,
           maxDimension: 192,
         });
         upsertActiveFile({
@@ -457,11 +496,14 @@ export default function TestScreen() {
     gridLayout,
     selectedCategory,
     fileTileSize,
+    activeLineColor,
+    activeLineWidth,
     ready,
     activeFileId,
     upsertActiveFile,
     isHydratingFile,
   ]);
+
 
   const getRelativePoint = (event: any) => {
     if (isWeb) {
@@ -545,6 +587,8 @@ export default function TestScreen() {
       gridGap: GRID_GAP,
       blankSource: BLANK_TILE,
       errorSource: ERROR_TILE,
+      lineColor: activeLineColor,
+      lineWidth: activeLineWidth,
       maxDimension: 192,
     });
     upsertActiveFile({
@@ -777,6 +821,8 @@ export default function TestScreen() {
                                   <TileAsset
                                     source={source}
                                     name={sources[tile.imageIndex]?.name}
+                                    strokeColor={file.lineColor}
+                                    strokeWidth={file.lineWidth}
                                     style={[
                                       styles.fileThumbImage,
                                       {
@@ -1395,12 +1441,49 @@ export default function TestScreen() {
               </ThemedView>
               </ThemedView>
               <ThemedView style={styles.sectionGroup}>
-                <ThemedText type="defaultSemiBold">Line Width</ThemedText>
-                <ThemedView style={styles.inlineOptions}>
-                  {[0.5, 1, 1.5, 2, 3, 4].map((value) => (
-                    <Pressable
-                      key={`line-width-${value}`}
-                      onPress={() => {
+                <ThemedView style={styles.sectionHeader}>
+                  <ThemedText type="defaultSemiBold">Line Width</ThemedText>
+                  <ThemedText type="defaultSemiBold">
+                    {activeLineWidth.toFixed(1)}
+                  </ThemedText>
+                </ThemedView>
+                <Slider
+                  minimumValue={1}
+                  maximumValue={20}
+                  step={0.1}
+                  value={activeLineWidth}
+                  onValueChange={(value) => {
+                    if (!activeFileId) {
+                      return;
+                    }
+                    upsertActiveFile({
+                      tiles,
+                      gridLayout,
+                      category: selectedCategory,
+                      preferredTileSize: fileTileSize,
+                      lineWidth: value,
+                      lineColor: activeLineColor,
+                    });
+                  }}
+                  minimumTrackTintColor="#22c55e"
+                  maximumTrackTintColor="#e5e7eb"
+                  thumbTintColor="#22c55e"
+                />
+              </ThemedView>
+              <ThemedView style={styles.sectionGroup}>
+                <ThemedText type="defaultSemiBold">Line Color</ThemedText>
+                <ThemedView style={styles.colorPickerWrap}>
+                  <ThemedView
+                    style={[styles.colorPreview, { backgroundColor: activeLineColor }]}
+                  />
+                  <ThemedView style={styles.colorRow}>
+                    <ThemedText type="defaultSemiBold">R</ThemedText>
+                    <Slider
+                      minimumValue={0}
+                      maximumValue={255}
+                      step={1}
+                      value={activeRed}
+                      onValueChange={(value) => {
                         if (!activeFileId) {
                           return;
                         }
@@ -1409,52 +1492,77 @@ export default function TestScreen() {
                           gridLayout,
                           category: selectedCategory,
                           preferredTileSize: fileTileSize,
-                          lineWidth: value,
-                          lineColor: activeLineColor,
+                          lineWidth: activeLineWidth,
+                          lineColor: rgbToHex(value, activeGreen, activeBlue),
                         });
                       }}
-                      style={[
-                        styles.resetButton,
-                        activeLineWidth === value && styles.overlayItemSelected,
-                      ]}
-                      accessibilityRole="button"
-                      accessibilityLabel={`Set line width to ${value}`}
-                    >
-                      <ThemedText type="defaultSemiBold">{value}</ThemedText>
-                    </Pressable>
-                  ))}
-                </ThemedView>
-              </ThemedView>
-              <ThemedView style={styles.sectionGroup}>
-                <ThemedText type="defaultSemiBold">Line Color</ThemedText>
-                <ThemedView style={styles.inlineOptions}>
-                  {['#ffffff', '#d1d5db', '#9ca3af', '#1f2937', '#0f172a'].map(
-                    (value) => (
-                      <Pressable
-                        key={`line-color-${value}`}
-                        onPress={() => {
-                          if (!activeFileId) {
-                            return;
-                          }
-                          upsertActiveFile({
-                            tiles,
-                            gridLayout,
-                            category: selectedCategory,
-                            preferredTileSize: fileTileSize,
-                            lineWidth: activeLineWidth,
-                            lineColor: value,
-                          });
-                        }}
-                        style={[
-                          styles.colorSwatch,
-                          { backgroundColor: value },
-                          activeLineColor === value && styles.colorSwatchSelected,
-                        ]}
-                        accessibilityRole="button"
-                        accessibilityLabel={`Set line color to ${value}`}
-                      />
-                    )
-                  )}
+                      minimumTrackTintColor="#ef4444"
+                      maximumTrackTintColor="#e5e7eb"
+                      thumbTintColor="#ef4444"
+                      style={styles.colorSlider}
+                    />
+                    <ThemedText type="defaultSemiBold">
+                      {Math.round(activeRed)}
+                    </ThemedText>
+                  </ThemedView>
+                  <ThemedView style={styles.colorRow}>
+                    <ThemedText type="defaultSemiBold">G</ThemedText>
+                    <Slider
+                      minimumValue={0}
+                      maximumValue={255}
+                      step={1}
+                      value={activeGreen}
+                      onValueChange={(value) => {
+                        if (!activeFileId) {
+                          return;
+                        }
+                        upsertActiveFile({
+                          tiles,
+                          gridLayout,
+                          category: selectedCategory,
+                          preferredTileSize: fileTileSize,
+                          lineWidth: activeLineWidth,
+                          lineColor: rgbToHex(activeRed, value, activeBlue),
+                        });
+                      }}
+                      minimumTrackTintColor="#22c55e"
+                      maximumTrackTintColor="#e5e7eb"
+                      thumbTintColor="#22c55e"
+                      style={styles.colorSlider}
+                    />
+                    <ThemedText type="defaultSemiBold">
+                      {Math.round(activeGreen)}
+                    </ThemedText>
+                  </ThemedView>
+                  <ThemedView style={styles.colorRow}>
+                    <ThemedText type="defaultSemiBold">B</ThemedText>
+                    <Slider
+                      minimumValue={0}
+                      maximumValue={255}
+                      step={1}
+                      value={activeBlue}
+                      onValueChange={(value) => {
+                        if (!activeFileId) {
+                          return;
+                        }
+                        upsertActiveFile({
+                          tiles,
+                          gridLayout,
+                          category: selectedCategory,
+                          preferredTileSize: fileTileSize,
+                          lineWidth: activeLineWidth,
+                          lineColor: rgbToHex(activeRed, activeGreen, value),
+                        });
+                      }}
+                      minimumTrackTintColor="#3b82f6"
+                      maximumTrackTintColor="#e5e7eb"
+                      thumbTintColor="#3b82f6"
+                      style={styles.colorSlider}
+                    />
+                    <ThemedText type="defaultSemiBold">
+                      {Math.round(activeBlue)}
+                    </ThemedText>
+                  </ThemedView>
                 </ThemedView>
               </ThemedView>
             </ThemedView>
@@ -1626,6 +1734,36 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 8,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  colorPickerWrap: {
+    width: '100%',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#1f1f1f',
+    padding: 10,
+    gap: 8,
+    backgroundColor: '#f8fafc',
+  },
+  colorPreview: {
+    width: '100%',
+    height: 36,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#1f1f1f',
+  },
+  colorRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  colorSlider: {
+    flex: 1,
   },
   colorSwatch: {
     width: 32,

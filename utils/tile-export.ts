@@ -11,6 +11,8 @@ type ExportParams = {
   gridGap: number;
   blankSource: unknown;
   errorSource: unknown;
+  lineColor?: string;
+  lineWidth?: number;
   fileName?: string;
 };
 
@@ -51,6 +53,80 @@ const loadImage = (uri: string) =>
     img.src = uri;
   });
 
+const stripOuterBorder = (xml: string) =>
+  xml.replace(/<rect\b[^>]*(x=["']0\.5["']|y=["']0\.5["'])[^>]*\/?>/gi, '');
+
+const applySvgOverrides = (xml: string, strokeColor?: string, strokeWidth?: number) => {
+  let next = xml;
+  const applyInlineOverrides = (input: string) => {
+    const tagRegex =
+      /<(path|rect|circle|line|polyline|polygon|ellipse)([^>]*?)(\/?)>/gi;
+    return input.replace(tagRegex, (_match, tagName, attrs, selfClosing) => {
+      let nextAttrs = attrs;
+      if (strokeColor) {
+        if (/stroke=/.test(nextAttrs)) {
+          nextAttrs = nextAttrs.replace(
+            /stroke="(?!none)[^"]*"/gi,
+            `stroke="${strokeColor}"`
+          );
+          nextAttrs = nextAttrs.replace(
+            /stroke='(?!none)[^']*'/gi,
+            `stroke='${strokeColor}'`
+          );
+        } else {
+          nextAttrs += ` stroke="${strokeColor}"`;
+        }
+      }
+      if (strokeWidth !== undefined) {
+        if (/stroke-width=/.test(nextAttrs)) {
+          nextAttrs = nextAttrs.replace(
+            /stroke-width="[^"]*"/gi,
+            `stroke-width="${strokeWidth}"`
+          );
+          nextAttrs = nextAttrs.replace(
+            /stroke-width='[^']*'/gi,
+            `stroke-width='${strokeWidth}'`
+          );
+        } else {
+          nextAttrs += ` stroke-width="${strokeWidth}"`;
+        }
+      }
+      const closing = selfClosing === '/' ? ' />' : '>';
+      return `<${tagName}${nextAttrs}${closing}`;
+    });
+  };
+
+  if (strokeColor) {
+    next = next.replace(/stroke="(?!none)[^"]*"/gi, `stroke="${strokeColor}"`);
+    next = next.replace(/stroke='(?!none)[^']*'/gi, `stroke='${strokeColor}'`);
+    if (!/stroke\s*=/.test(next)) {
+      next = next.replace(/<svg\b([^>]*)>/i, `<svg$1 stroke="${strokeColor}">`);
+    }
+  }
+  if (strokeWidth !== undefined) {
+    next = next.replace(/stroke-width="[^"]*"/gi, `stroke-width="${strokeWidth}"`);
+    next = next.replace(/stroke-width='[^']*'/gi, `stroke-width='${strokeWidth}'`);
+    if (!/stroke-width\s*=/.test(next)) {
+      next = next.replace(/<svg\b([^>]*)>/i, `<svg$1 stroke-width="${strokeWidth}">`);
+    }
+  }
+  if (strokeColor || strokeWidth !== undefined) {
+    const overrideRules = [
+      strokeColor ? `stroke: ${strokeColor} !important;` : '',
+      strokeWidth !== undefined
+        ? `stroke-width: ${strokeWidth} !important; vector-effect: non-scaling-stroke;`
+        : '',
+    ]
+      .filter(Boolean)
+      .join(' ');
+    const overrideStyle = `<style data-tile-overrides="true">* { ${overrideRules} }</style>`;
+    next = next.replace(/<style data-tile-overrides="true">[\s\S]*?<\/style>/i, '');
+    next = next.replace(/<svg\b([^>]*)>/i, `<svg$1>${overrideStyle}`);
+    next = applyInlineOverrides(next);
+  }
+  return next;
+};
+
 export const exportTileCanvasAsPng = async ({
   tiles,
   gridLayout,
@@ -88,6 +164,8 @@ export const renderTileCanvasToDataUrl = async ({
   gridGap,
   blankSource,
   errorSource,
+  lineColor,
+  lineWidth,
   maxDimension = 256,
 }: Omit<ExportParams, 'fileName'> & { maxDimension?: number }): Promise<string | null> => {
   if (Platform.OS !== 'web') {
@@ -116,17 +194,42 @@ export const renderTileCanvasToDataUrl = async ({
   }
 
   const uriCache = new Map<string, HTMLImageElement>();
-  const getImage = async (source: unknown) => {
+  const svgCache = new Map<string, string>();
+  const getImage = async (
+    source: unknown,
+    overrides?: { strokeColor?: string; strokeWidth?: number }
+  ) => {
     const uri = resolveSourceUri(source);
     if (!uri) {
       return null;
     }
-    const cached = uriCache.get(uri);
+    const cacheKey = overrides
+      ? `${uri}|${overrides.strokeColor ?? ''}|${overrides.strokeWidth ?? ''}`
+      : uri;
+    const cached = uriCache.get(cacheKey);
     if (cached) {
       return cached;
     }
+    if (uri.toLowerCase().includes('.svg')) {
+      let xml = svgCache.get(uri);
+      if (!xml) {
+        const response = await fetch(uri);
+        xml = await response.text();
+        svgCache.set(uri, xml);
+      }
+      let nextXml = stripOuterBorder(xml);
+      if (overrides) {
+        nextXml = applySvgOverrides(nextXml, overrides.strokeColor, overrides.strokeWidth);
+      }
+      const blob = new Blob([nextXml], { type: 'image/svg+xml' });
+      const blobUrl = URL.createObjectURL(blob);
+      const img = await loadImage(blobUrl);
+      URL.revokeObjectURL(blobUrl);
+      uriCache.set(cacheKey, img);
+      return img;
+    }
     const img = await loadImage(uri);
-    uriCache.set(uri, img);
+    uriCache.set(cacheKey, img);
     return img;
   };
 
@@ -147,7 +250,10 @@ export const renderTileCanvasToDataUrl = async ({
           : blankSource
         : tileSources[tile.imageIndex]?.source ?? errorSource;
 
-    const img = await getImage(source);
+    const img = await getImage(
+      source,
+      tile.imageIndex >= 0 ? { strokeColor: lineColor, strokeWidth: lineWidth } : undefined
+    );
     if (!img) {
       continue;
     }
