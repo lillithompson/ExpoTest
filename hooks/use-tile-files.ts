@@ -38,6 +38,7 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
   const [activeFileId, setActiveFileId] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
   const savingRef = useRef<Promise<void> | null>(null);
+  const defaultCategoryRef = useRef(defaultCategory);
 
   useEffect(() => {
     let mounted = true;
@@ -50,13 +51,14 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
         if (!mounted) {
           return;
         }
+        const fallbackCategory = defaultCategoryRef.current;
         const parsed = filesRaw
           ? (JSON.parse(filesRaw) as Array<Partial<TileFile>>).map((file) => ({
               id: file.id ?? createId(),
               name: file.name ?? 'Canvas',
               tiles: file.tiles ?? [],
               grid: file.grid ?? { rows: 0, columns: 0 },
-              category: (file.category ?? defaultCategory) as TileCategory,
+              category: (file.category ?? fallbackCategory) as TileCategory,
               preferredTileSize: file.preferredTileSize ?? 45,
               thumbnailUri: file.thumbnailUri ?? null,
               updatedAt: file.updatedAt ?? Date.now(),
@@ -64,7 +66,7 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
           : [];
         const activeId = activeRaw || null;
         if (parsed.length === 0) {
-          const initial = defaultFile(defaultCategory);
+          const initial = defaultFile(fallbackCategory);
           setFiles([initial]);
           setActiveFileId(initial.id);
           await AsyncStorage.setItem(FILES_KEY, JSON.stringify([initial]));
@@ -85,7 +87,7 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
     return () => {
       mounted = false;
     };
-  }, [defaultCategory]);
+  }, []);
 
   const persistFiles = useCallback(async (next: TileFile[], activeId: string | null) => {
     if (savingRef.current) {
@@ -242,7 +244,7 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
         return remaining;
       });
     },
-    [activeFileId, defaultCategory, persistFiles]
+    [activeFileId, persistFiles]
   );
 
   const activeFile = useMemo(

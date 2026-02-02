@@ -18,6 +18,7 @@ type Params = {
   gridGap: number;
   preferredTileSize: number;
   allowEdgeConnections: boolean;
+  suspendRemap?: boolean;
   brush:
     | { mode: 'random' }
     | { mode: 'erase' }
@@ -55,6 +56,7 @@ export const useTileGrid = ({
   gridGap,
   preferredTileSize,
   allowEdgeConnections,
+  suspendRemap = false,
   brush,
   mirrorHorizontal,
   mirrorVertical,
@@ -323,6 +325,9 @@ export const useTileGrid = ({
       return;
     }
     previousTileSourcesRef.current = tileSources;
+    if (suspendRemap) {
+      return;
+    }
     if (!previousSources) {
       return;
     }

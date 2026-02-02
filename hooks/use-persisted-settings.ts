@@ -9,7 +9,6 @@ export type AppSettings = {
   allowEdgeConnections: boolean;
   mirrorHorizontal: boolean;
   mirrorVertical: boolean;
-  selectedTileCategory: string;
 };
 
 const STORAGE_KEY = 'tile-settings-v1';
@@ -21,7 +20,6 @@ const getDefaultSettings = (): AppSettings => ({
   allowEdgeConnections: true,
   mirrorHorizontal: false,
   mirrorVertical: false,
-  selectedTileCategory: '',
 });
 
 type SetSettings = (updater: AppSettings | ((prev: AppSettings) => AppSettings)) => void;

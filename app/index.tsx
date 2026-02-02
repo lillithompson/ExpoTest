@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Image,
@@ -42,6 +42,7 @@ const BRUSH_PANEL_ROW_GAP = 1;
 const FILE_GRID_COLUMNS_MOBILE = 3;
 const FILE_GRID_SIDE_PADDING = 12;
 const FILE_GRID_GAP = 12;
+const DEFAULT_CATEGORY = TILE_CATEGORIES[0];
 const BLANK_TILE = require('@/assets/images/tiles/tile_blank.png');
 const ERROR_TILE = require('@/assets/images/tiles/tile_error.png');
 
@@ -189,15 +190,9 @@ export default function TestScreen() {
   const gridRef = useRef<View>(null);
   const gridOffsetRef = useRef({ x: 0, y: 0 });
   const { settings, setSettings } = usePersistedSettings();
-  const [selectedCategory, setSelectedCategory] = useState<TileCategory>(() => {
-    const defaultCategory = TILE_CATEGORIES[0];
-    if (!settings.selectedTileCategory) {
-      return defaultCategory;
-    }
-    return TILE_CATEGORIES.includes(settings.selectedTileCategory as TileCategory)
-      ? (settings.selectedTileCategory as TileCategory)
-      : defaultCategory;
-  });
+  const [selectedCategory, setSelectedCategory] = useState<TileCategory>(
+    () => DEFAULT_CATEGORY
+  );
   const [showTileSetOverlay, setShowTileSetOverlay] = useState(false);
   const [showSettingsOverlay, setShowSettingsOverlay] = useState(false);
   const [showNewFileModal, setShowNewFileModal] = useState(false);
@@ -207,6 +202,7 @@ export default function TestScreen() {
   const [showDownloadOverlay, setShowDownloadOverlay] = useState(false);
   const [downloadRenderKey, setDownloadRenderKey] = useState(0);
   const [downloadLoadedCount, setDownloadLoadedCount] = useState(0);
+  const [isHydratingFile, setIsHydratingFile] = useState(false);
   const NEW_FILE_TILE_SIZES = [25, 50, 75, 100, 150, 200] as const;
   const [viewMode, setViewMode] = useState<'modify' | 'file'>('file');
   const [brush, setBrush] = useState<
@@ -260,7 +256,7 @@ export default function TestScreen() {
     deleteFile,
     upsertActiveFile,
     ready,
-  } = useTileFiles(selectedCategory);
+  } = useTileFiles(DEFAULT_CATEGORY);
 
   const fileTileSize = activeFile?.preferredTileSize ?? settings.preferredTileSize;
 
@@ -284,6 +280,7 @@ export default function TestScreen() {
     gridGap: GRID_GAP,
     preferredTileSize: fileTileSize,
     allowEdgeConnections: settings.allowEdgeConnections,
+    suspendRemap: isHydratingFile,
     brush,
     mirrorHorizontal: settings.mirrorHorizontal,
     mirrorVertical: settings.mirrorVertical,
@@ -307,6 +304,7 @@ export default function TestScreen() {
   const isHydratingFileRef = useRef(false);
   const viewShotRef = useRef<ViewShot>(null);
   const downloadTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingSwitchRef = useRef<string | null>(null);
   const downloadExpectedRef = useRef(0);
   const pendingRestoreRef = useRef<{
     fileId: string;
@@ -314,7 +312,12 @@ export default function TestScreen() {
     rows: number;
     columns: number;
     preferredTileSize: number;
+    category: TileCategory;
   } | null>(null);
+  const setHydrating = useCallback((value: boolean) => {
+    isHydratingFileRef.current = value;
+    setIsHydratingFile(value);
+  }, []);
   const rowIndices = useMemo(
     () => Array.from({ length: gridLayout.rows }, (_, index) => index),
     [gridLayout.rows]
@@ -329,16 +332,6 @@ export default function TestScreen() {
   );
 
   useEffect(() => {
-    if (
-      settings.selectedTileCategory &&
-      settings.selectedTileCategory !== selectedCategory &&
-      TILE_CATEGORIES.includes(settings.selectedTileCategory as TileCategory)
-    ) {
-      setSelectedCategory(settings.selectedTileCategory as TileCategory);
-    }
-  }, [selectedCategory, settings.selectedTileCategory]);
-
-  useEffect(() => {
     if (brush.mode !== 'clone') {
       clearCloneSource();
     }
@@ -348,7 +341,11 @@ export default function TestScreen() {
     if (!ready || !activeFile) {
       return;
     }
-    if (lastLoadedFileRef.current === activeFile.id) {
+    if (
+      lastLoadedFileRef.current === activeFile.id &&
+      activeFile.category === selectedCategory &&
+      pendingSwitchRef.current !== activeFile.id
+    ) {
       return;
     }
     lastLoadedFileRef.current = activeFile.id;
@@ -361,13 +358,20 @@ export default function TestScreen() {
       rows: activeFile.grid.rows,
       columns: activeFile.grid.columns,
       preferredTileSize: activeFile.preferredTileSize,
+      category: activeFile.category,
     };
-    isHydratingFileRef.current = true;
-  }, [activeFile, ready, selectedCategory]);
+    setHydrating(true);
+    if (pendingSwitchRef.current === activeFile.id) {
+      pendingSwitchRef.current = null;
+    }
+  }, [activeFile, ready, selectedCategory, setHydrating]);
 
   useEffect(() => {
     const pending = pendingRestoreRef.current;
     if (!pending || activeFileId !== pending.fileId) {
+      return;
+    }
+    if (pending.category !== selectedCategory) {
       return;
     }
     const gridMatches =
@@ -376,16 +380,24 @@ export default function TestScreen() {
     if (gridLayout.tileSize > 0 && (gridMatches || allowFallback || pending.tiles.length > 0)) {
       loadTiles(pending.tiles);
       pendingRestoreRef.current = null;
-      isHydratingFileRef.current = false;
+      setHydrating(false);
     }
-  }, [activeFileId, gridLayout.tileSize, gridLayout.columns, gridLayout.rows, loadTiles]);
+  }, [
+    activeFileId,
+    selectedCategory,
+    gridLayout.tileSize,
+    gridLayout.columns,
+    gridLayout.rows,
+    loadTiles,
+    setHydrating,
+  ]);
 
   useEffect(() => {
     if (!ready || !activeFileId) {
       return;
     }
     const pending = pendingRestoreRef.current;
-    if (isHydratingFileRef.current || (pending && pending.fileId === activeFileId)) {
+    if (isHydratingFile || (pending && pending.fileId === activeFileId)) {
       return;
     }
     if (saveTimeoutRef.current) {
@@ -416,7 +428,16 @@ export default function TestScreen() {
         clearTimeout(saveTimeoutRef.current);
       }
     };
-  }, [tiles, gridLayout, selectedCategory, fileTileSize, ready, activeFileId, upsertActiveFile]);
+  }, [
+    tiles,
+    gridLayout,
+    selectedCategory,
+    fileTileSize,
+    ready,
+    activeFileId,
+    upsertActiveFile,
+    isHydratingFile,
+  ]);
 
   const getRelativePoint = (event: any) => {
     if (isWeb) {
@@ -616,18 +637,9 @@ export default function TestScreen() {
     if (!file) {
       return;
     }
-    lastLoadedFileRef.current = file.id;
-    if (file.category !== selectedCategory) {
-      setSelectedCategory(file.category);
-    }
-    pendingRestoreRef.current = {
-      fileId: file.id,
-      tiles: file.tiles,
-      rows: file.grid.rows,
-      columns: file.grid.columns,
-      preferredTileSize: file.preferredTileSize,
-    };
-    isHydratingFileRef.current = true;
+    lastLoadedFileRef.current = null;
+    pendingSwitchRef.current = file.id;
+    setHydrating(true);
     setActive(file.id);
     setViewMode('modify');
   };
@@ -978,18 +990,8 @@ export default function TestScreen() {
                   <Pressable
                     key={`new-file-size-${size}`}
                     onPress={() => {
-                      const newId = createFile(selectedCategory, size);
-                      if (newId) {
-                        lastLoadedFileRef.current = newId;
-                        pendingRestoreRef.current = {
-                          fileId: newId,
-                          tiles: [],
-                          rows: 0,
-                          columns: 0,
-                          preferredTileSize: size,
-                        };
-                        isHydratingFileRef.current = true;
-                      }
+                      createFile(selectedCategory, size);
+                      lastLoadedFileRef.current = null;
                       setShowNewFileModal(false);
                       setViewMode('modify');
                     }}
@@ -1374,10 +1376,14 @@ export default function TestScreen() {
                     key={category}
                     onPress={() => {
                       setSelectedCategory(category);
-                      setSettings((prev) => ({
-                        ...prev,
-                        selectedTileCategory: category,
-                      }));
+                      if (activeFileId) {
+                        upsertActiveFile({
+                          tiles,
+                          gridLayout,
+                          category,
+                          preferredTileSize: fileTileSize,
+                        });
+                      }
                       setShowTileSetOverlay(false);
                     }}
                     style={[
