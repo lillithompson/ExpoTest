@@ -1,6 +1,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
+  Animated,
   Image,
   Platform,
   Pressable,
@@ -508,6 +509,9 @@ export default function TestScreen() {
   const [downloadRenderKey, setDownloadRenderKey] = useState(0);
   const [downloadLoadedCount, setDownloadLoadedCount] = useState(0);
   const [includeDownloadBackground, setIncludeDownloadBackground] = useState(true);
+  const [isSelectMode, setIsSelectMode] = useState(false);
+  const [selectedFileIds, setSelectedFileIds] = useState<Set<string>>(new Set());
+  const selectBarAnim = useRef(new Animated.Value(0)).current;
   const [isHydratingFile, setIsHydratingFile] = useState(false);
   const [showGrid, setShowGrid] = useState(true);
   const [isPrefetchingTiles, setIsPrefetchingTiles] = useState(false);
@@ -687,6 +691,14 @@ export default function TestScreen() {
       clearCloneSource();
     }
   }, [brush.mode, clearCloneSource]);
+
+  useEffect(() => {
+    Animated.timing(selectBarAnim, {
+      toValue: isSelectMode ? 1 : 0,
+      duration: 180,
+      useNativeDriver: false,
+    }).start();
+  }, [isSelectMode, selectBarAnim]);
 
   useEffect(() => {
     if (activeFile?.category && TILE_MANIFEST[activeFile.category]) {
@@ -1238,6 +1250,34 @@ export default function TestScreen() {
     setViewMode('modify');
   };
 
+  const toggleSelectFile = (fileId: string) => {
+    setSelectedFileIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(fileId)) {
+        next.delete(fileId);
+      } else {
+        next.add(fileId);
+      }
+      return next;
+    });
+  };
+
+  const clearSelection = () => {
+    setSelectedFileIds(new Set());
+    setIsSelectMode(false);
+  };
+
+  const deleteSelectedFiles = () => {
+    if (selectedFileIds.size === 0) {
+      clearSelection();
+      return;
+    }
+    selectedFileIds.forEach((fileId) => {
+      deleteFile(fileId);
+    });
+    clearSelection();
+  };
+
   const handleDownloadPng = async () => {
     if (!downloadTargetFile) {
       return;
@@ -1363,8 +1403,53 @@ export default function TestScreen() {
               color="#fff"
               onPress={() => setShowSettingsOverlay(true)}
             />
+            <ToolbarButton
+              label="Select files"
+              icon="checkbox-marked-outline"
+              color="#fff"
+              onPress={() => {
+                setIsSelectMode(true);
+              }}
+            />
           </ThemedView>
         </ThemedView>
+        <Animated.View
+          style={[
+            styles.fileSelectBar,
+            {
+              height: selectBarAnim.interpolate({
+                inputRange: [0, 1],
+                outputRange: [0, 44],
+              }),
+              opacity: selectBarAnim,
+            },
+          ]}
+          pointerEvents={isSelectMode ? 'auto' : 'none'}
+        >
+          <Pressable
+            onPress={deleteSelectedFiles}
+            style={styles.fileSelectDelete}
+            accessibilityRole="button"
+            accessibilityLabel="Delete selected files"
+          >
+            <ThemedText type="defaultSemiBold" style={styles.fileSelectDeleteText}>
+              Delete
+            </ThemedText>
+          </Pressable>
+          <ThemedText type="defaultSemiBold" style={styles.fileSelectCount}>
+            {selectedFileIds.size > 0 ? `${selectedFileIds.size} selected` : ''}
+          </ThemedText>
+          <Pressable
+            onPress={clearSelection}
+            style={styles.fileSelectButton}
+            accessibilityRole="button"
+            accessibilityLabel="Exit selection mode"
+          >
+            <ThemedText type="defaultSemiBold" style={styles.fileSelectExitText}>
+              X
+            </ThemedText>
+          </Pressable>
+        </Animated.View>
         <ScrollView
           style={styles.fileScroll}
           contentContainerStyle={styles.fileGrid}
@@ -1383,9 +1468,16 @@ export default function TestScreen() {
                 key={file.id}
                 style={[styles.fileCard, { width: fileCardWidth }]}
                 onPress={() => {
-                  void openFileInModifyView(file.id);
+                  if (isSelectMode) {
+                    toggleSelectFile(file.id);
+                  } else {
+                    void openFileInModifyView(file.id);
+                  }
                 }}
                 onLongPress={() => {
+                  if (isSelectMode) {
+                    return;
+                  }
                   setIncludeDownloadBackground(true);
                   setFileMenuTargetId(file.id);
                 }}
@@ -1396,6 +1488,7 @@ export default function TestScreen() {
                 <ThemedView
                   style={[
                     styles.fileThumb,
+                    selectedFileIds.has(file.id) && styles.fileThumbSelected,
                     { width: fileCardWidth, aspectRatio: thumbAspect },
                   ]}
                 >
@@ -2602,6 +2695,31 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     backgroundColor: '#2a2a2a',
   },
+  fileSelectBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 12,
+    backgroundColor: '#1f1f1f',
+    overflow: 'hidden',
+  },
+  fileSelectButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 8,
+  },
+  fileSelectDelete: {
+    paddingVertical: 8,
+    paddingHorizontal: 8,
+  },
+  fileSelectDeleteText: {
+    color: '#dc2626',
+  },
+  fileSelectExitText: {
+    color: '#fff',
+  },
+  fileSelectCount: {
+    color: '#9ca3af',
+  },
   fileHeaderActions: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -2637,6 +2755,10 @@ const styles = StyleSheet.create({
     borderColor: '#1f1f1f',
     backgroundColor: '#111',
     padding: 4,
+  },
+  fileThumbSelected: {
+    borderColor: '#22c55e',
+    borderWidth: 2,
   },
   fileThumbGrid: {
     flex: 1,
