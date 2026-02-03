@@ -1881,15 +1881,26 @@ export default function TestScreen() {
           </ThemedView>
         )}
         {showSettingsOverlay && (
-          <ThemedView style={styles.overlay} accessibilityRole="dialog">
-            <Pressable
-              style={styles.overlayBackdrop}
-              onPress={() => setShowSettingsOverlay(false)}
-              accessibilityRole="button"
-              accessibilityLabel="Close settings"
-            />
-            <ThemedView style={styles.overlayPanel}>
+          <ThemedView
+            style={[styles.settingsScreen, { paddingTop: insets.top }]}
+            accessibilityRole="dialog"
+          >
+            <ThemedView style={styles.settingsHeader}>
               <ThemedText type="title">Settings</ThemedText>
+              <Pressable
+                onPress={() => setShowSettingsOverlay(false)}
+                style={styles.settingsClose}
+                accessibilityRole="button"
+                accessibilityLabel="Close settings"
+              >
+                <ThemedText type="defaultSemiBold">X</ThemedText>
+              </Pressable>
+            </ThemedView>
+            <ScrollView
+              style={styles.settingsScroll}
+              contentContainerStyle={styles.settingsContent}
+              showsVerticalScrollIndicator
+            >
               <ThemedView style={styles.toggleRow}>
                 <ThemedText type="defaultSemiBold">Allow Border Connections</ThemedText>
                 <Switch
@@ -1953,7 +1964,7 @@ export default function TestScreen() {
                   thumbTintColor="#22c55e"
                 />
               </ThemedView>
-            </ThemedView>
+            </ScrollView>
           </ThemedView>
         )}
       </ThemedView>
@@ -2461,17 +2472,28 @@ export default function TestScreen() {
           </ThemedView>
         )}
         {showSettingsOverlay && (
-          <ThemedView style={styles.overlay} accessibilityRole="dialog">
-            <Pressable
-              style={styles.overlayBackdrop}
-              onPress={() => setShowSettingsOverlay(false)}
-              accessibilityRole="button"
-              accessibilityLabel="Close settings"
-            />
-            <ThemedView style={styles.overlayPanel}>
+          <ThemedView
+            style={[styles.settingsScreen, { paddingTop: insets.top }]}
+            accessibilityRole="dialog"
+          >
+            <ThemedView style={styles.settingsHeader}>
               <ThemedText type="title">Settings</ThemedText>
+              <Pressable
+                onPress={() => setShowSettingsOverlay(false)}
+                style={styles.settingsClose}
+                accessibilityRole="button"
+                accessibilityLabel="Close settings"
+              >
+                <ThemedText type="defaultSemiBold">X</ThemedText>
+              </Pressable>
+            </ThemedView>
+            <ScrollView
+              style={styles.settingsScroll}
+              contentContainerStyle={styles.settingsContent}
+              showsVerticalScrollIndicator
+            >
               <ThemedView style={styles.toggleRow}>
-                <ThemedText type="defaultSemiBold">AllowEdgeConections</ThemedText>
+                <ThemedText type="defaultSemiBold">Allow Border Connections</ThemedText>
                 <Switch
                   value={settings.allowEdgeConnections}
                   onValueChange={(value) =>
@@ -2482,7 +2504,7 @@ export default function TestScreen() {
               </ThemedView>
               <Pressable
                 onPress={handleDownload}
-                style={styles.resetButton}
+                style={styles.settingsAction}
                 accessibilityRole="button"
                 accessibilityLabel="Download tile canvas"
               >
@@ -2541,7 +2563,7 @@ export default function TestScreen() {
                   thumbTintColor="#22c55e"
                 />
               </ThemedView>
-            </ThemedView>
+            </ScrollView>
           </ThemedView>
         )}
       </ThemedView>
@@ -2644,6 +2666,39 @@ const styles = StyleSheet.create({
     padding: 16,
     backgroundColor: '#fff',
     gap: 12,
+  },
+  settingsScreen: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: '#fff',
+    zIndex: 20,
+  },
+  settingsHeader: {
+    height: HEADER_HEIGHT,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e5e7eb',
+  },
+  settingsClose: {
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+  },
+  settingsScroll: {
+    flex: 1,
+  },
+  settingsContent: {
+    padding: 16,
+    gap: 12,
+  },
+  settingsAction: {
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderColor: '#1f1f1f',
+    borderRadius: 6,
+    alignItems: 'center',
   },
   overlayList: {
     gap: 8,
