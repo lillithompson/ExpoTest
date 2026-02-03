@@ -7,6 +7,9 @@ export type AppSettings = {
   allowEdgeConnections: boolean;
   mirrorHorizontal: boolean;
   mirrorVertical: boolean;
+  backgroundColor: string;
+  backgroundLineColor: string;
+  backgroundLineWidth: number;
 };
 
 const STORAGE_KEY = 'tile-settings-v1';
@@ -17,6 +20,9 @@ const getDefaultSettings = (): AppSettings => ({
   allowEdgeConnections: true,
   mirrorHorizontal: false,
   mirrorVertical: false,
+  backgroundColor: '#4b5a6b',
+  backgroundLineColor: '#d1d5db',
+  backgroundLineWidth: 1,
 });
 
 type SetSettings = (updater: AppSettings | ((prev: AppSettings) => AppSettings)) => void;

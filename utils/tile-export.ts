@@ -13,6 +13,9 @@ type ExportParams = {
   errorSource: unknown;
   lineColor?: string;
   lineWidth?: number;
+  backgroundColor?: string;
+  backgroundLineColor?: string;
+  backgroundLineWidth?: number;
   fileName?: string;
 };
 
@@ -166,6 +169,9 @@ export const renderTileCanvasToDataUrl = async ({
   errorSource,
   lineColor,
   lineWidth,
+  backgroundColor,
+  backgroundLineColor,
+  backgroundLineWidth,
   maxDimension = 256,
   format = 'image/png',
   quality,
@@ -197,6 +203,29 @@ export const renderTileCanvasToDataUrl = async ({
   const ctx = canvas.getContext('2d');
   if (!ctx) {
     return null;
+  }
+
+  if (backgroundColor) {
+    ctx.fillStyle = backgroundColor;
+    ctx.fillRect(0, 0, totalWidth, totalHeight);
+  }
+
+  const lineWidthValue = Math.max(0, backgroundLineWidth ?? 0);
+  if (lineWidthValue > 0 && backgroundLineColor) {
+    ctx.strokeStyle = backgroundLineColor;
+    ctx.lineWidth = lineWidthValue;
+    ctx.beginPath();
+    for (let col = 1; col < gridLayout.columns; col += 1) {
+      const x = col * (gridLayout.tileSize + gridGap);
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, totalHeight);
+    }
+    for (let row = 1; row < gridLayout.rows; row += 1) {
+      const y = row * (gridLayout.tileSize + gridGap);
+      ctx.moveTo(0, y);
+      ctx.lineTo(totalWidth, y);
+    }
+    ctx.stroke();
   }
 
   const uriCache = new Map<string, HTMLImageElement>();
@@ -253,8 +282,12 @@ export const renderTileCanvasToDataUrl = async ({
       tile.imageIndex < 0
         ? tile.imageIndex === -2
           ? errorSource
-          : blankSource
+          : null
         : tileSources[tile.imageIndex]?.source ?? errorSource;
+
+    if (!source) {
+      continue;
+    }
 
     const img = await getImage(
       source,

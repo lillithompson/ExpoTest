@@ -232,7 +232,15 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
   );
 
   const downloadFile = useCallback(
-    async (file: TileFile, tileSources: { source: unknown }[]) => {
+    async (
+      file: TileFile,
+      tileSources: { source: unknown }[],
+      options?: {
+        backgroundColor?: string;
+        backgroundLineColor?: string;
+        backgroundLineWidth?: number;
+      }
+    ) => {
       const dataUrl = await renderTileCanvasToDataUrl({
         tiles: file.tiles,
         gridLayout: {
@@ -246,6 +254,9 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
         errorSource: null,
         lineColor: file.lineColor,
         lineWidth: file.lineWidth,
+        backgroundColor: options?.backgroundColor,
+        backgroundLineColor: options?.backgroundLineColor,
+        backgroundLineWidth: options?.backgroundLineWidth,
         maxDimension: 0,
       });
       if (!dataUrl || typeof document === 'undefined') {
