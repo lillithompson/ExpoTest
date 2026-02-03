@@ -439,7 +439,7 @@ const TileCell = memo(
         style={[
           styles.tile,
           { width: tileSize, height: tileSize },
-          isCloneSource && styles.cloneSource,
+          showOverlays && isCloneSource && styles.cloneSource,
         ]}
       >
         {source && (
@@ -612,7 +612,7 @@ export default function TestScreen() {
     mirrorVertical: settings.mirrorVertical,
   });
   const displayTiles = tiles;
-  const showOverlays = !isCapturingPreview;
+  const showOverlays = !isCapturingPreview && !suspendTiles && showGrid;
   const gridWidth =
     gridLayout.columns * gridLayout.tileSize +
     GRID_GAP * Math.max(0, gridLayout.columns - 1);
@@ -747,6 +747,10 @@ export default function TestScreen() {
     setShowGrid(false);
     setHydrating(true);
     setSuspendTiles(true);
+    clearCloneSource();
+    if (brush.mode === 'clone') {
+      setBrush({ mode: 'random' });
+    }
     if (file.tiles.length === 0) {
       resetTiles();
     }
@@ -760,7 +764,7 @@ export default function TestScreen() {
       token: nextToken,
       preview: Boolean(previewUri),
     };
-  }, [activeFileId, loadRequestId, ready, viewMode, selectedCategory]);
+  }, [activeFileId, loadRequestId, ready, viewMode, selectedCategory, clearCloneSource]);
 
   useEffect(() => {
     if (viewMode !== 'modify') {
