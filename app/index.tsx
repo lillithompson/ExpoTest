@@ -267,16 +267,25 @@ function HsvColorPicker({ label, color, onChange }: HsvColorPickerProps) {
 type ToolbarButtonProps = {
   label: string;
   onPress: () => void;
+  onLongPress?: () => void;
   icon: React.ComponentProps<typeof MaterialCommunityIcons>['name'];
   active?: boolean;
   color?: string;
 };
 
-function ToolbarButton({ label, onPress, icon, active, color }: ToolbarButtonProps) {
+function ToolbarButton({
+  label,
+  onPress,
+  onLongPress,
+  icon,
+  active,
+  color,
+}: ToolbarButtonProps) {
   const [hovered, setHovered] = useState(false);
   return (
     <Pressable
       onPress={onPress}
+      onLongPress={onLongPress}
       style={styles.toolbarButton}
       accessibilityRole="button"
       accessibilityLabel={label}
@@ -588,6 +597,7 @@ export default function TestScreen() {
     gridLayout,
     tiles,
     handlePress,
+    floodFill,
     floodComplete,
     resetTiles,
     loadTiles,
@@ -2013,6 +2023,13 @@ export default function TestScreen() {
                   pendingFloodCompleteRef.current = null;
                   floodComplete();
                 }, 0);
+              }}
+              onLongPress={() => {
+                if (pendingFloodCompleteRef.current) {
+                  clearTimeout(pendingFloodCompleteRef.current);
+                  pendingFloodCompleteRef.current = null;
+                }
+                floodFill();
               }}
             />
             <ToolbarButton
