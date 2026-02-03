@@ -31,7 +31,11 @@ import { ThemedView } from '@/components/themed-view';
 import { useTileGrid } from '@/hooks/use-tile-grid';
 import { usePersistedSettings } from '@/hooks/use-persisted-settings';
 import { useTileFiles } from '@/hooks/use-tile-files';
-import { renderTileCanvasToDataUrl } from '@/utils/tile-export';
+import {
+  exportTileCanvasAsSvg,
+  renderTileCanvasToDataUrl,
+  renderTileCanvasToSvg,
+} from '@/utils/tile-export';
 import { getTransformedConnectionsForName } from '@/utils/tile-compat';
 import { normalizeTiles, type Tile } from '@/utils/tile-grid';
 
@@ -625,7 +629,6 @@ export default function TestScreen() {
   const loadTokenRef = useRef(0);
   const isHydratingFileRef = useRef(false);
   const viewShotRef = useRef<ViewShot>(null);
-  const downloadTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const downloadExpectedRef = useRef(0);
   const pendingFloodCompleteRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const suppressAutosaveRef = useRef(false);
@@ -1235,81 +1238,9 @@ export default function TestScreen() {
     setShowDownloadOverlay(true);
   }, [downloadTargetFile, downloadPreviewUri]);
 
-  useEffect(() => {
-    if (!downloadTargetFile || isDownloading || Platform.OS === 'web') {
-      return;
-    }
-    const captureAndShare = async () => {
-      const canShare = await Sharing.isAvailableAsync();
-      if (!canShare) {
-        Alert.alert('Download unavailable', 'Sharing is not available on this device.');
-        return false;
-      }
-      for (let attempt = 0; attempt < 6; attempt += 1) {
-        await new Promise((resolve) => setTimeout(resolve, 120));
-        const uri = await viewShotRef.current?.capture?.({
-          format: 'png',
-          quality: 1,
-          result: 'tmpfile',
-        });
-        if (uri) {
-          const safeName = downloadTargetFile.name.replace(/[^\w-]+/g, '_');
-          const target = `${FileSystem.cacheDirectory}${safeName}.png`;
-          await FileSystem.copyAsync({ from: uri, to: target });
-          await Sharing.shareAsync(target);
-          return true;
-        }
-      }
-      Alert.alert('Download failed', 'Unable to capture the canvas image.');
-      return false;
-    };
-
-    const expected = downloadExpectedRef.current;
-    const loaded = downloadLoadedCount;
-    const trigger = expected === 0 || loaded >= expected;
-    if (!trigger) {
-      if (downloadTimeoutRef.current) {
-        clearTimeout(downloadTimeoutRef.current);
-      }
-      downloadTimeoutRef.current = setTimeout(() => {
-        setIsDownloading(true);
-        void (async () => {
-          try {
-            await captureAndShare();
-          } finally {
-            setIsDownloading(false);
-            setDownloadTargetId(null);
-            setShowDownloadOverlay(false);
-          }
-        })();
-      }, 1500);
-      return () => {
-        if (downloadTimeoutRef.current) {
-          clearTimeout(downloadTimeoutRef.current);
-          downloadTimeoutRef.current = null;
-        }
-      };
-    }
-    setIsDownloading(true);
-    const timer = setTimeout(() => {
-      void (async () => {
-        try {
-          await captureAndShare();
-        } finally {
-          setIsDownloading(false);
-          setDownloadTargetId(null);
-          setShowDownloadOverlay(false);
-        }
-      })();
-    }, 200);
-    return () => {
-      clearTimeout(timer);
-      if (downloadTimeoutRef.current) {
-        clearTimeout(downloadTimeoutRef.current);
-        downloadTimeoutRef.current = null;
-      }
-    };
-  }, [downloadTargetFile, isDownloading, downloadRenderKey, downloadLoadedCount]);
+  const downloadReady =
+    downloadExpectedRef.current === 0 ||
+    downloadLoadedCount >= downloadExpectedRef.current;
 
   const openFileInModifyView = async (fileId: string) => {
     await persistActiveFileNow();
@@ -1326,6 +1257,85 @@ export default function TestScreen() {
     setHydrating(true);
     setActive(file.id);
     setViewMode('modify');
+  };
+
+  const handleDownloadPng = async () => {
+    if (!downloadTargetFile) {
+      return;
+    }
+    if (!downloadReady) {
+      return;
+    }
+    setIsDownloading(true);
+    try {
+      const canShare = await Sharing.isAvailableAsync();
+      if (!canShare) {
+        Alert.alert('Download unavailable', 'Sharing is not available on this device.');
+        return;
+      }
+      const uri = await viewShotRef.current?.capture?.({
+        format: 'png',
+        quality: 1,
+        result: 'tmpfile',
+      });
+      if (!uri) {
+        Alert.alert('Download failed', 'Unable to capture the canvas image.');
+        return;
+      }
+      const safeName = downloadTargetFile.name.replace(/[^\w-]+/g, '_');
+      const target = `${FileSystem.cacheDirectory}${safeName}.png`;
+      await FileSystem.copyAsync({ from: uri, to: target });
+      await Sharing.shareAsync(target);
+    } finally {
+      setIsDownloading(false);
+      setDownloadTargetId(null);
+      setShowDownloadOverlay(false);
+    }
+  };
+
+  const handleDownloadSvg = async () => {
+    if (!downloadTargetFile) {
+      return;
+    }
+    setIsDownloading(true);
+    try {
+      const sources = TILE_MANIFEST[downloadTargetFile.category] ?? [];
+      const svg = await renderTileCanvasToSvg({
+        tiles: downloadTargetFile.tiles,
+        gridLayout: {
+          rows: downloadTargetFile.grid.rows,
+          columns: downloadTargetFile.grid.columns,
+          tileSize: downloadTargetFile.preferredTileSize,
+        },
+        tileSources: sources,
+        gridGap: GRID_GAP,
+        errorSource: ERROR_TILE,
+        lineColor: downloadTargetFile.lineColor,
+        lineWidth: downloadTargetFile.lineWidth,
+        backgroundColor: includeDownloadBackground
+          ? settings.backgroundColor
+          : undefined,
+      });
+      if (!svg) {
+        Alert.alert('Download failed', 'Unable to render the SVG.');
+        return;
+      }
+      const canShare = await Sharing.isAvailableAsync();
+      if (!canShare) {
+        Alert.alert('Download unavailable', 'Sharing is not available on this device.');
+        return;
+      }
+      const safeName = downloadTargetFile.name.replace(/[^\w-]+/g, '_');
+      const target = `${FileSystem.cacheDirectory}${safeName}.svg`;
+      await FileSystem.writeAsStringAsync(target, svg, {
+        encoding: FileSystem.EncodingType.UTF8,
+      });
+      await Sharing.shareAsync(target);
+    } finally {
+      setIsDownloading(false);
+      setDownloadTargetId(null);
+      setShowDownloadOverlay(false);
+    }
   };
 
   if (viewMode === 'file') {
@@ -1576,11 +1586,15 @@ export default function TestScreen() {
               </ThemedView>
               <ThemedView style={styles.downloadActions}>
                 <Pressable
-                  style={styles.downloadActionButton}
+                  style={[
+                    styles.downloadActionButton,
+                    isDownloading && styles.downloadActionDisabled,
+                  ]}
                   onPress={() => {
                     setShowDownloadOverlay(false);
                     setDownloadTargetId(null);
                   }}
+                  disabled={isDownloading}
                   accessibilityRole="button"
                   accessibilityLabel="Cancel download"
                 >
@@ -1589,47 +1603,48 @@ export default function TestScreen() {
                   </ThemedText>
                 </Pressable>
                 <Pressable
-                  style={[styles.downloadActionButton, styles.downloadPrimaryButton]}
+                  style={[
+                    styles.downloadActionButton,
+                    isDownloading && styles.downloadActionDisabled,
+                  ]}
                   onPress={() => {
-                    setIsDownloading(true);
-                    void (async () => {
-                      try {
-                        const canShare = await Sharing.isAvailableAsync();
-                        if (!canShare) {
-                          Alert.alert(
-                            'Download unavailable',
-                            'Sharing is not available on this device.'
-                          );
-                          return;
-                        }
-                        const uri = await viewShotRef.current?.capture?.({
-                          format: 'png',
-                          quality: 1,
-                          result: 'tmpfile',
-                        });
-                        if (!uri) {
-                          Alert.alert('Download failed', 'Unable to capture the canvas image.');
-                          return;
-                        }
-                        const safeName = downloadTargetFile.name.replace(/[^\w-]+/g, '_');
-                        const target = `${FileSystem.cacheDirectory}${safeName}.png`;
-                        await FileSystem.copyAsync({ from: uri, to: target });
-                        await Sharing.shareAsync(target);
-                      } finally {
-                        setIsDownloading(false);
-                        setDownloadTargetId(null);
-                        setShowDownloadOverlay(false);
-                      }
-                    })();
+                    if (isDownloading) {
+                      return;
+                    }
+                    void handleDownloadSvg();
                   }}
+                  disabled={isDownloading}
                   accessibilityRole="button"
-                  accessibilityLabel="Download now"
+                  accessibilityLabel="Download SVG"
+                >
+                  <ThemedText
+                    type="defaultSemiBold"
+                    style={styles.downloadActionText}
+                  >
+                    SVG
+                  </ThemedText>
+                </Pressable>
+                <Pressable
+                  style={[
+                    styles.downloadActionButton,
+                    styles.downloadPrimaryButton,
+                    (!downloadReady || isDownloading) && styles.downloadActionDisabled,
+                  ]}
+                  onPress={() => {
+                    if (!downloadReady || isDownloading) {
+                      return;
+                    }
+                    void handleDownloadPng();
+                  }}
+                  disabled={!downloadReady || isDownloading}
+                  accessibilityRole="button"
+                  accessibilityLabel="Download PNG"
                 >
                   <ThemedText
                     type="defaultSemiBold"
                     style={[styles.downloadActionText, styles.downloadPrimaryText]}
                   >
-                    Download
+                    PNG
                   </ThemedText>
                 </Pressable>
               </ThemedView>
@@ -1674,10 +1689,45 @@ export default function TestScreen() {
                   setFileMenuTargetId(null);
                 }}
                 accessibilityRole="button"
-                accessibilityLabel="Download file"
+                accessibilityLabel={Platform.OS === 'web' ? 'Download PNG' : 'Download file'}
               >
-                <ThemedText type="defaultSemiBold">Download</ThemedText>
+                <ThemedText type="defaultSemiBold">
+                  {Platform.OS === 'web' ? 'Download PNG' : 'Download'}
+                </ThemedText>
               </Pressable>
+              {Platform.OS === 'web' && (
+                <Pressable
+                  style={styles.fileMenuButton}
+                  onPress={() => {
+                    const file = files.find((entry) => entry.id === fileMenuTargetId);
+                    if (file) {
+                      const sources = TILE_MANIFEST[file.category] ?? [];
+                      void exportTileCanvasAsSvg({
+                        tiles: file.tiles,
+                        gridLayout: {
+                          rows: file.grid.rows,
+                          columns: file.grid.columns,
+                          tileSize: file.preferredTileSize,
+                        },
+                        tileSources: sources,
+                        gridGap: GRID_GAP,
+                        errorSource: ERROR_TILE,
+                        lineColor: file.lineColor,
+                        lineWidth: file.lineWidth,
+                        backgroundColor: includeDownloadBackground
+                          ? settings.backgroundColor
+                          : undefined,
+                        fileName: `${file.name}.svg`,
+                      });
+                    }
+                    setFileMenuTargetId(null);
+                  }}
+                  accessibilityRole="button"
+                  accessibilityLabel="Download SVG"
+                >
+                  <ThemedText type="defaultSemiBold">Download SVG</ThemedText>
+                </Pressable>
+              )}
               <Pressable
                 style={styles.fileMenuButton}
                 onPress={() => {
@@ -2705,6 +2755,9 @@ const styles = StyleSheet.create({
     minWidth: 72,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  downloadActionDisabled: {
+    opacity: 0.5,
   },
   downloadPrimaryButton: {
     backgroundColor: 'transparent',

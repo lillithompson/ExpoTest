@@ -59,6 +59,46 @@ const loadImage = (uri: string) =>
 const stripOuterBorder = (xml: string) =>
   xml.replace(/<rect\b[^>]*(x=["']0\.5["']|y=["']0\.5["'])[^>]*\/?>/gi, '');
 
+const extractSvgContent = (xml: string) => {
+  const cleaned = xml
+    .replace(/<\?xml[^>]*\?>/gi, '')
+    .replace(/<!DOCTYPE[^>]*>/gi, '')
+    .trim();
+  const viewBoxMatch = cleaned.match(/viewBox=["']([^"']+)["']/i);
+  const widthMatch = cleaned.match(/width=["']([^"']+)["']/i);
+  const heightMatch = cleaned.match(/height=["']([^"']+)["']/i);
+  const viewBox =
+    viewBoxMatch?.[1] ??
+    (widthMatch && heightMatch ? `0 0 ${widthMatch[1]} ${heightMatch[1]}` : null);
+  const innerMatch = cleaned.match(/<svg\b[^>]*>([\s\S]*?)<\/svg>/i);
+  let content = innerMatch ? innerMatch[1] : cleaned;
+  content = content.replace(/<title>[\s\S]*?<\/title>/gi, '');
+  return { viewBox, content };
+};
+
+const applyTransformToSvgContent = (content: string, transform: string) => {
+  const withoutGroups = content.replace(/<\/?g\b[^>]*>/gi, '');
+  const tagRegex =
+    /<(path|rect|circle|line|polyline|polygon|ellipse)\b([^>]*?)(\/?)>/gi;
+  return withoutGroups.replace(tagRegex, (_match, tagName, attrs, selfClosing) => {
+    let nextAttrs = attrs;
+    if (/transform=/.test(nextAttrs)) {
+      nextAttrs = nextAttrs.replace(
+        /transform="([^"]*)"/i,
+        (_t, existing) => `transform="${transform} ${existing}"`
+      );
+      nextAttrs = nextAttrs.replace(
+        /transform='([^']*)'/i,
+        (_t, existing) => `transform='${transform} ${existing}'`
+      );
+    } else {
+      nextAttrs += ` transform="${transform}"`;
+    }
+    const closing = selfClosing === '/' ? ' />' : '>';
+    return `<${tagName}${nextAttrs}${closing}`;
+  });
+};
+
 const applySvgOverrides = (xml: string, strokeColor?: string, strokeWidth?: number) => {
   let next = xml;
   const applyInlineOverrides = (input: string) => {
@@ -157,6 +197,203 @@ export const exportTileCanvasAsPng = async ({
   link.click();
   link.remove();
 
+  return { ok: true };
+};
+
+export const renderTileCanvasToSvg = async ({
+  tiles,
+  gridLayout,
+  tileSources,
+  gridGap,
+  errorSource,
+  lineColor,
+  lineWidth,
+  backgroundColor,
+}: Omit<ExportParams, 'blankSource' | 'backgroundLineColor' | 'backgroundLineWidth' | 'fileName'>): Promise<string | null> => {
+  if (gridLayout.columns <= 0 || gridLayout.rows <= 0 || gridLayout.tileSize <= 0) {
+    return null;
+  }
+
+  const totalWidth =
+    gridLayout.columns * gridLayout.tileSize +
+    gridGap * Math.max(0, gridLayout.columns - 1);
+  const totalHeight =
+    gridLayout.rows * gridLayout.tileSize +
+    gridGap * Math.max(0, gridLayout.rows - 1);
+
+  const svgParts: string[] = [];
+  svgParts.push(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${totalWidth}" height="${totalHeight}" viewBox="0 0 ${totalWidth} ${totalHeight}">`
+  );
+  if (backgroundColor) {
+    svgParts.push(
+      `<rect width="${totalWidth}" height="${totalHeight}" fill="${backgroundColor}" />`
+    );
+  }
+
+  const svgCache = new Map<string, { content: string; viewBox: string | null }>();
+  const dataUriCache = new Map<string, string>();
+  const toDataUri = async (
+    source: unknown,
+    overrides?: { strokeColor?: string; strokeWidth?: number }
+  ) => {
+    const uri = resolveSourceUri(source);
+    if (!uri) {
+      return null;
+    }
+    const cacheKey = overrides
+      ? `${uri}|${overrides.strokeColor ?? ''}|${overrides.strokeWidth ?? ''}`
+      : uri;
+    const cached = dataUriCache.get(cacheKey);
+    if (cached) {
+      return cached;
+    }
+    if (!uri.toLowerCase().includes('.svg')) {
+      dataUriCache.set(cacheKey, uri);
+      return uri;
+    }
+    const response = await fetch(uri);
+    const xml = await response.text();
+    let nextXml = stripOuterBorder(xml);
+    if (overrides) {
+      nextXml = applySvgOverrides(nextXml, overrides.strokeColor, overrides.strokeWidth);
+    }
+    const encoded = encodeURIComponent(nextXml);
+    const dataUri = `data:image/svg+xml;utf8,${encoded}`;
+    dataUriCache.set(cacheKey, dataUri);
+    return dataUri;
+  };
+
+  const toInlineSvg = async (
+    source: unknown,
+    overrides?: { strokeColor?: string; strokeWidth?: number }
+  ) => {
+    const uri = resolveSourceUri(source);
+    if (!uri || !uri.toLowerCase().includes('.svg')) {
+      return null;
+    }
+    const cacheKey = overrides
+      ? `${uri}|${overrides.strokeColor ?? ''}|${overrides.strokeWidth ?? ''}`
+      : uri;
+    const cached = svgCache.get(cacheKey);
+    if (cached) {
+      return cached;
+    }
+    const response = await fetch(uri);
+    const xml = await response.text();
+    let nextXml = stripOuterBorder(xml);
+    if (overrides) {
+      nextXml = applySvgOverrides(nextXml, overrides.strokeColor, overrides.strokeWidth);
+    }
+    const extracted = extractSvgContent(nextXml);
+    svgCache.set(cacheKey, extracted);
+    return extracted;
+  };
+
+  for (let index = 0; index < gridLayout.rows * gridLayout.columns; index += 1) {
+    const tile = tiles[index];
+    if (!tile) {
+      continue;
+    }
+    const row = Math.floor(index / gridLayout.columns);
+    const col = index % gridLayout.columns;
+    const x = col * (gridLayout.tileSize + gridGap);
+    const y = row * (gridLayout.tileSize + gridGap);
+
+    const source =
+      tile.imageIndex < 0
+        ? tile.imageIndex === -2
+          ? errorSource
+          : null
+        : tileSources[tile.imageIndex]?.source ?? errorSource;
+
+    if (!source) {
+      continue;
+    }
+
+    const overrides =
+      tile.imageIndex >= 0 ? { strokeColor: lineColor, strokeWidth: lineWidth } : undefined;
+    const center = gridLayout.tileSize / 2;
+    const scaleX = tile.mirrorX ? -1 : 1;
+    const scaleY = tile.mirrorY ? -1 : 1;
+    const rotation = tile.rotation ?? 0;
+    const transform = [
+      `translate(${x} ${y})`,
+      `translate(${center} ${center})`,
+      `scale(${scaleX} ${scaleY})`,
+      `rotate(${rotation})`,
+      `translate(${-center} ${-center})`,
+    ].join(' ');
+
+    const inline = await toInlineSvg(source, overrides);
+    if (inline) {
+      const viewBox = inline.viewBox ?? `0 0 ${gridLayout.tileSize} ${gridLayout.tileSize}`;
+      const viewParts = viewBox.split(/\s+/).map((part) => Number(part));
+      const vbWidth = Number.isFinite(viewParts[2]) ? viewParts[2] : gridLayout.tileSize;
+      const vbHeight = Number.isFinite(viewParts[3]) ? viewParts[3] : gridLayout.tileSize;
+      const scaleXToTile = gridLayout.tileSize / vbWidth;
+      const scaleYToTile = gridLayout.tileSize / vbHeight;
+      const tileTransform = [
+        `translate(${x} ${y})`,
+        `translate(${center} ${center})`,
+        `scale(${scaleX} ${scaleY})`,
+        `rotate(${rotation})`,
+        `translate(${-center} ${-center})`,
+      ].join(' ');
+      const fullTransform = `${tileTransform} scale(${scaleXToTile} ${scaleYToTile})`;
+      svgParts.push(applyTransformToSvgContent(inline.content, fullTransform));
+      continue;
+    }
+
+    const dataUri = await toDataUri(source, overrides);
+    if (!dataUri) {
+      continue;
+    }
+    svgParts.push(
+      `<g transform="${transform}"><image href="${dataUri}" width="${gridLayout.tileSize}" height="${gridLayout.tileSize}" /></g>`
+    );
+  }
+
+  svgParts.push('</svg>');
+  return svgParts.join('');
+};
+
+export const exportTileCanvasAsSvg = async ({
+  tiles,
+  gridLayout,
+  tileSources,
+  gridGap,
+  errorSource,
+  lineColor,
+  lineWidth,
+  backgroundColor,
+  fileName = 'tile-canvas.svg',
+}: Omit<ExportParams, 'blankSource' | 'backgroundLineColor' | 'backgroundLineWidth'>): Promise<ExportResult> => {
+  if (typeof document === 'undefined') {
+    return { ok: false, error: 'Unable to export SVG.' };
+  }
+  const svg = await renderTileCanvasToSvg({
+    tiles,
+    gridLayout,
+    tileSources,
+    gridGap,
+    errorSource,
+    lineColor,
+    lineWidth,
+    backgroundColor,
+  });
+  if (!svg) {
+    return { ok: false, error: 'Unable to render SVG.' };
+  }
+  const blob = new Blob([svg], { type: 'image/svg+xml' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
   return { ok: true };
 };
 
