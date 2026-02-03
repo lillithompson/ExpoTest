@@ -77,7 +77,11 @@ const extractSvgContent = (xml: string) => {
 };
 
 const applyTransformToSvgContent = (content: string, transform: string) => {
-  const withoutGroups = content.replace(/<\/?g\b[^>]*>/gi, '');
+  const withoutGroups = content
+    .replace(/<defs[\s\S]*?<\/defs>/gi, '')
+    .replace(/<\/?g\b[^>]*>/gi, '')
+    .replace(/\sclip-path="[^"]*"/gi, '')
+    .replace(/\sclip-path='[^']*'/gi, '');
   const tagRegex =
     /<(path|rect|circle|line|polyline|polygon|ellipse)\b([^>]*?)(\/?)>/gi;
   return withoutGroups.replace(tagRegex, (_match, tagName, attrs, selfClosing) => {
