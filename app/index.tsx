@@ -152,8 +152,10 @@ function HsvColorPicker({ label, color, onChange }: HsvColorPickerProps) {
   const { r, g, b } = useMemo(() => hexToRgb(color), [color]);
   const hsv = useMemo(() => rgbToHsv(r, g, b), [r, g, b]);
   const [draftHsv, setDraftHsv] = useState(hsv);
+  const draftRef = useRef(draftHsv);
   useEffect(() => {
     setDraftHsv(hsv);
+    draftRef.current = hsv;
   }, [hsv.h, hsv.s, hsv.v]);
   const updateColor = useCallback(
     (nextH: number, nextS: number, nextV: number) => {
@@ -184,10 +186,17 @@ function HsvColorPicker({ label, color, onChange }: HsvColorPickerProps) {
             maximumValue={360}
             step={1}
             value={draftHsv.h}
-            onValueChange={(value) =>
-              setDraftHsv((prev) => ({ ...prev, h: value }))
-            }
-            onSlidingComplete={(value) => updateColor(value, draftHsv.s, draftHsv.v)}
+            onValueChange={(value) => {
+              setDraftHsv((prev) => {
+                const next = { ...prev, h: value };
+                draftRef.current = next;
+                return next;
+              });
+            }}
+            onSlidingComplete={(value) => {
+              const current = draftRef.current;
+              updateColor(value, current.s, current.v);
+            }}
             minimumTrackTintColor="#ef4444"
             maximumTrackTintColor="#e5e7eb"
             thumbTintColor="#ef4444"
@@ -202,10 +211,17 @@ function HsvColorPicker({ label, color, onChange }: HsvColorPickerProps) {
             maximumValue={100}
             step={1}
             value={draftHsv.s}
-            onValueChange={(value) =>
-              setDraftHsv((prev) => ({ ...prev, s: value }))
-            }
-            onSlidingComplete={(value) => updateColor(draftHsv.h, value, draftHsv.v)}
+            onValueChange={(value) => {
+              setDraftHsv((prev) => {
+                const next = { ...prev, s: value };
+                draftRef.current = next;
+                return next;
+              });
+            }}
+            onSlidingComplete={(value) => {
+              const current = draftRef.current;
+              updateColor(current.h, value, current.v);
+            }}
             minimumTrackTintColor="#22c55e"
             maximumTrackTintColor="#e5e7eb"
             thumbTintColor="#22c55e"
@@ -220,10 +236,17 @@ function HsvColorPicker({ label, color, onChange }: HsvColorPickerProps) {
             maximumValue={100}
             step={1}
             value={draftHsv.v}
-            onValueChange={(value) =>
-              setDraftHsv((prev) => ({ ...prev, v: value }))
-            }
-            onSlidingComplete={(value) => updateColor(draftHsv.h, draftHsv.s, value)}
+            onValueChange={(value) => {
+              setDraftHsv((prev) => {
+                const next = { ...prev, v: value };
+                draftRef.current = next;
+                return next;
+              });
+            }}
+            onSlidingComplete={(value) => {
+              const current = draftRef.current;
+              updateColor(current.h, current.s, value);
+            }}
             minimumTrackTintColor="#3b82f6"
             maximumTrackTintColor="#e5e7eb"
             thumbTintColor="#3b82f6"
