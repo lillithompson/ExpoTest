@@ -32,6 +32,7 @@ import { ThemedView } from '@/components/themed-view';
 import { useTileGrid } from '@/hooks/use-tile-grid';
 import { usePersistedSettings } from '@/hooks/use-persisted-settings';
 import { useTileFiles } from '@/hooks/use-tile-files';
+import { useTilePatterns } from '@/hooks/use-tile-patterns';
 import {
   exportTileCanvasAsSvg,
   renderTileCanvasToDataUrl,
@@ -46,6 +47,8 @@ const HEADER_HEIGHT = 50;
 const TOOLBAR_BUTTON_SIZE = 40;
 const TITLE_SPACING = 0;
 const BRUSH_PANEL_HEIGHT = 160;
+const PATTERN_THUMB_HEIGHT = 70;
+const PATTERN_THUMB_PADDING = 4;
 const BRUSH_PANEL_ROW_GAP = 1;
 const FILE_GRID_COLUMNS_MOBILE = 3;
 const FILE_GRID_SIDE_PADDING = 12;
@@ -539,6 +542,7 @@ export default function TestScreen() {
     | { mode: 'random' }
     | { mode: 'erase' }
     | { mode: 'clone' }
+    | { mode: 'pattern' }
     | { mode: 'fixed'; index: number; rotation: number; mirrorX: boolean }
   >({
     mode: 'random',
@@ -547,6 +551,20 @@ export default function TestScreen() {
     {}
   );
   const [paletteMirrors, setPaletteMirrors] = useState<Record<number, boolean>>({});
+  const { patternsByCategory, createPattern } = useTilePatterns();
+  const [selectedPatternId, setSelectedPatternId] = useState<string | null>(null);
+  const [isPatternCreationMode, setIsPatternCreationMode] = useState(false);
+  const [patternSelection, setPatternSelection] = useState<{
+    start: number;
+    end: number;
+  } | null>(null);
+  const [showPatternSaveModal, setShowPatternSaveModal] = useState(false);
+  const [showPatternChooser, setShowPatternChooser] = useState(false);
+  const [patternRotations, setPatternRotations] = useState<Record<string, number>>(
+    {}
+  );
+  const [patternMirrors, setPatternMirrors] = useState<Record<string, boolean>>({});
+  const patternLastTapRef = useRef<{ id: string; time: number } | null>(null);
   // tileSources is set after we resolve the active file/category.
   const isWeb = Platform.OS === 'web';
   const shouldUseAspectRatio = false;
@@ -558,6 +576,8 @@ export default function TestScreen() {
     : safeWidth;
   const rawContentHeight = aspectRatio ? contentWidth * aspectRatio : safeHeight;
   const contentHeight = Math.max(0, rawContentHeight);
+  const showPatternModal =
+    showPatternChooser && brush.mode === 'pattern' && !isPatternCreationMode;
 
   const availableWidth = contentWidth - CONTENT_PADDING * 2;
   const availableHeight = Math.max(
@@ -587,6 +607,42 @@ export default function TestScreen() {
       ? activeFile.category
       : selectedCategory;
   const tileSources = TILE_MANIFEST[activeCategory] ?? [];
+  const activePatterns = useMemo(
+    () => patternsByCategory.get(activeCategory) ?? [],
+    [patternsByCategory, activeCategory]
+  );
+  const selectedPattern = useMemo(() => {
+    if (!selectedPatternId) {
+      return activePatterns[0] ?? null;
+    }
+    return activePatterns.find((pattern) => pattern.id === selectedPatternId) ?? null;
+  }, [activePatterns, selectedPatternId]);
+
+  useEffect(() => {
+    if (activePatterns.length === 0) {
+      if (selectedPatternId !== null) {
+        setSelectedPatternId(null);
+      }
+      if (brush.mode === 'pattern') {
+        setIsPatternCreationMode(true);
+      }
+      return;
+    }
+    if (!selectedPattern) {
+      setSelectedPatternId(activePatterns[0].id);
+    }
+  }, [activePatterns, selectedPattern, selectedPatternId, brush.mode]);
+
+  useEffect(() => {
+    if (brush.mode !== 'pattern') {
+      setIsPatternCreationMode(false);
+      setPatternSelection(null);
+      setShowPatternSaveModal(false);
+      setShowPatternChooser(false);
+    } else if (activePatterns.length === 0) {
+      setIsPatternCreationMode(true);
+    }
+  }, [brush.mode, activePatterns.length]);
 
   const fileTileSize = activeFile?.preferredTileSize ?? settings.preferredTileSize;
   const activeLineWidth = activeFile?.lineWidth ?? 10;
@@ -620,6 +676,16 @@ export default function TestScreen() {
     brush,
     mirrorHorizontal: settings.mirrorHorizontal,
     mirrorVertical: settings.mirrorVertical,
+    pattern: selectedPattern
+      ? {
+          tiles: selectedPattern.tiles,
+          width: selectedPattern.width,
+          height: selectedPattern.height,
+          rotation: patternRotations[selectedPattern.id] ?? 0,
+          mirrorX: patternMirrors[selectedPattern.id] ?? false,
+        }
+      : null,
+    patternAnchorKey: selectedPattern?.id ?? null,
   });
   const displayTiles = tiles;
   const showOverlays = !isCapturingPreview && !suspendTiles && showGrid;
@@ -631,7 +697,11 @@ export default function TestScreen() {
     GRID_GAP * Math.max(0, gridLayout.rows - 1);
   const brushPanelHeight = Math.max(
     0,
-    contentHeight - HEADER_HEIGHT - CONTENT_PADDING * 2 - TITLE_SPACING - gridHeight
+    contentHeight -
+      HEADER_HEIGHT -
+      CONTENT_PADDING * 2 -
+      TITLE_SPACING -
+      gridHeight
   );
   const brushItemSize = Math.max(
     0,
@@ -1032,6 +1102,18 @@ export default function TestScreen() {
     return row * gridLayout.columns + col;
   };
 
+  const getSelectionBounds = (startIndex: number, endIndex: number) => {
+    const startRow = Math.floor(startIndex / gridLayout.columns);
+    const startCol = startIndex % gridLayout.columns;
+    const endRow = Math.floor(endIndex / gridLayout.columns);
+    const endCol = endIndex % gridLayout.columns;
+    const minRow = Math.min(startRow, endRow);
+    const maxRow = Math.max(startRow, endRow);
+    const minCol = Math.min(startCol, endCol);
+    const maxCol = Math.max(startCol, endCol);
+    return { minRow, maxRow, minCol, maxCol };
+  };
+
   const paintCellIndex = (cellIndex: number) => {
     if (lastPaintedRef.current === cellIndex) {
       return;
@@ -1095,6 +1177,77 @@ export default function TestScreen() {
       return;
     }
     paintCellIndex(cellIndex);
+  };
+
+  const patternSelectionRect = useMemo(() => {
+    if (!patternSelection || gridLayout.columns === 0) {
+      return null;
+    }
+    const { minRow, maxRow, minCol, maxCol } = getSelectionBounds(
+      patternSelection.start,
+      patternSelection.end
+    );
+    const tileStride = gridLayout.tileSize + GRID_GAP;
+    const width =
+      (maxCol - minCol + 1) * tileStride - (GRID_GAP > 0 ? GRID_GAP : 0);
+    const height =
+      (maxRow - minRow + 1) * tileStride - (GRID_GAP > 0 ? GRID_GAP : 0);
+    return {
+      left: minCol * tileStride,
+      top: minRow * tileStride,
+      width,
+      height,
+    };
+  }, [patternSelection, gridLayout.columns, gridLayout.tileSize, gridLayout.rows]);
+
+  const handleSavePattern = () => {
+    if (!patternSelection || gridLayout.columns === 0) {
+      setShowPatternSaveModal(false);
+      return;
+    }
+    const { minRow, maxRow, minCol, maxCol } = getSelectionBounds(
+      patternSelection.start,
+      patternSelection.end
+    );
+    const width = maxCol - minCol + 1;
+    const height = maxRow - minRow + 1;
+    if (width <= 0 || height <= 0) {
+      setShowPatternSaveModal(false);
+      return;
+    }
+    const nextTiles: Tile[] = [];
+    for (let row = minRow; row <= maxRow; row += 1) {
+      for (let col = minCol; col <= maxCol; col += 1) {
+        const index = row * gridLayout.columns + col;
+        const tile = tiles[index] ?? {
+          imageIndex: -1,
+          rotation: 0,
+          mirrorX: false,
+          mirrorY: false,
+        };
+        nextTiles.push({ ...tile });
+      }
+    }
+    const patternId = createPattern({
+      category: activeCategory,
+      width,
+      height,
+      tiles: nextTiles,
+    });
+    setSelectedPatternId(patternId);
+    setIsPatternCreationMode(false);
+    setPatternSelection(null);
+    setShowPatternSaveModal(false);
+    setBrush({ mode: 'pattern' });
+    setShowPatternChooser(false);
+  };
+
+  const handleCancelPattern = () => {
+    setShowPatternSaveModal(false);
+    setPatternSelection(null);
+    setIsPatternCreationMode(false);
+    setShowPatternChooser(false);
+    setBrush({ mode: 'pattern' });
   };
 
   const persistActiveFileNow = async () => {
@@ -2124,6 +2277,12 @@ export default function TestScreen() {
                 )}
               </View>
             )}
+          {isPatternCreationMode && patternSelectionRect && (
+            <View
+              pointerEvents="none"
+              style={[styles.patternSelection, patternSelectionRect]}
+            />
+          )}
           {Platform.OS === 'web' ? (
             <ThemedView
               ref={setGridNode}
@@ -2145,6 +2304,10 @@ export default function TestScreen() {
                   if (cellIndex === null) {
                     return;
                   }
+                  if (isPatternCreationMode) {
+                    setPatternSelection({ start: cellIndex, end: cellIndex });
+                    return;
+                  }
                   if (brush.mode === 'clone' && cloneSourceIndex === null) {
                     setCloneSource(cellIndex);
                     lastPaintedRef.current = null;
@@ -2157,6 +2320,15 @@ export default function TestScreen() {
                 if (event.buttons === 1) {
                   const point = getRelativePoint(event);
                   if (point) {
+                    if (isPatternCreationMode) {
+                      const cellIndex = getCellIndexForPoint(point.x, point.y);
+                      if (cellIndex !== null) {
+                        setPatternSelection((prev) =>
+                          prev ? { ...prev, end: cellIndex } : prev
+                        );
+                      }
+                      return;
+                    }
                     handlePaintAt(point.x, point.y);
                   }
                 }
@@ -2165,6 +2337,12 @@ export default function TestScreen() {
                 lastPaintedRef.current = null;
               }}
               onMouseUp={() => {
+                if (isPatternCreationMode) {
+                  if (patternSelection) {
+                    setShowPatternSaveModal(true);
+                  }
+                  return;
+                }
                 lastPaintedRef.current = null;
               }}
             >
@@ -2274,6 +2452,10 @@ export default function TestScreen() {
                     if (cellIndex === null) {
                       return;
                     }
+                    if (isPatternCreationMode) {
+                      setPatternSelection({ start: cellIndex, end: cellIndex });
+                      return;
+                    }
                     if (longPressTimeoutRef.current) {
                       clearTimeout(longPressTimeoutRef.current);
                     }
@@ -2300,10 +2482,25 @@ export default function TestScreen() {
                       clearTimeout(longPressTimeoutRef.current);
                       longPressTimeoutRef.current = null;
                     }
+                    if (isPatternCreationMode) {
+                      const cellIndex = getCellIndexForPoint(point.x, point.y);
+                      if (cellIndex !== null) {
+                        setPatternSelection((prev) =>
+                          prev ? { ...prev, end: cellIndex } : prev
+                        );
+                      }
+                      return;
+                    }
                     handlePaintAt(point.x, point.y);
                   }
                 }}
                 onResponderRelease={() => {
+                  if (isPatternCreationMode) {
+                    if (patternSelection) {
+                      setShowPatternSaveModal(true);
+                    }
+                    return;
+                  }
                   if (longPressTimeoutRef.current) {
                     clearTimeout(longPressTimeoutRef.current);
                     longPressTimeoutRef.current = null;
@@ -2318,6 +2515,9 @@ export default function TestScreen() {
                     clearTimeout(longPressTimeoutRef.current);
                     longPressTimeoutRef.current = null;
                   }
+                  if (isPatternCreationMode) {
+                    return;
+                  }
                   longPressTriggeredRef.current = false;
                   lastPaintedRef.current = null;
                 }}
@@ -2325,12 +2525,57 @@ export default function TestScreen() {
             </>
           )}
         </View>
+        {isPatternCreationMode && (
+          <View
+            pointerEvents="box-none"
+            style={[
+              styles.patternCreationOverlay,
+              { top: 0, bottom: brushPanelHeight },
+            ]}
+          >
+            <View style={styles.patternCreationTop} pointerEvents="auto">
+              <ThemedText type="defaultSemiBold" style={styles.patternCreationText}>
+                drag select to creat a pattern
+              </ThemedText>
+            </View>
+          </View>
+        )}
+        {isPatternCreationMode && (
+          <View
+            pointerEvents="auto"
+            style={[
+              styles.patternCreationBottom,
+              { height: brushPanelHeight },
+            ]}
+          />
+        )}
         <TileBrushPanel
           tileSources={tileSources}
           selected={brush}
+          selectedPattern={
+            selectedPattern
+              ? {
+                  tiles: selectedPattern.tiles,
+                  width: selectedPattern.width,
+                  height: selectedPattern.height,
+                  rotation: patternRotations[selectedPattern.id] ?? 0,
+                  mirrorX: patternMirrors[selectedPattern.id] ?? false,
+                }
+              : null
+          }
           onSelect={(next) => {
             if (next.mode === 'clone') {
               clearCloneSource();
+            }
+            if (next.mode === 'pattern') {
+              setIsPatternCreationMode(false);
+              const shouldShowChooser =
+                activePatterns.length === 0 || !selectedPattern;
+              if (shouldShowChooser) {
+                setShowPatternChooser(true);
+              }
+              setBrush(next);
+              return;
             }
             if (next.mode === 'fixed') {
               const rotation = paletteRotations[next.index] ?? next.rotation ?? 0;
@@ -2376,10 +2621,236 @@ export default function TestScreen() {
           }
           getRotation={(index) => paletteRotations[index] ?? 0}
           getMirror={(index) => paletteMirrors[index] ?? false}
+          onPatternLongPress={() => {
+            if (brush.mode !== 'pattern') {
+              setBrush({ mode: 'pattern' });
+            }
+            setIsPatternCreationMode(false);
+            setShowPatternChooser(true);
+          }}
           height={brushPanelHeight}
           itemSize={brushItemSize}
           rowGap={BRUSH_PANEL_ROW_GAP}
         />
+        {showPatternModal && (
+          <View style={styles.patternModal} accessibilityRole="dialog">
+            <Pressable
+              style={styles.patternModalBackdrop}
+              onPress={() => {
+                setIsPatternCreationMode(false);
+                setShowPatternChooser(false);
+                setBrush({ mode: 'pattern' });
+              }}
+              accessibilityRole="button"
+              accessibilityLabel="Close pattern picker"
+            />
+            <ThemedView style={styles.patternModalPanel}>
+              <ThemedView style={styles.patternModalHeader}>
+                <Pressable
+                  onPress={() => {
+                    setBrush({ mode: 'pattern' });
+                    setIsPatternCreationMode(true);
+                    setPatternSelection(null);
+                    setShowPatternChooser(false);
+                  }}
+                  style={styles.patternModalNew}
+                  accessibilityRole="button"
+                  accessibilityLabel="Create new pattern"
+                >
+                  <ThemedText type="defaultSemiBold">New</ThemedText>
+                </Pressable>
+                <Pressable
+                  onPress={() => {
+                    setIsPatternCreationMode(false);
+                    setShowPatternChooser(false);
+                    setBrush({ mode: 'pattern' });
+                  }}
+                  style={styles.patternModalClose}
+                  accessibilityRole="button"
+                  accessibilityLabel="Close patterns"
+                >
+                  <ThemedText type="defaultSemiBold">X</ThemedText>
+                </Pressable>
+              </ThemedView>
+              <ScrollView
+                style={styles.patternModalScroll}
+                contentContainerStyle={styles.patternModalContent}
+                showsVerticalScrollIndicator
+              >
+                {activePatterns.map((pattern) => {
+                  const rotation =
+                    ((patternRotations[pattern.id] ?? 0) + 360) % 360;
+                  const mirrorX = patternMirrors[pattern.id] ?? false;
+                  const rotatedWidth =
+                    rotation % 180 === 0 ? pattern.width : pattern.height;
+                  const rotatedHeight =
+                    rotation % 180 === 0 ? pattern.height : pattern.width;
+                  const tileSize = Math.max(
+                    8,
+                    Math.floor(
+                      (PATTERN_THUMB_HEIGHT - PATTERN_THUMB_PADDING * 2) /
+                        Math.max(1, rotatedHeight)
+                    )
+                  );
+                  const thumbWidth =
+                    Math.max(1, rotatedWidth) * tileSize + PATTERN_THUMB_PADDING * 2;
+                  const thumbHeight =
+                    Math.max(1, rotatedHeight) * tileSize + PATTERN_THUMB_PADDING * 2;
+                  return (
+                    <Pressable
+                      key={pattern.id}
+                      onPress={() => {
+                        setSelectedPatternId(pattern.id);
+                        setIsPatternCreationMode(false);
+                        setBrush({ mode: 'pattern' });
+                        setShowPatternChooser(false);
+                      }}
+                      onLongPress={() => {
+                        setPatternRotations((prev) => ({
+                          ...prev,
+                          [pattern.id]: ((prev[pattern.id] ?? 0) + 270) % 360,
+                        }));
+                      }}
+                      onPressIn={() => {
+                        const now = Date.now();
+                        const lastTap = patternLastTapRef.current;
+                        if (
+                          lastTap &&
+                          lastTap.id === pattern.id &&
+                          now - lastTap.time < 260
+                        ) {
+                          setPatternMirrors((prev) => ({
+                            ...prev,
+                            [pattern.id]: !(prev[pattern.id] ?? false),
+                          }));
+                          patternLastTapRef.current = null;
+                        } else {
+                          patternLastTapRef.current = { id: pattern.id, time: now };
+                        }
+                      }}
+                      style={[
+                        styles.patternThumb,
+                        { width: thumbWidth, height: thumbHeight },
+                        selectedPattern?.id === pattern.id &&
+                          styles.patternThumbSelected,
+                      ]}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Pattern ${pattern.name}`}
+                    >
+                      <View
+                        style={{
+                          width: rotatedWidth * tileSize,
+                          height: rotatedHeight * tileSize,
+                          flexDirection: 'column',
+                        }}
+                      >
+                        {Array.from({ length: rotatedHeight }, (_, rowIndex) => (
+                          <View
+                            key={`pattern-row-${pattern.id}-${rowIndex}`}
+                            style={{ flexDirection: 'row' }}
+                          >
+                            {Array.from({ length: rotatedWidth }, (_, colIndex) => {
+                              let mappedRow = rowIndex;
+                              let mappedCol = colIndex;
+                              if (mirrorX) {
+                                mappedCol = rotatedWidth - 1 - mappedCol;
+                              }
+                              let sourceRow = mappedRow;
+                              let sourceCol = mappedCol;
+                              if (rotation === 90) {
+                                sourceRow = pattern.height - 1 - mappedCol;
+                                sourceCol = mappedRow;
+                              } else if (rotation === 180) {
+                                sourceRow = pattern.height - 1 - mappedRow;
+                                sourceCol = pattern.width - 1 - mappedCol;
+                              } else if (rotation === 270) {
+                                sourceRow = mappedCol;
+                                sourceCol = pattern.width - 1 - mappedRow;
+                              }
+                              const index = sourceRow * pattern.width + sourceCol;
+                              const tile = pattern.tiles[index];
+                              const tileName =
+                                tile && tile.imageIndex >= 0
+                                  ? tileSources[tile.imageIndex]?.name ?? ''
+                                  : '';
+                              const source =
+                                tile && tile.imageIndex >= 0
+                                  ? tileSources[tile.imageIndex]?.source ?? ERROR_TILE
+                                  : null;
+                              return (
+                                <View
+                                  key={`pattern-cell-${pattern.id}-${index}`}
+                                  style={{
+                                    width: tileSize,
+                                    height: tileSize,
+                                    backgroundColor: 'transparent',
+                                  }}
+                                >
+                                  {source && tile && (
+                                    <TileAsset
+                                      source={source}
+                                      name={tileName}
+                                      strokeColor={activeLineColor}
+                                      strokeWidth={activeLineWidth}
+                                      style={{
+                                        width: '100%',
+                                        height: '100%',
+                                        transform: [
+                                          { scaleX: tile.mirrorX ? -1 : 1 },
+                                          { scaleY: tile.mirrorY ? -1 : 1 },
+                                          { rotate: `${tile.rotation}deg` },
+                                        ],
+                                      }}
+                                      resizeMode="cover"
+                                    />
+                                  )}
+                                </View>
+                              );
+                            })}
+                          </View>
+                        ))}
+                      </View>
+                    </Pressable>
+                  );
+                })}
+              </ScrollView>
+            </ThemedView>
+          </View>
+        )}
+        {showPatternSaveModal && (
+          <ThemedView style={styles.overlay} accessibilityRole="dialog">
+            <Pressable
+              style={styles.overlayBackdrop}
+              onPress={handleCancelPattern}
+              accessibilityRole="button"
+              accessibilityLabel="Cancel pattern creation"
+            />
+            <ThemedView style={styles.overlayPanel}>
+              <ThemedText type="title">Save Pattern</ThemedText>
+              <ThemedText type="defaultSemiBold">
+                Save the selected tiles as a new pattern?
+              </ThemedText>
+              <ThemedView style={styles.inlineOptions}>
+                <Pressable
+                  onPress={handleCancelPattern}
+                  style={styles.overlayItem}
+                  accessibilityRole="button"
+                  accessibilityLabel="Cancel save pattern"
+                >
+                  <ThemedText type="defaultSemiBold">Cancel</ThemedText>
+                </Pressable>
+                <Pressable
+                  onPress={handleSavePattern}
+                  style={[styles.overlayItem, styles.overlayItemSelected]}
+                  accessibilityRole="button"
+                  accessibilityLabel="Save pattern"
+                >
+                  <ThemedText type="defaultSemiBold">Save</ThemedText>
+                </Pressable>
+              </ThemedView>
+            </ThemedView>
+          </ThemedView>
+        )}
         {showFileSettingsOverlay && (
           <ThemedView style={styles.overlay} accessibilityRole="dialog">
             <Pressable
@@ -2881,6 +3352,96 @@ const styles = StyleSheet.create({
   fileMenuDeleteText: {
     color: '#dc2626',
   },
+  patternModal: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 30,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'transparent',
+  },
+  patternModalBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+  },
+  patternModalPanel: {
+    width: '90%',
+    maxHeight: '80%',
+    borderRadius: 12,
+    backgroundColor: '#e5e5e5',
+    borderWidth: 1,
+    borderColor: '#1f1f1f',
+    padding: 12,
+  },
+  patternModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 10,
+    backgroundColor: '#d4d4d4',
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  patternModalNew: {
+    paddingHorizontal: 4,
+    paddingVertical: 4,
+  },
+  patternCreationOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 50,
+  },
+  patternCreationTop: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: HEADER_HEIGHT,
+    backgroundColor: '#000',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 50,
+  },
+  patternCreationBottom: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: '#000',
+    zIndex: 50,
+  },
+  patternCreationText: {
+    color: '#fff',
+  },
+  patternModalClose: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  patternModalScroll: {
+    flexGrow: 0,
+  },
+  patternModalContent: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+    justifyContent: 'flex-start',
+    paddingBottom: 8,
+  },
+  patternThumb: {
+    borderWidth: 1,
+    borderColor: '#1f1f1f',
+    backgroundColor: '#000',
+    borderRadius: 6,
+    padding: PATTERN_THUMB_PADDING,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  patternThumbSelected: {
+    borderColor: '#22c55e',
+    borderWidth: 2,
+  },
+  patternCreateText: {
+    color: '#fff',
+  },
   downloadPanel: {
     borderRadius: 12,
     backgroundColor: 'rgba(0,0,0,0.7)',
@@ -2993,6 +3554,12 @@ const styles = StyleSheet.create({
   },
   gridBackground: {
     ...StyleSheet.absoluteFillObject,
+  },
+  patternSelection: {
+    position: 'absolute',
+    borderWidth: 2,
+    borderColor: '#22c55e',
+    zIndex: 5,
   },
   gridLineVertical: {
     position: 'absolute',

@@ -26,9 +26,14 @@ type Params = {
     | { mode: 'random' }
     | { mode: 'erase' }
     | { mode: 'clone' }
+    | { mode: 'pattern' }
     | { mode: 'fixed'; index: number; rotation: number; mirrorX: boolean };
   mirrorHorizontal: boolean;
   mirrorVertical: boolean;
+  pattern:
+    | { tiles: Tile[]; width: number; height: number; rotation: number; mirrorX: boolean }
+    | null;
+  patternAnchorKey?: string | null;
 };
 
 type Result = {
@@ -65,6 +70,8 @@ export const useTileGrid = ({
   brush,
   mirrorHorizontal,
   mirrorVertical,
+  pattern,
+  patternAnchorKey,
 }: Params): Result => {
   const clearLogRef = useRef<{ clearId: number } | null>(null);
   const previousTileSourcesRef = useRef<TileSource[] | null>(null);
@@ -106,6 +113,7 @@ export const useTileGrid = ({
   const [cloneSampleIndex, setCloneSampleIndex] = useState<number | null>(null);
   const [cloneAnchorIndex, setCloneAnchorIndex] = useState<number | null>(null);
   const [cloneCursorIndex, setCloneCursorIndex] = useState<number | null>(null);
+  const patternAnchorRef = useRef<number | null>(null);
 
   const renderTiles = useMemo(
     () => normalizeTiles(tiles, totalCells, tileSourcesLength),
@@ -203,6 +211,14 @@ export const useTileGrid = ({
     }
     clearCloneSource();
   }, [brush.mode]);
+
+  useEffect(() => {
+    if (brush.mode !== 'pattern') {
+      patternAnchorRef.current = null;
+      return;
+    }
+    patternAnchorRef.current = null;
+  }, [brush.mode, patternAnchorKey]);
 
   const tileSourceMeta = useMemo(
     () =>
@@ -584,6 +600,45 @@ export const useTileGrid = ({
     );
   };
 
+  const getPatternTileForPosition = (row: number, col: number) => {
+    if (!pattern || pattern.width <= 0 || pattern.height <= 0) {
+      return null;
+    }
+    const rotation = ((pattern.rotation % 360) + 360) % 360;
+    const rotW = rotation % 180 === 0 ? pattern.width : pattern.height;
+    const rotH = rotation % 180 === 0 ? pattern.height : pattern.width;
+    const localRow = ((row % rotH) + rotH) % rotH;
+    const localCol = ((col % rotW) + rotW) % rotW;
+    let mappedRow = localRow;
+    let mappedCol = localCol;
+    if (pattern.mirrorX) {
+      mappedCol = rotW - 1 - mappedCol;
+    }
+    let sourceRow = mappedRow;
+    let sourceCol = mappedCol;
+    if (rotation === 90) {
+      sourceRow = pattern.height - 1 - mappedCol;
+      sourceCol = mappedRow;
+    } else if (rotation === 180) {
+      sourceRow = pattern.height - 1 - mappedRow;
+      sourceCol = pattern.width - 1 - mappedCol;
+    } else if (rotation === 270) {
+      sourceRow = mappedCol;
+      sourceCol = pattern.width - 1 - mappedRow;
+    }
+    const patternIndex = sourceRow * pattern.width + sourceCol;
+    const patternTile = pattern.tiles[patternIndex];
+    if (!patternTile) {
+      return null;
+    }
+    return {
+      imageIndex: patternTile.imageIndex,
+      rotation: (patternTile.rotation + rotation) % 360,
+      mirrorX: patternTile.mirrorX !== pattern.mirrorX,
+      mirrorY: patternTile.mirrorY,
+    };
+  };
+
   const handlePress = (cellIndex: number) => {
     if (bulkUpdateRef.current) {
       return;
@@ -636,6 +691,35 @@ export const useTileGrid = ({
         rotation: sourceTile.rotation,
         mirrorX: sourceTile.mirrorX,
         mirrorY: sourceTile.mirrorY,
+      });
+      return;
+    }
+    if (brush.mode === 'pattern') {
+      if (!pattern || pattern.width <= 0 || pattern.height <= 0) {
+        return;
+      }
+      if (gridLayout.rows === 0 || gridLayout.columns === 0) {
+        return;
+      }
+      if (patternAnchorRef.current === null) {
+        patternAnchorRef.current = cellIndex;
+      }
+      const anchorIndex = patternAnchorRef.current ?? cellIndex;
+      const anchorRow = Math.floor(anchorIndex / gridLayout.columns);
+      const anchorCol = anchorIndex % gridLayout.columns;
+      const destRow = Math.floor(cellIndex / gridLayout.columns);
+      const destCol = cellIndex % gridLayout.columns;
+      const rowOffset = destRow - anchorRow;
+      const colOffset = destCol - anchorCol;
+      const tile = getPatternTileForPosition(rowOffset, colOffset);
+      if (!tile) {
+        return;
+      }
+      applyPlacement(cellIndex, {
+        imageIndex: tile.imageIndex,
+        rotation: tile.rotation,
+        mirrorX: tile.mirrorX,
+        mirrorY: tile.mirrorY,
       });
       return;
     }
@@ -741,6 +825,33 @@ export const useTileGrid = ({
       });
       return;
     }
+    if (brush.mode === 'clone') {
+      return;
+    }
+    if (brush.mode === 'pattern') {
+      if (!pattern || pattern.width <= 0 || pattern.height <= 0) {
+        return;
+      }
+      const nextTiles = buildInitialTiles(totalCells);
+      for (let row = 0; row < gridLayout.rows; row += 1) {
+        for (let col = 0; col < gridLayout.columns; col += 1) {
+          const targetIndex = row * gridLayout.columns + col;
+          const tile = getPatternTileForPosition(row, col);
+          if (tile) {
+            nextTiles[targetIndex] = {
+              imageIndex: tile.imageIndex,
+              rotation: tile.rotation,
+              mirrorX: tile.mirrorX,
+              mirrorY: tile.mirrorY,
+            };
+          }
+        }
+      }
+      withBulkUpdate(() => {
+        applyTiles(nextTiles);
+      });
+      return;
+    }
     if (brush.mode === 'random') {
       if (mirrorHorizontal || mirrorVertical) {
         const nextTiles = buildInitialTiles(totalCells);
@@ -804,6 +915,37 @@ export const useTileGrid = ({
     if (brush.mode === 'erase') {
       withBulkUpdate(() => {
         applyTiles(buildInitialTiles(totalCells));
+      });
+      return;
+    }
+    if (brush.mode === 'clone') {
+      return;
+    }
+    if (brush.mode === 'pattern') {
+      if (!pattern || pattern.width <= 0 || pattern.height <= 0) {
+        return;
+      }
+      const nextTiles = [...normalizeTiles(tiles, totalCells, tileSourcesLength)];
+      for (let row = 0; row < gridLayout.rows; row += 1) {
+        for (let col = 0; col < gridLayout.columns; col += 1) {
+          const targetIndex = row * gridLayout.columns + col;
+          if (nextTiles[targetIndex].imageIndex >= 0) {
+            continue;
+          }
+          const tile = getPatternTileForPosition(row, col);
+          if (!tile) {
+            continue;
+          }
+          nextTiles[targetIndex] = {
+            imageIndex: tile.imageIndex,
+            rotation: tile.rotation,
+            mirrorX: tile.mirrorX,
+            mirrorY: tile.mirrorY,
+          };
+        }
+      }
+      withBulkUpdate(() => {
+        applyTiles(nextTiles);
       });
       return;
     }

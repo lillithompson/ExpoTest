@@ -9,14 +9,23 @@ type Brush =
   | { mode: 'random' }
   | { mode: 'erase' }
   | { mode: 'clone' }
+  | { mode: 'pattern' }
   | { mode: 'fixed'; index: number; rotation: number; mirrorX: boolean };
 
 type Props = {
   tileSources: TileSource[];
   selected: Brush;
+  selectedPattern?: {
+    tiles: { imageIndex: number; rotation: number; mirrorX: boolean; mirrorY: boolean }[];
+    width: number;
+    height: number;
+    rotation: number;
+    mirrorX: boolean;
+  } | null;
   onSelect: (brush: Brush) => void;
   onRotate: (index: number) => void;
   onMirror: (index: number) => void;
+  onPatternLongPress?: () => void;
   getRotation: (index: number) => number;
   getMirror: (index: number) => boolean;
   height: number;
@@ -27,9 +36,11 @@ type Props = {
 export function TileBrushPanel({
   tileSources,
   selected,
+  selectedPattern,
   onSelect,
   onRotate,
   onMirror,
+  onPatternLongPress,
   getRotation,
   getMirror,
   height,
@@ -59,8 +70,9 @@ export function TileBrushPanel({
         <View style={[styles.column, { height: columnHeight }]}>
           {[
             { type: 'random' as const },
-            { type: 'erase' as const },
             { type: 'clone' as const },
+            { type: 'erase' as const },
+            { type: 'pattern' as const },
             ...tileSources.map((tile, index) => ({
               type: 'fixed' as const,
               tile,
@@ -70,22 +82,52 @@ export function TileBrushPanel({
             const isRandom = entry.type === 'random';
             const isErase = entry.type === 'erase';
             const isClone = entry.type === 'clone';
+            const isPattern = entry.type === 'pattern';
             const isSelected = isRandom
               ? selected.mode === 'random'
               : isErase
                 ? selected.mode === 'erase'
                 : isClone
                   ? selected.mode === 'clone'
-                  : selected.mode === 'fixed' && selected.index === entry.index;
+                  : isPattern
+                    ? selected.mode === 'pattern'
+                    : selected.mode === 'fixed' && selected.index === entry.index;
             const isTopRow = idx % 2 === 0;
             const rotation =
-              !isRandom && !isErase && !isClone ? getRotation(entry.index) : 0;
+              !isRandom && !isErase && !isClone && !isPattern
+                ? getRotation(entry.index)
+                : 0;
             const mirrorX =
-              !isRandom && !isErase && !isClone ? getMirror(entry.index) : false;
+              !isRandom && !isErase && !isClone && !isPattern
+                ? getMirror(entry.index)
+                : false;
+            const previewRotation = selectedPattern?.rotation ?? 0;
+            const previewMirrorX = selectedPattern?.mirrorX ?? false;
+            const previewWidth =
+              previewRotation % 180 === 0
+                ? selectedPattern?.width ?? 0
+                : selectedPattern?.height ?? 0;
+            const previewHeight =
+              previewRotation % 180 === 0
+                ? selectedPattern?.height ?? 0
+                : selectedPattern?.width ?? 0;
+            const previewMax = Math.max(10, Math.floor(itemSize * 0.6));
+            const previewTileSize = Math.max(
+              4,
+              Math.floor(previewMax / Math.max(1, previewHeight))
+            );
             return (
               <Pressable
                 key={
-                  isRandom ? 'random' : isErase ? 'erase' : isClone ? 'clone' : entry.tile.name
+                  isRandom
+                    ? 'random'
+                    : isErase
+                      ? 'erase'
+                      : isClone
+                        ? 'clone'
+                        : isPattern
+                          ? 'pattern'
+                          : entry.tile.name
                 }
                 onPressIn={() =>
                   onSelect(
@@ -95,11 +137,13 @@ export function TileBrushPanel({
                         ? { mode: 'erase' }
                         : isClone
                           ? { mode: 'clone' }
-                          : { mode: 'fixed', index: entry.index, rotation, mirrorX }
+                          : isPattern
+                            ? { mode: 'pattern' }
+                            : { mode: 'fixed', index: entry.index, rotation, mirrorX }
                   )
                 }
                 onPress={() => {
-                  if (isRandom || isErase || isClone) {
+                  if (isRandom || isErase || isClone || isPattern) {
                     return;
                   }
                   const now = Date.now();
@@ -112,6 +156,10 @@ export function TileBrushPanel({
                   }
                 }}
                 onLongPress={() => {
+                  if (isPattern) {
+                    onPatternLongPress?.();
+                    return;
+                  }
                   if (!isRandom && !isErase && !isClone) {
                     onRotate(entry.index);
                   }
@@ -131,7 +179,9 @@ export function TileBrushPanel({
                       ? 'Erase brush'
                       : isClone
                         ? 'Clone brush'
-                      : `Brush ${entry.tile.name}`
+                        : isPattern
+                          ? 'Pattern brush'
+                          : `Brush ${entry.tile.name}`
                 }
               >
                 {isRandom ? (
@@ -146,6 +196,90 @@ export function TileBrushPanel({
                   <ThemedText type="defaultSemiBold" style={styles.labelText}>
                     Clone
                   </ThemedText>
+                ) : isPattern ? (
+                  <View style={styles.patternButton}>
+                    <ThemedText type="defaultSemiBold" style={styles.labelText}>
+                      Pattern
+                    </ThemedText>
+                    {selectedPattern && previewWidth > 0 && previewHeight > 0 && (
+                      <View
+                        style={{
+                          width: previewWidth * previewTileSize,
+                          height: previewHeight * previewTileSize,
+                          flexDirection: 'column',
+                        }}
+                      >
+                        {Array.from({ length: previewHeight }, (_, rowIndex) => (
+                          <View
+                            key={`pattern-preview-row-${rowIndex}`}
+                            style={{ flexDirection: 'row' }}
+                          >
+                            {Array.from({ length: previewWidth }, (_, colIndex) => {
+                              let mappedRow = rowIndex;
+                              let mappedCol = colIndex;
+                              if (previewMirrorX) {
+                                mappedCol = previewWidth - 1 - mappedCol;
+                              }
+                              let sourceRow = mappedRow;
+                              let sourceCol = mappedCol;
+                              if (previewRotation === 90) {
+                                sourceRow =
+                                  (selectedPattern?.height ?? 0) - 1 - mappedCol;
+                                sourceCol = mappedRow;
+                              } else if (previewRotation === 180) {
+                                sourceRow =
+                                  (selectedPattern?.height ?? 0) - 1 - mappedRow;
+                                sourceCol =
+                                  (selectedPattern?.width ?? 0) - 1 - mappedCol;
+                              } else if (previewRotation === 270) {
+                                sourceRow = mappedCol;
+                                sourceCol =
+                                  (selectedPattern?.width ?? 0) - 1 - mappedRow;
+                              }
+                              const index =
+                                sourceRow * (selectedPattern?.width ?? 0) + sourceCol;
+                              const tile = selectedPattern?.tiles[index];
+                              const tileName =
+                                tile && tile.imageIndex >= 0
+                                  ? tileSources[tile.imageIndex]?.name ?? ''
+                                  : '';
+                              const source =
+                                tile && tile.imageIndex >= 0
+                                  ? tileSources[tile.imageIndex]?.source ?? null
+                                  : null;
+                              return (
+                                <View
+                                  key={`pattern-preview-cell-${rowIndex}-${colIndex}`}
+                                  style={{
+                                    width: previewTileSize,
+                                    height: previewTileSize,
+                                    backgroundColor: 'transparent',
+                                  }}
+                                >
+                                  {source && tile && (
+                                    <TileAsset
+                                      source={source}
+                                      name={tileName}
+                                      style={{
+                                        width: '100%',
+                                        height: '100%',
+                                        transform: [
+                                          { scaleX: tile.mirrorX ? -1 : 1 },
+                                          { scaleY: tile.mirrorY ? -1 : 1 },
+                                          { rotate: `${tile.rotation}deg` },
+                                        ],
+                                      }}
+                                      resizeMode="cover"
+                                    />
+                                  )}
+                                </View>
+                              );
+                            })}
+                          </View>
+                        ))}
+                      </View>
+                    )}
+                  </View>
                 ) : (
                   <View style={styles.imageBox}>
                     <TileAsset
@@ -227,5 +361,9 @@ const styles = StyleSheet.create({
   },
   labelText: {
     color: '#fff',
+  },
+  patternButton: {
+    alignItems: 'center',
+    gap: 4,
   },
 });
