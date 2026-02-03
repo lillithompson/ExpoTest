@@ -1881,7 +1881,7 @@ export default function TestScreen() {
             <ThemedView style={styles.overlayPanel}>
               <ThemedText type="title">Settings</ThemedText>
               <ThemedView style={styles.toggleRow}>
-                <ThemedText type="defaultSemiBold">AllowEdgeConections</ThemedText>
+                <ThemedText type="defaultSemiBold">Allow Border Connections</ThemedText>
                 <Switch
                   value={settings.allowEdgeConnections}
                   onValueChange={(value) =>
