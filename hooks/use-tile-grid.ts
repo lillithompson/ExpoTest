@@ -66,6 +66,13 @@ export const useTileGrid = ({
   mirrorHorizontal,
   mirrorVertical,
 }: Params): Result => {
+  const log = (...args: unknown[]) => {
+    if (__DEV__) {
+      // eslint-disable-next-line no-console
+      console.log('[tile-grid]', ...args);
+    }
+  };
+  const clearLogRef = useRef<{ clearId: number } | null>(null);
   const previousTileSourcesRef = useRef<TileSource[] | null>(null);
   const tileSourcesLength = tileSources.length;
   const gridLayout = useMemo(() => {
@@ -110,6 +117,88 @@ export const useTileGrid = ({
     () => normalizeTiles(tiles, totalCells, tileSourcesLength),
     [tiles, totalCells, tileSourcesLength]
   );
+  const bulkUpdateRef = useRef(false);
+
+  const withBulkUpdate = (fn: () => void) => {
+    bulkUpdateRef.current = true;
+    fn();
+    requestAnimationFrame(() => {
+      bulkUpdateRef.current = false;
+    });
+  };
+
+  const tilesEqual = (left: Tile[], right: Tile[]) => {
+    if (left === right) {
+      return true;
+    }
+    if (left.length !== right.length) {
+      return false;
+    }
+    for (let i = 0; i < left.length; i += 1) {
+      const a = left[i];
+      const b = right[i];
+      if (
+        a.imageIndex !== b.imageIndex ||
+        a.rotation !== b.rotation ||
+        a.mirrorX !== b.mirrorX ||
+        a.mirrorY !== b.mirrorY
+      ) {
+        return false;
+      }
+    }
+    return true;
+  };
+
+  const markClear = () => {
+    clearLogRef.current = { clearId: Date.now() };
+    log('clear:mark', { clearId: clearLogRef.current.clearId });
+  };
+
+  const logClearApply = (changed: number, total: number) => {
+    if (!clearLogRef.current) {
+      return;
+    }
+    log('clear:applyTiles', {
+      clearId: clearLogRef.current.clearId,
+      changed,
+      total,
+    });
+  };
+
+  const clearLogDone = () => {
+    if (!clearLogRef.current) {
+      return;
+    }
+    log('clear:end', { clearId: clearLogRef.current.clearId });
+    clearLogRef.current = null;
+  };
+
+  const applyTiles = (nextTiles: Tile[]) => {
+    setTiles((prev) => {
+      const normalizedNext = normalizeTiles(nextTiles, totalCells, tileSourcesLength);
+      const normalizedPrev = normalizeTiles(prev, totalCells, tileSourcesLength);
+      if (tilesEqual(normalizedPrev, normalizedNext)) {
+        log('applyTiles:skip');
+        return prev;
+      }
+      let changed = 0;
+      for (let i = 0; i < normalizedPrev.length; i += 1) {
+        const a = normalizedPrev[i];
+        const b = normalizedNext[i];
+        if (
+          a.imageIndex !== b.imageIndex ||
+          a.rotation !== b.rotation ||
+          a.mirrorX !== b.mirrorX ||
+          a.mirrorY !== b.mirrorY
+        ) {
+          changed += 1;
+        }
+      }
+      log('applyTiles', { changed, total: normalizedNext.length });
+      logClearApply(changed, normalizedNext.length);
+      return normalizedNext;
+    });
+  };
 
   useEffect(() => {
     setTiles((prev) => (prev.length === totalCells ? prev : buildInitialTiles(totalCells)));
@@ -516,6 +605,14 @@ export const useTileGrid = ({
   };
 
   const handlePress = (cellIndex: number) => {
+    log('handlePress', {
+      cellIndex,
+      brush: brush.mode,
+      bulk: bulkUpdateRef.current,
+    });
+    if (bulkUpdateRef.current) {
+      return;
+    }
     if (brush.mode === 'erase') {
       applyPlacement(cellIndex, {
         imageIndex: -1,
@@ -638,8 +735,10 @@ export const useTileGrid = ({
   };
 
   const randomFill = () => {
+    log('randomFill:start', { totalCells });
     const normalized = buildInitialTiles(totalCells);
     if (totalCells <= 0 || tileSourcesLength <= 0) {
+      log('randomFill:skip', { totalCells, tileSourcesLength });
       return;
     }
     const startIndex = Math.floor(Math.random() * totalCells);
@@ -654,15 +753,22 @@ export const useTileGrid = ({
       nextTiles[index] =
         validSelection ?? { imageIndex: -2, rotation: 0, mirrorX: false, mirrorY: false };
     }
-    setTiles(nextTiles);
+    withBulkUpdate(() => {
+      applyTiles(nextTiles);
+    });
+    log('randomFill:done', { totalCells });
   };
 
   const floodFill = () => {
+    log('floodFill:start', { totalCells, brush: brush.mode });
     if (totalCells <= 0) {
       return;
     }
     if (brush.mode === 'erase') {
-      setTiles(buildInitialTiles(totalCells));
+      withBulkUpdate(() => {
+        applyTiles(buildInitialTiles(totalCells));
+      });
+      log('floodFill:erase');
       return;
     }
     if (brush.mode === 'random') {
@@ -679,10 +785,14 @@ export const useTileGrid = ({
             getMirroredPlacements(index, placement)
           );
         }
-        setTiles(nextTiles);
+        withBulkUpdate(() => {
+          applyTiles(nextTiles);
+        });
+        log('floodFill:random-mirror');
         return;
       }
       randomFill();
+      log('floodFill:random');
       return;
     }
     const fixedIndex = brush.index;
@@ -702,25 +812,35 @@ export const useTileGrid = ({
           })
         );
       }
-      setTiles(nextTiles);
+      withBulkUpdate(() => {
+        applyTiles(nextTiles);
+      });
+      log('floodFill:fixed-mirror');
       return;
     }
-    setTiles(
-      Array.from({ length: totalCells }, () => ({
-        imageIndex: fixedIndex,
-        rotation: brush.rotation,
-        mirrorX: false,
-        mirrorY: false,
-      }))
-    );
+    withBulkUpdate(() => {
+      applyTiles(
+        Array.from({ length: totalCells }, () => ({
+          imageIndex: fixedIndex,
+          rotation: brush.rotation,
+          mirrorX: false,
+          mirrorY: false,
+        }))
+      );
+    });
+    log('floodFill:fixed');
   };
 
   const floodComplete = () => {
+    log('floodComplete:start', { totalCells, brush: brush.mode });
     if (totalCells <= 0) {
       return;
     }
     if (brush.mode === 'erase') {
-      setTiles(buildInitialTiles(totalCells));
+      withBulkUpdate(() => {
+        applyTiles(buildInitialTiles(totalCells));
+      });
+      log('floodComplete:erase');
       return;
     }
     const drivenSet = new Set(getDrivenCellIndices());
@@ -753,14 +873,18 @@ export const useTileGrid = ({
           index
         );
       }
-      setTiles(nextTiles);
+      withBulkUpdate(() => {
+        applyTiles(nextTiles);
+      });
+      log('floodComplete:random');
       return;
     }
     const fixedIndex = brush.index;
     if (fixedIndex < 0 || fixedIndex >= tileSourcesLength) {
       return;
     }
-    setTiles((prev) => {
+    withBulkUpdate(() => {
+      setTiles((prev) => {
       const nextTiles = [...normalizeTiles(prev, totalCells, tileSourcesLength)];
       if (mirrorHorizontal || mirrorVertical) {
         for (let index = 0; index < totalCells; index += 1) {
@@ -789,15 +913,24 @@ export const useTileGrid = ({
         );
       }
       return nextTiles;
+      });
     });
+    log('floodComplete:fixed');
   };
 
   const resetTiles = () => {
-    setTiles(buildInitialTiles(totalCells));
+    log('resetTiles', { totalCells, brush: brush.mode });
+    markClear();
+    withBulkUpdate(() => {
+      applyTiles(buildInitialTiles(totalCells));
+    });
+    requestAnimationFrame(() => {
+      clearLogDone();
+    });
   };
 
   const loadTiles = (nextTiles: Tile[]) => {
-    setTiles(normalizeTiles(nextTiles, totalCells, tileSourcesLength));
+    applyTiles(nextTiles);
   };
 
   const setCloneSource = (cellIndex: number) => {

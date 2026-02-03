@@ -266,6 +266,8 @@ export default function TestScreen() {
   const [loadedToken, setLoadedToken] = useState(0);
   const [loadPreviewUri, setLoadPreviewUri] = useState<string | null>(null);
   const [isCapturingPreview, setIsCapturingPreview] = useState(false);
+  const [isClearing, setIsClearing] = useState(false);
+  const [clearPreviewUri, setClearPreviewUri] = useState<string | null>(null);
   const NEW_FILE_TILE_SIZES = [25, 50, 75, 100, 150, 200] as const;
   const [viewMode, setViewMode] = useState<'modify' | 'file'>('file');
   const [brush, setBrush] = useState<
@@ -355,18 +357,7 @@ export default function TestScreen() {
     mirrorHorizontal: settings.mirrorHorizontal,
     mirrorVertical: settings.mirrorVertical,
   });
-  const displayTiles = useMemo(
-    () =>
-      suspendTiles
-        ? Array.from({ length: gridLayout.rows * gridLayout.columns }, () => ({
-            imageIndex: -1,
-            rotation: 0,
-            mirrorX: false,
-            mirrorY: false,
-          }))
-        : tiles,
-    [suspendTiles, tiles, gridLayout.rows, gridLayout.columns]
-  );
+  const displayTiles = tiles;
   const showOverlays = !isCapturingPreview;
   const gridWidth =
     gridLayout.columns * gridLayout.tileSize +
@@ -391,6 +382,9 @@ export default function TestScreen() {
   const viewShotRef = useRef<ViewShot>(null);
   const downloadTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const downloadExpectedRef = useRef(0);
+  const pendingFloodCompleteRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const suppressAutosaveRef = useRef(false);
+  const clearSequenceRef = useRef(0);
   const pendingRestoreRef = useRef<{
     fileId: string;
     tiles: Tile[];
@@ -505,6 +499,7 @@ export default function TestScreen() {
     }
     setShowGrid(true);
   }, [isHydratingFile, isPrefetchingTiles, loadedToken, loadToken, activeFileId, viewMode]);
+
 
   useEffect(() => {
     if (viewMode !== 'modify') {
@@ -642,6 +637,12 @@ export default function TestScreen() {
       return;
     }
     const pending = pendingRestoreRef.current;
+    if (suppressAutosaveRef.current) {
+      if (__DEV__) {
+        console.log('[tile-grid] autosave:suppressed');
+      }
+      return;
+    }
     if (isHydratingFile || (pending && pending.fileId === activeFileId)) {
       return;
     }
@@ -765,6 +766,61 @@ export default function TestScreen() {
     }
     lastPaintedRef.current = cellIndex;
     handlePress(cellIndex);
+  };
+
+  const clearCanvas = () => {
+    clearSequenceRef.current += 1;
+    const clearId = clearSequenceRef.current;
+    if (__DEV__) {
+      console.log('[tile-grid] clearCanvas:start', { clearId });
+    }
+    suppressAutosaveRef.current = true;
+    setIsClearing(true);
+    setShowGrid(false);
+    setShowPreview(Boolean(clearPreviewUri ?? loadPreviewUri));
+    resetTiles();
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        void (async () => {
+          setIsCapturingPreview(true);
+          await new Promise((resolve) => requestAnimationFrame(resolve));
+          let previewUri: string | null = null;
+          if (Platform.OS !== 'web') {
+            try {
+              await FileSystem.makeDirectoryAsync(PREVIEW_DIR, { intermediates: true });
+              const uri = await gridCaptureRef.current?.capture?.({
+                format: 'jpg',
+                quality: 0.9,
+                result: 'tmpfile',
+              });
+              if (uri) {
+                const target = `${PREVIEW_DIR}clear-preview.jpg`;
+                try {
+                  await FileSystem.deleteAsync(target, { idempotent: true });
+                } catch {
+                  // ignore
+                }
+                await FileSystem.copyAsync({ from: uri, to: target });
+                previewUri = target;
+              }
+            } catch {
+              // ignore
+            }
+          }
+          if (previewUri) {
+            setClearPreviewUri(previewUri);
+          }
+          setIsCapturingPreview(false);
+          suppressAutosaveRef.current = false;
+          setIsClearing(false);
+          setShowGrid(true);
+          setShowPreview(false);
+          if (__DEV__) {
+            console.log('[tile-grid] clearCanvas:end', { clearId });
+          }
+        })();
+      });
+    });
   };
 
   const handlePaintAt = (x: number, y: number) => {
@@ -1480,11 +1536,38 @@ export default function TestScreen() {
               icon="tune-vertical-variant"
               onPress={() => setShowFileSettingsOverlay(true)}
             />
-            <ToolbarButton label="Reset" icon="refresh" onPress={resetTiles} />
+            <ToolbarButton
+              label="Reset"
+              icon="refresh"
+              onPress={() => {
+                if (__DEV__) {
+                  console.log('[tile-grid] ui-reset', { brush: brush.mode });
+                }
+                if (pendingFloodCompleteRef.current) {
+                  clearTimeout(pendingFloodCompleteRef.current);
+                  pendingFloodCompleteRef.current = null;
+                  if (__DEV__) {
+                    console.log('[tile-grid] cancel-flood-complete');
+                  }
+                }
+                clearCanvas();
+              }}
+            />
             <ToolbarButton
               label="Flood Complete"
               icon="format-color-fill"
-              onPress={floodComplete}
+              onPress={() => {
+                if (__DEV__) {
+                  console.log('[tile-grid] ui-flood-complete', { brush: brush.mode });
+                }
+                if (pendingFloodCompleteRef.current) {
+                  clearTimeout(pendingFloodCompleteRef.current);
+                }
+                pendingFloodCompleteRef.current = setTimeout(() => {
+                  pendingFloodCompleteRef.current = null;
+                  floodComplete();
+                }, 0);
+              }}
             />
             <ToolbarButton
               label="Mirror Horizontal"
@@ -1520,9 +1603,9 @@ export default function TestScreen() {
             },
           ]}
         >
-          {loadPreviewUri && showPreview && !showGrid && (
+          {showPreview && !showGrid && (loadPreviewUri || clearPreviewUri) && (
             <Image
-              source={{ uri: loadPreviewUri }}
+              source={{ uri: clearPreviewUri ?? loadPreviewUri ?? undefined }}
               style={styles.gridPreview}
               resizeMode="cover"
             />
@@ -1553,7 +1636,7 @@ export default function TestScreen() {
               ref={setGridNode}
               style={[styles.grid, { opacity: showGrid ? 1 : 0 }]}
               accessibilityRole="grid"
-              pointerEvents={showGrid ? 'auto' : 'none'}
+              pointerEvents={showGrid && !isClearing ? 'auto' : 'none'}
               onLayout={(event: any) => {
                 const layout = event?.nativeEvent?.layout;
                 if (layout) {
@@ -1628,14 +1711,18 @@ export default function TestScreen() {
             </ThemedView>
           ) : (
             <>
-            <ViewShot
-              ref={setGridNode}
-              style={[
-                styles.grid,
-                { opacity: showGrid ? 1 : 0, width: gridWidth, height: gridHeight },
-              ]}
-              pointerEvents="none"
-            >
+              <ViewShot
+                ref={setGridNode}
+                style={[
+                  styles.grid,
+                  {
+                    opacity: showGrid || isCapturingPreview ? 1 : 0,
+                    width: gridWidth,
+                    height: gridHeight,
+                  },
+                ]}
+                pointerEvents="none"
+              >
               {rowIndices.map((rowIndex) => (
                 <ThemedView key={`row-${rowIndex}`} style={styles.row}>
                   {columnIndices.map((columnIndex) => {
@@ -1673,7 +1760,7 @@ export default function TestScreen() {
               <View
                 ref={gridTouchRef}
                 style={StyleSheet.absoluteFillObject}
-                pointerEvents={showGrid ? 'auto' : 'none'}
+                pointerEvents={showGrid && !isClearing ? 'auto' : 'none'}
                 onLayout={(event: any) => {
                   const layout = event?.nativeEvent?.layout;
                   if (layout) {
