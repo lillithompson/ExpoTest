@@ -77,11 +77,10 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
           : [];
         const activeId = activeRaw || null;
         if (parsed.length === 0) {
-          const initial = defaultFile(fallbackCategory);
-          setFiles([initial]);
-          setActiveFileId(initial.id);
-          await AsyncStorage.setItem(FILES_KEY, JSON.stringify([initial]));
-          await AsyncStorage.setItem(ACTIVE_KEY, initial.id);
+          setFiles([]);
+          setActiveFileId(null);
+          await AsyncStorage.setItem(FILES_KEY, JSON.stringify([]));
+          await AsyncStorage.removeItem(ACTIVE_KEY);
         } else {
           setFiles(parsed);
           setActiveFileId(activeId ?? parsed[0].id);

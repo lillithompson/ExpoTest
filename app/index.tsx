@@ -1398,18 +1398,18 @@ export default function TestScreen() {
               }}
             />
             <ToolbarButton
-              label="Open settings"
-              icon="cog"
-              color="#fff"
-              onPress={() => setShowSettingsOverlay(true)}
-            />
-            <ToolbarButton
               label="Select files"
               icon="checkbox-marked-outline"
               color="#fff"
               onPress={() => {
                 setIsSelectMode(true);
               }}
+            />
+            <ToolbarButton
+              label="Open settings"
+              icon="cog"
+              color="#fff"
+              onPress={() => setShowSettingsOverlay(true)}
             />
           </ThemedView>
         </ThemedView>
