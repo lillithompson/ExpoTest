@@ -1621,6 +1621,8 @@ const styles = StyleSheet.create({
     gap: 8,
     height: HEADER_HEIGHT,
     zIndex: 10,
+    width: '100%',
+    backgroundColor: '#e5e5e5',
   },
   headerRow: {
     flexDirection: 'row',
@@ -1628,6 +1630,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     width: '100%',
     paddingHorizontal: 6,
+    backgroundColor: '#e5e5e5',
   },
   controls: {
     flexDirection: 'row',
@@ -1637,6 +1640,7 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
     flex: 1,
     overflow: 'visible',
+    backgroundColor: 'transparent',
   },
   inputGroup: {
     flexDirection: 'row',
@@ -1672,6 +1676,7 @@ const styles = StyleSheet.create({
     borderColor: '#1f1f1f',
     borderRadius: 6,
     position: 'relative',
+    backgroundColor: 'transparent',
   },
   toolbarButton: {
     width: TOOLBAR_BUTTON_SIZE,

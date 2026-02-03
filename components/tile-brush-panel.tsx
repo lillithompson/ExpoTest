@@ -1,8 +1,7 @@
 import { useRef, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
 import { TileAsset } from '@/components/tile-asset';
 import { type TileSource } from '@/assets/images/tiles/manifest';
 
@@ -44,7 +43,7 @@ export function TileBrushPanel({
   const lastTapRef = useRef<{ time: number; index: number } | null>(null);
 
   return (
-    <ThemedView
+    <View
       style={[styles.container, { height }]}
       onLayout={(event) => setContainerWidth(event.nativeEvent.layout.width)}
     >
@@ -57,7 +56,7 @@ export function TileBrushPanel({
         contentInset={{ top: 0, left: 0, bottom: 0, right: 0 }}
         scrollIndicatorInsets={{ top: 0, left: 0, bottom: 0, right: 0 }}
       >
-        <ThemedView style={[styles.column, { height: columnHeight }]}>
+        <View style={[styles.column, { height: columnHeight }]}>
           {[
             { type: 'random' as const },
             { type: 'erase' as const },
@@ -148,7 +147,7 @@ export function TileBrushPanel({
                     Clone
                   </ThemedText>
                 ) : (
-                  <ThemedView style={styles.imageBox}>
+                  <View style={styles.imageBox}>
                     <TileAsset
                       source={entry.tile.source}
                       name={entry.tile.name}
@@ -163,14 +162,14 @@ export function TileBrushPanel({
                       ]}
                       resizeMode="cover"
                     />
-                  </ThemedView>
+                  </View>
                 )}
               </Pressable>
             );
           })}
-        </ThemedView>
+        </View>
       </ScrollView>
-    </ThemedView>
+    </View>
   );
 }
 
@@ -180,23 +179,23 @@ const styles = StyleSheet.create({
     borderColor: '#1f1f1f',
     paddingHorizontal: 1,
     paddingVertical: 0,
-    backgroundColor: '#2a2a2a',
+    backgroundColor: '#3f3f3f',
   },
   scroll: {
-    backgroundColor: '#2a2a2a',
+    backgroundColor: '#3f3f3f',
   },
   content: {
     flexGrow: 1,
     justifyContent: 'center',
     paddingVertical: 0,
-    backgroundColor: '#2a2a2a',
+    backgroundColor: '#3f3f3f',
   },
   column: {
     flexDirection: 'column',
     flexWrap: 'wrap',
     alignContent: 'flex-start',
     gap: 0,
-    backgroundColor: '#2a2a2a',
+    backgroundColor: '#3f3f3f',
   },
   item: {
     borderWidth: 1,
