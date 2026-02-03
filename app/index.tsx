@@ -151,6 +151,10 @@ type HsvColorPickerProps = {
 function HsvColorPicker({ label, color, onChange }: HsvColorPickerProps) {
   const { r, g, b } = useMemo(() => hexToRgb(color), [color]);
   const hsv = useMemo(() => rgbToHsv(r, g, b), [r, g, b]);
+  const [draftHsv, setDraftHsv] = useState(hsv);
+  useEffect(() => {
+    setDraftHsv(hsv);
+  }, [hsv.h, hsv.s, hsv.v]);
   const updateColor = useCallback(
     (nextH: number, nextS: number, nextV: number) => {
       const { r: nextR, g: nextG, b: nextB } = hsvToRgb(nextH, nextS, nextV);
@@ -158,27 +162,38 @@ function HsvColorPicker({ label, color, onChange }: HsvColorPickerProps) {
     },
     [onChange]
   );
+  const draftColor = useMemo(() => {
+    const { r: nextR, g: nextG, b: nextB } = hsvToRgb(
+      draftHsv.h,
+      draftHsv.s,
+      draftHsv.v
+    );
+    return rgbToHex(nextR, nextG, nextB);
+  }, [draftHsv.h, draftHsv.s, draftHsv.v]);
 
   return (
     <ThemedView style={styles.sectionGroup}>
       <ThemedText type="defaultSemiBold">{label}</ThemedText>
       <ThemedView style={styles.colorPickerWrap}>
-        <ThemedView style={[styles.colorPreview, { backgroundColor: color }]} />
-        <ThemedText type="defaultSemiBold">{color.toUpperCase()}</ThemedText>
+        <ThemedView style={[styles.colorPreview, { backgroundColor: draftColor }]} />
+        <ThemedText type="defaultSemiBold">{draftColor.toUpperCase()}</ThemedText>
         <ThemedView style={styles.colorRow}>
           <ThemedText type="defaultSemiBold">H</ThemedText>
           <Slider
             minimumValue={0}
             maximumValue={360}
             step={1}
-            value={hsv.h}
-            onValueChange={(value) => updateColor(value, hsv.s, hsv.v)}
+            value={draftHsv.h}
+            onValueChange={(value) =>
+              setDraftHsv((prev) => ({ ...prev, h: value }))
+            }
+            onSlidingComplete={(value) => updateColor(value, draftHsv.s, draftHsv.v)}
             minimumTrackTintColor="#ef4444"
             maximumTrackTintColor="#e5e7eb"
             thumbTintColor="#ef4444"
             style={styles.colorSlider}
           />
-          <ThemedText type="defaultSemiBold">{Math.round(hsv.h)}</ThemedText>
+          <ThemedText type="defaultSemiBold">{Math.round(draftHsv.h)}</ThemedText>
         </ThemedView>
         <ThemedView style={styles.colorRow}>
           <ThemedText type="defaultSemiBold">S</ThemedText>
@@ -186,14 +201,17 @@ function HsvColorPicker({ label, color, onChange }: HsvColorPickerProps) {
             minimumValue={0}
             maximumValue={100}
             step={1}
-            value={hsv.s}
-            onValueChange={(value) => updateColor(hsv.h, value, hsv.v)}
+            value={draftHsv.s}
+            onValueChange={(value) =>
+              setDraftHsv((prev) => ({ ...prev, s: value }))
+            }
+            onSlidingComplete={(value) => updateColor(draftHsv.h, value, draftHsv.v)}
             minimumTrackTintColor="#22c55e"
             maximumTrackTintColor="#e5e7eb"
             thumbTintColor="#22c55e"
             style={styles.colorSlider}
           />
-          <ThemedText type="defaultSemiBold">{Math.round(hsv.s)}</ThemedText>
+          <ThemedText type="defaultSemiBold">{Math.round(draftHsv.s)}</ThemedText>
         </ThemedView>
         <ThemedView style={styles.colorRow}>
           <ThemedText type="defaultSemiBold">V</ThemedText>
@@ -201,14 +219,17 @@ function HsvColorPicker({ label, color, onChange }: HsvColorPickerProps) {
             minimumValue={0}
             maximumValue={100}
             step={1}
-            value={hsv.v}
-            onValueChange={(value) => updateColor(hsv.h, hsv.s, value)}
+            value={draftHsv.v}
+            onValueChange={(value) =>
+              setDraftHsv((prev) => ({ ...prev, v: value }))
+            }
+            onSlidingComplete={(value) => updateColor(draftHsv.h, draftHsv.s, value)}
             minimumTrackTintColor="#3b82f6"
             maximumTrackTintColor="#e5e7eb"
             thumbTintColor="#3b82f6"
             style={styles.colorSlider}
           />
-          <ThemedText type="defaultSemiBold">{Math.round(hsv.v)}</ThemedText>
+          <ThemedText type="defaultSemiBold">{Math.round(draftHsv.v)}</ThemedText>
         </ThemedView>
       </ThemedView>
     </ThemedView>
@@ -523,6 +544,7 @@ export default function TestScreen() {
   const fileTileSize = activeFile?.preferredTileSize ?? settings.preferredTileSize;
   const activeLineWidth = activeFile?.lineWidth ?? 10;
   const activeLineColor = activeFile?.lineColor ?? '#ffffff';
+  const [lineWidthDraft, setLineWidthDraft] = useState(activeLineWidth);
   const debugLog = useCallback((...args: unknown[]) => {
     if (__DEV__) {
       console.log('[tile-load]', ...args);
@@ -619,6 +641,10 @@ export default function TestScreen() {
   useEffect(() => {
     filesRef.current = files;
   }, [files]);
+
+  useEffect(() => {
+    setLineWidthDraft(activeLineWidth);
+  }, [activeLineWidth]);
 
   useEffect(() => {
     if (brush.mode !== 'clone') {
@@ -2197,15 +2223,16 @@ export default function TestScreen() {
                 <ThemedView style={styles.sectionHeader}>
                   <ThemedText type="defaultSemiBold">Line Width</ThemedText>
                   <ThemedText type="defaultSemiBold">
-                    {activeLineWidth.toFixed(1)}
+                    {lineWidthDraft.toFixed(1)}
                   </ThemedText>
                 </ThemedView>
                 <Slider
                   minimumValue={1}
                   maximumValue={20}
                   step={0.1}
-                  value={activeLineWidth}
-                  onValueChange={(value) => {
+                  value={lineWidthDraft}
+                  onValueChange={(value) => setLineWidthDraft(value)}
+                  onSlidingComplete={(value) => {
                     if (!activeFileId) {
                       return;
                     }
