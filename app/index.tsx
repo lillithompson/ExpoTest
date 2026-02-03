@@ -720,7 +720,7 @@ export default function TestScreen() {
     loadTokenRef.current = nextToken;
     setLoadToken(nextToken);
     setLoadedToken(0);
-    const previewUri = isTransparentPreview(file.previewUri) ? file.previewUri : null;
+    const previewUri = file.previewUri ?? file.thumbnailUri ?? null;
     setLoadPreviewUri(previewUri);
     setShowPreview(Boolean(previewUri));
     setShowGrid(false);
@@ -1248,7 +1248,7 @@ export default function TestScreen() {
     if (!file) {
       return;
     }
-    const previewUri = isTransparentPreview(file.previewUri) ? file.previewUri : null;
+    const previewUri = file.previewUri ?? file.thumbnailUri ?? null;
     setLoadRequestId((prev) => prev + 1);
     setLoadPreviewUri(previewUri);
     setShowPreview(Boolean(previewUri));
