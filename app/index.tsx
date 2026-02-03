@@ -534,7 +534,7 @@ export default function TestScreen() {
     {}
   );
   const [paletteMirrors, setPaletteMirrors] = useState<Record<number, boolean>>({});
-  const tileSources = TILE_MANIFEST[selectedCategory] ?? [];
+  // tileSources is set after we resolve the active file/category.
   const isWeb = Platform.OS === 'web';
   const shouldUseAspectRatio = false;
   const aspectRatio = null;
@@ -568,6 +568,12 @@ export default function TestScreen() {
     upsertActiveFile,
     ready,
   } = useTileFiles(DEFAULT_CATEGORY);
+
+  const activeCategory =
+    activeFile && TILE_MANIFEST[activeFile.category]
+      ? activeFile.category
+      : selectedCategory;
+  const tileSources = TILE_MANIFEST[activeCategory] ?? [];
 
   const fileTileSize = activeFile?.preferredTileSize ?? settings.preferredTileSize;
   const activeLineWidth = activeFile?.lineWidth ?? 10;
@@ -681,6 +687,14 @@ export default function TestScreen() {
       clearCloneSource();
     }
   }, [brush.mode, clearCloneSource]);
+
+  useEffect(() => {
+    if (activeFile?.category && TILE_MANIFEST[activeFile.category]) {
+      if (activeFile.category !== selectedCategory) {
+        setSelectedCategory(activeFile.category);
+      }
+    }
+  }, [activeFile?.category, selectedCategory]);
 
   useEffect(() => {
     if (!ready || !activeFileId || viewMode !== 'modify') {

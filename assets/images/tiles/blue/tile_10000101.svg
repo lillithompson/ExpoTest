@@ -1,8 +1,6 @@
 <svg width="256" height="256" viewBox="0 0 256 256" fill="none" xmlns="http://www.w3.org/2000/svg">
 <g clip-path="url(#clip0_0_32)">
-<path d="M128 -0.5V127.5" stroke="#00D9FF" stroke-width="10"/>
-<path d="M128 128L4.38125e-06 4.38125e-06" stroke="#00D9FF" stroke-width="10"/>
-<path d="M0 256L128 128" stroke="#00D9FF" stroke-width="10"/>
+<path d="M-5.45567e-05 256L65.9999 140M65.9999 140L-4.64645e-05 0.00020273M65.9999 140C114.142 140 149.816 95.287 139.125 48.3471L128 -0.499819" stroke="#00D9FF" stroke-width="10"/>
 </g>
 <defs>
 <clipPath id="clip0_0_32">
