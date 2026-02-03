@@ -66,12 +66,6 @@ export const useTileGrid = ({
   mirrorHorizontal,
   mirrorVertical,
 }: Params): Result => {
-  const log = (...args: unknown[]) => {
-    if (__DEV__) {
-      // eslint-disable-next-line no-console
-      console.log('[tile-grid]', ...args);
-    }
-  };
   const clearLogRef = useRef<{ clearId: number } | null>(null);
   const previousTileSourcesRef = useRef<TileSource[] | null>(null);
   const tileSourcesLength = tileSources.length;
@@ -151,25 +145,13 @@ export const useTileGrid = ({
 
   const markClear = () => {
     clearLogRef.current = { clearId: Date.now() };
-    log('clear:mark', { clearId: clearLogRef.current.clearId });
   };
 
-  const logClearApply = (changed: number, total: number) => {
-    if (!clearLogRef.current) {
-      return;
-    }
-    log('clear:applyTiles', {
-      clearId: clearLogRef.current.clearId,
-      changed,
-      total,
-    });
+  const logClearApply = (_changed: number, _total: number) => {
+    // no-op (logging removed)
   };
 
   const clearLogDone = () => {
-    if (!clearLogRef.current) {
-      return;
-    }
-    log('clear:end', { clearId: clearLogRef.current.clearId });
     clearLogRef.current = null;
   };
 
@@ -178,7 +160,6 @@ export const useTileGrid = ({
       const normalizedNext = normalizeTiles(nextTiles, totalCells, tileSourcesLength);
       const normalizedPrev = normalizeTiles(prev, totalCells, tileSourcesLength);
       if (tilesEqual(normalizedPrev, normalizedNext)) {
-        log('applyTiles:skip');
         return prev;
       }
       let changed = 0;
@@ -194,7 +175,6 @@ export const useTileGrid = ({
           changed += 1;
         }
       }
-      log('applyTiles', { changed, total: normalizedNext.length });
       logClearApply(changed, normalizedNext.length);
       return normalizedNext;
     });
@@ -605,11 +585,6 @@ export const useTileGrid = ({
   };
 
   const handlePress = (cellIndex: number) => {
-    log('handlePress', {
-      cellIndex,
-      brush: brush.mode,
-      bulk: bulkUpdateRef.current,
-    });
     if (bulkUpdateRef.current) {
       return;
     }
@@ -735,10 +710,8 @@ export const useTileGrid = ({
   };
 
   const randomFill = () => {
-    log('randomFill:start', { totalCells });
     const normalized = buildInitialTiles(totalCells);
     if (totalCells <= 0 || tileSourcesLength <= 0) {
-      log('randomFill:skip', { totalCells, tileSourcesLength });
       return;
     }
     const startIndex = Math.floor(Math.random() * totalCells);
@@ -756,11 +729,9 @@ export const useTileGrid = ({
     withBulkUpdate(() => {
       applyTiles(nextTiles);
     });
-    log('randomFill:done', { totalCells });
   };
 
   const floodFill = () => {
-    log('floodFill:start', { totalCells, brush: brush.mode });
     if (totalCells <= 0) {
       return;
     }
@@ -768,7 +739,6 @@ export const useTileGrid = ({
       withBulkUpdate(() => {
         applyTiles(buildInitialTiles(totalCells));
       });
-      log('floodFill:erase');
       return;
     }
     if (brush.mode === 'random') {
@@ -788,11 +758,9 @@ export const useTileGrid = ({
         withBulkUpdate(() => {
           applyTiles(nextTiles);
         });
-        log('floodFill:random-mirror');
         return;
       }
       randomFill();
-      log('floodFill:random');
       return;
     }
     const fixedIndex = brush.index;
@@ -815,7 +783,6 @@ export const useTileGrid = ({
       withBulkUpdate(() => {
         applyTiles(nextTiles);
       });
-      log('floodFill:fixed-mirror');
       return;
     }
     withBulkUpdate(() => {
@@ -828,11 +795,9 @@ export const useTileGrid = ({
         }))
       );
     });
-    log('floodFill:fixed');
   };
 
   const floodComplete = () => {
-    log('floodComplete:start', { totalCells, brush: brush.mode });
     if (totalCells <= 0) {
       return;
     }
@@ -840,7 +805,6 @@ export const useTileGrid = ({
       withBulkUpdate(() => {
         applyTiles(buildInitialTiles(totalCells));
       });
-      log('floodComplete:erase');
       return;
     }
     const drivenSet = new Set(getDrivenCellIndices());
@@ -876,7 +840,6 @@ export const useTileGrid = ({
       withBulkUpdate(() => {
         applyTiles(nextTiles);
       });
-      log('floodComplete:random');
       return;
     }
     const fixedIndex = brush.index;
@@ -915,11 +878,9 @@ export const useTileGrid = ({
       return nextTiles;
       });
     });
-    log('floodComplete:fixed');
   };
 
   const resetTiles = () => {
-    log('resetTiles', { totalCells, brush: brush.mode });
     markClear();
     withBulkUpdate(() => {
       applyTiles(buildInitialTiles(totalCells));

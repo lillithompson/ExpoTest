@@ -573,11 +573,6 @@ export default function TestScreen() {
   const activeLineWidth = activeFile?.lineWidth ?? 10;
   const activeLineColor = activeFile?.lineColor ?? '#ffffff';
   const [lineWidthDraft, setLineWidthDraft] = useState(activeLineWidth);
-  const debugLog = useCallback((...args: unknown[]) => {
-    if (__DEV__) {
-      console.log('[tile-load]', ...args);
-    }
-  }, []);
 
   const {
     gridLayout,
@@ -728,7 +723,6 @@ export default function TestScreen() {
     setSuspendTiles(true);
     if (file.tiles.length === 0) {
       resetTiles();
-      debugLog('clear-tiles', { fileId: file.id, token: nextToken });
     }
     pendingRestoreRef.current = {
       fileId: file.id,
@@ -740,14 +734,7 @@ export default function TestScreen() {
       token: nextToken,
       preview: Boolean(previewUri),
     };
-    debugLog('start-load', {
-      fileId: file.id,
-      token: nextToken,
-      preview: Boolean(previewUri),
-      rows: file.grid.rows,
-      columns: file.grid.columns,
-    });
-  }, [activeFileId, loadRequestId, ready, viewMode, selectedCategory, debugLog]);
+  }, [activeFileId, loadRequestId, ready, viewMode, selectedCategory]);
 
   useEffect(() => {
     if (viewMode !== 'modify') {
@@ -852,12 +839,6 @@ export default function TestScreen() {
       setSuspendTiles(false);
       const finalize = () => {
         setLoadedToken(pending.token ?? 0);
-        debugLog('finish-load', {
-          fileId: pending.fileId,
-          token: pending.token,
-          rows: pending.rows,
-          columns: pending.columns,
-        });
       };
       if (pending.preview) {
         requestAnimationFrame(() => {
@@ -874,12 +855,6 @@ export default function TestScreen() {
       setHydrating(false);
       setSuspendTiles(false);
       setLoadedToken(pending.token ?? 0);
-      debugLog('finish-load-empty', {
-        fileId: pending.fileId,
-        token: pending.token,
-        rows: pending.rows,
-        columns: pending.columns,
-      });
     }
   }, [
     activeFileId,
@@ -889,7 +864,6 @@ export default function TestScreen() {
     gridLayout.rows,
     loadTiles,
     setHydrating,
-    debugLog,
     loadToken,
   ]);
 
@@ -899,9 +873,6 @@ export default function TestScreen() {
     }
     const pending = pendingRestoreRef.current;
     if (suppressAutosaveRef.current) {
-      if (__DEV__) {
-        console.log('[tile-grid] autosave:suppressed');
-      }
       return;
     }
     if (isHydratingFile || (pending && pending.fileId === activeFileId)) {
@@ -1032,9 +1003,6 @@ export default function TestScreen() {
   const clearCanvas = () => {
     clearSequenceRef.current += 1;
     const clearId = clearSequenceRef.current;
-    if (__DEV__) {
-      console.log('[tile-grid] clearCanvas:start', { clearId });
-    }
     suppressAutosaveRef.current = true;
     setIsClearing(true);
     setShowGrid(false);
@@ -1076,9 +1044,6 @@ export default function TestScreen() {
           setIsClearing(false);
           setShowGrid(true);
           setShowPreview(false);
-          if (__DEV__) {
-            console.log('[tile-grid] clearCanvas:end', { clearId });
-          }
         })();
       });
     });
@@ -1602,28 +1567,30 @@ export default function TestScreen() {
                     Cancel
                   </ThemedText>
                 </Pressable>
-                <Pressable
-                  style={[
-                    styles.downloadActionButton,
-                    isDownloading && styles.downloadActionDisabled,
-                  ]}
-                  onPress={() => {
-                    if (isDownloading) {
-                      return;
-                    }
-                    void handleDownloadSvg();
-                  }}
-                  disabled={isDownloading}
-                  accessibilityRole="button"
-                  accessibilityLabel="Download SVG"
-                >
-                  <ThemedText
-                    type="defaultSemiBold"
-                    style={styles.downloadActionText}
+                {Platform.OS === 'web' && (
+                  <Pressable
+                    style={[
+                      styles.downloadActionButton,
+                      isDownloading && styles.downloadActionDisabled,
+                    ]}
+                    onPress={() => {
+                      if (isDownloading) {
+                        return;
+                      }
+                      void handleDownloadSvg();
+                    }}
+                    disabled={isDownloading}
+                    accessibilityRole="button"
+                    accessibilityLabel="Download SVG"
                   >
-                    SVG
-                  </ThemedText>
-                </Pressable>
+                    <ThemedText
+                      type="defaultSemiBold"
+                      style={styles.downloadActionText}
+                    >
+                      SVG
+                    </ThemedText>
+                  </Pressable>
+                )}
                 <Pressable
                   style={[
                     styles.downloadActionButton,
@@ -1917,15 +1884,9 @@ export default function TestScreen() {
               label="Reset"
               icon="refresh"
               onPress={() => {
-                if (__DEV__) {
-                  console.log('[tile-grid] ui-reset', { brush: brush.mode });
-                }
                 if (pendingFloodCompleteRef.current) {
                   clearTimeout(pendingFloodCompleteRef.current);
                   pendingFloodCompleteRef.current = null;
-                  if (__DEV__) {
-                    console.log('[tile-grid] cancel-flood-complete');
-                  }
                 }
                 clearCanvas();
               }}
@@ -1934,9 +1895,6 @@ export default function TestScreen() {
               label="Flood Complete"
               icon="format-color-fill"
               onPress={() => {
-                if (__DEV__) {
-                  console.log('[tile-grid] ui-flood-complete', { brush: brush.mode });
-                }
                 if (pendingFloodCompleteRef.current) {
                   clearTimeout(pendingFloodCompleteRef.current);
                 }
