@@ -503,6 +503,7 @@ export default function TestScreen() {
   const [showDownloadOverlay, setShowDownloadOverlay] = useState(false);
   const [downloadRenderKey, setDownloadRenderKey] = useState(0);
   const [downloadLoadedCount, setDownloadLoadedCount] = useState(0);
+  const [includeDownloadBackground, setIncludeDownloadBackground] = useState(true);
   const [isHydratingFile, setIsHydratingFile] = useState(false);
   const [showGrid, setShowGrid] = useState(true);
   const [isPrefetchingTiles, setIsPrefetchingTiles] = useState(false);
@@ -659,6 +660,14 @@ export default function TestScreen() {
     () => files.find((file) => file.id === downloadTargetId) ?? null,
     [files, downloadTargetId]
   );
+  const downloadPreviewUri = useMemo(() => {
+    if (!downloadTargetFile) {
+      return null;
+    }
+    return isTransparentPreview(downloadTargetFile.previewUri)
+      ? downloadTargetFile.previewUri
+      : null;
+  }, [downloadTargetFile]);
   const filesRef = useRef(files);
 
   useEffect(() => {
@@ -1209,16 +1218,22 @@ export default function TestScreen() {
       return;
     }
     setDownloadLoadedCount(0);
-    const sources = TILE_MANIFEST[downloadTargetFile.category] ?? [];
-    const total = downloadTargetFile.grid.rows * downloadTargetFile.grid.columns;
-    const normalized = normalizeTiles(downloadTargetFile.tiles, total, sources.length);
-    const expected = normalized.filter(
-      (tile) => tile && tile.imageIndex >= 0 && sources[tile.imageIndex]?.source
-    ).length;
+    let expected = 0;
+    if (downloadPreviewUri) {
+      expected = 1;
+    } else {
+      const sources = TILE_MANIFEST[downloadTargetFile.category] ?? [];
+      const total = downloadTargetFile.grid.rows * downloadTargetFile.grid.columns;
+      const normalized = normalizeTiles(downloadTargetFile.tiles, total, sources.length);
+      expected = normalized.filter(
+        (tile) => tile && tile.imageIndex >= 0 && sources[tile.imageIndex]?.source
+      ).length;
+    }
     downloadExpectedRef.current = expected;
     setDownloadRenderKey((prev) => prev + 1);
+    setIncludeDownloadBackground(true);
     setShowDownloadOverlay(true);
-  }, [downloadTargetFile]);
+  }, [downloadTargetFile, downloadPreviewUri]);
 
   useEffect(() => {
     if (!downloadTargetFile || isDownloading || Platform.OS === 'web') {
@@ -1381,7 +1396,10 @@ export default function TestScreen() {
                 onPress={() => {
                   void openFileInModifyView(file.id);
                 }}
-                onLongPress={() => setFileMenuTargetId(file.id)}
+                onLongPress={() => {
+                  setIncludeDownloadBackground(true);
+                  setFileMenuTargetId(file.id);
+                }}
                 delayLongPress={320}
                 accessibilityRole="button"
                 accessibilityLabel={`Open ${file.name}`}
@@ -1452,7 +1470,7 @@ export default function TestScreen() {
         {downloadTargetFile && Platform.OS !== 'web' && showDownloadOverlay && (
           <ThemedView style={styles.overlay} accessibilityRole="dialog">
             <View style={styles.overlayBackdrop} />
-          <ThemedView style={styles.downloadPanel}>
+            <ThemedView style={styles.downloadPanel}>
               <ViewShot
                 ref={viewShotRef}
                 collapsable={false}
@@ -1466,75 +1484,96 @@ export default function TestScreen() {
                       downloadTargetFile.preferredTileSize,
                     height:
                       downloadTargetFile.grid.rows * downloadTargetFile.preferredTileSize,
-                    backgroundColor: settings.backgroundColor,
+                    backgroundColor: includeDownloadBackground
+                      ? settings.backgroundColor
+                      : 'transparent',
                   },
                 ]}
               >
-                {(() => {
-                  const sources = TILE_MANIFEST[downloadTargetFile.category] ?? [];
-                  const total =
-                    downloadTargetFile.grid.rows * downloadTargetFile.grid.columns;
-                  const tiles = normalizeTiles(
-                    downloadTargetFile.tiles,
-                    total,
-                    sources.length
-                  );
-                  return Array.from(
-                    { length: downloadTargetFile.grid.rows },
-                    (_, rowIndex) => (
-                      <View key={`capture-row-${rowIndex}`} style={styles.captureRow}>
-                        {Array.from(
-                          { length: downloadTargetFile.grid.columns },
-                          (_, colIndex) => {
-                            const index =
-                              rowIndex * downloadTargetFile.grid.columns + colIndex;
-                            const tile = tiles[index];
-                            const source =
-                              tile && tile.imageIndex >= 0
-                                ? sources[tile.imageIndex]?.source
-                                : null;
-                            return (
-                              <View
-                                key={`capture-cell-${index}`}
-                                style={[
-                                  styles.captureCell,
-                                  {
-                                    width: downloadTargetFile.preferredTileSize,
-                                    height: downloadTargetFile.preferredTileSize,
-                                  },
-                                ]}
-                              >
-                                {source && (
-                                  <TileAsset
-                                    source={source}
-                                    name={sources[tile.imageIndex]?.name}
-                                    strokeColor={downloadTargetFile.lineColor}
-                                    strokeWidth={downloadTargetFile.lineWidth}
-                                    style={[
-                                      styles.captureImage,
-                                      {
-                                        transform: [
-                                          { scaleX: tile?.mirrorX ? -1 : 1 },
-                                          { scaleY: tile?.mirrorY ? -1 : 1 },
-                                          { rotate: `${tile?.rotation ?? 0}deg` },
-                                        ],
-                                      },
-                                    ]}
-                                    resizeMode="cover"
-                                    onLoad={() => {
-                                      setDownloadLoadedCount((count) => count + 1);
-                                    }}
-                                  />
-                                )}
-                              </View>
-                            );
-                          }
-                        )}
-                      </View>
-                    )
-                  );
-                })()}
+                {downloadPreviewUri ? (
+                  <Image
+                    source={{ uri: downloadPreviewUri }}
+                    style={styles.downloadPreviewImage}
+                    resizeMode="stretch"
+                    onLoad={() => {
+                      setDownloadLoadedCount((count) => count + 1);
+                    }}
+                  />
+                ) : (
+                  (() => {
+                    const sources = TILE_MANIFEST[downloadTargetFile.category] ?? [];
+                    const total =
+                      downloadTargetFile.grid.rows * downloadTargetFile.grid.columns;
+                    const tiles = normalizeTiles(
+                      downloadTargetFile.tiles,
+                      total,
+                      sources.length
+                    );
+                    return Array.from(
+                      { length: downloadTargetFile.grid.rows },
+                      (_, rowIndex) => (
+                        <View key={`capture-row-${rowIndex}`} style={styles.captureRow}>
+                          {Array.from(
+                            { length: downloadTargetFile.grid.columns },
+                            (_, colIndex) => {
+                              const index =
+                                rowIndex * downloadTargetFile.grid.columns + colIndex;
+                              const tile = tiles[index];
+                              const source =
+                                tile && tile.imageIndex >= 0
+                                  ? sources[tile.imageIndex]?.source
+                                  : null;
+                              return (
+                                <View
+                                  key={`capture-cell-${index}`}
+                                  style={[
+                                    styles.captureCell,
+                                    {
+                                      width: downloadTargetFile.preferredTileSize,
+                                      height: downloadTargetFile.preferredTileSize,
+                                    },
+                                  ]}
+                                >
+                                  {source && (
+                                    <TileAsset
+                                      source={source}
+                                      name={sources[tile.imageIndex]?.name}
+                                      strokeColor={downloadTargetFile.lineColor}
+                                      strokeWidth={downloadTargetFile.lineWidth}
+                                      style={[
+                                        styles.captureImage,
+                                        {
+                                          transform: [
+                                            { scaleX: tile?.mirrorX ? -1 : 1 },
+                                            { scaleY: tile?.mirrorY ? -1 : 1 },
+                                            { rotate: `${tile?.rotation ?? 0}deg` },
+                                          ],
+                                        },
+                                      ]}
+                                      resizeMode="cover"
+                                      onLoad={() => {
+                                        setDownloadLoadedCount((count) => count + 1);
+                                      }}
+                                    />
+                                  )}
+                                </View>
+                              );
+                            }
+                          )}
+                        </View>
+                      )
+                    );
+                  })()
+                )}
               </ViewShot>
+              <ThemedView style={styles.downloadOptions}>
+                <ThemedText type="defaultSemiBold">Include background color</ThemedText>
+                <Switch
+                  value={includeDownloadBackground}
+                  onValueChange={(value) => setIncludeDownloadBackground(value)}
+                  accessibilityLabel="Include background color in download"
+                />
+              </ThemedView>
               <ThemedView style={styles.downloadActions}>
                 <Pressable
                   style={styles.downloadActionButton}
@@ -1606,6 +1645,16 @@ export default function TestScreen() {
               accessibilityLabel="Close file options"
             />
             <ThemedView style={styles.fileMenuPanel}>
+              {Platform.OS === 'web' && (
+                <ThemedView style={styles.fileMenuToggle}>
+                  <ThemedText type="defaultSemiBold">Include background</ThemedText>
+                  <Switch
+                    value={includeDownloadBackground}
+                    onValueChange={(value) => setIncludeDownloadBackground(value)}
+                    accessibilityLabel="Include background color in download"
+                  />
+                </ThemedView>
+              )}
               <Pressable
                 style={styles.fileMenuButton}
                 onPress={() => {
@@ -1614,7 +1663,9 @@ export default function TestScreen() {
                     if (Platform.OS === 'web') {
                       const sources = TILE_MANIFEST[file.category] ?? [];
                       void downloadFile(file, sources, {
-                        backgroundColor: settings.backgroundColor,
+                        backgroundColor: includeDownloadBackground
+                          ? settings.backgroundColor
+                          : undefined,
                       });
                     } else {
                       setDownloadTargetId(file.id);
@@ -2588,6 +2639,16 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     overflow: 'hidden',
   },
+  fileMenuToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e5e7eb',
+  },
   fileMenuButton: {
     paddingVertical: 14,
     paddingHorizontal: 14,
@@ -2610,6 +2671,10 @@ const styles = StyleSheet.create({
   downloadPreview: {
     backgroundColor: '#000',
   },
+  downloadPreviewImage: {
+    width: '100%',
+    height: '100%',
+  },
   downloadActions: {
     flexDirection: 'row',
     gap: 8,
@@ -2621,6 +2686,16 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     borderTopWidth: 1,
     borderTopColor: 'rgba(255,255,255,0.18)',
+  },
+  downloadOptions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    width: '100%',
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 10,
   },
   downloadActionButton: {
     paddingVertical: 8,
