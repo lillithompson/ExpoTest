@@ -1867,8 +1867,7 @@ export default function TestScreen() {
               resizeMode="cover"
             />
           )}
-          {showOverlays &&
-            (settings.mirrorHorizontal || settings.mirrorVertical) &&
+          {(settings.mirrorHorizontal || settings.mirrorVertical) &&
             gridWidth > 0 &&
             gridHeight > 0 && (
               <View pointerEvents="none" style={styles.mirrorLines}>
