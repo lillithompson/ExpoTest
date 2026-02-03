@@ -69,6 +69,15 @@ const rgbToHex = (r: number, g: number, b: number) =>
   `#${[r, g, b]
     .map((channel) => clamp(Math.round(channel), 0, 255).toString(16).padStart(2, '0'))
     .join('')}`;
+const isTransparentPreview = (uri: string | null | undefined) => {
+  if (!uri) {
+    return false;
+  }
+  if (uri.startsWith('data:image/png')) {
+    return true;
+  }
+  return uri.toLowerCase().endsWith('.png');
+};
 const rgbToHsv = (r: number, g: number, b: number) => {
   const rNorm = r / 255;
   const gNorm = g / 255;
@@ -650,7 +659,7 @@ export default function TestScreen() {
     loadTokenRef.current = nextToken;
     setLoadToken(nextToken);
     setLoadedToken(0);
-    const previewUri = file.previewUri ?? file.thumbnailUri ?? null;
+    const previewUri = isTransparentPreview(file.previewUri) ? file.previewUri : null;
     setLoadPreviewUri(previewUri);
     setShowPreview(Boolean(previewUri));
     setShowGrid(false);
@@ -853,9 +862,6 @@ export default function TestScreen() {
                 errorSource: ERROR_TILE,
                 lineColor: activeLineColor,
                 lineWidth: activeLineWidth,
-                backgroundColor: settings.backgroundColor,
-                backgroundLineColor: settings.backgroundLineColor,
-                backgroundLineWidth: settings.backgroundLineWidth,
                 maxDimension: 192,
               })
             : undefined;
@@ -880,9 +886,6 @@ export default function TestScreen() {
     fileTileSize,
     activeLineColor,
     activeLineWidth,
-    settings.backgroundColor,
-    settings.backgroundLineColor,
-    settings.backgroundLineWidth,
     ready,
     activeFileId,
     upsertActiveFile,
@@ -986,12 +989,12 @@ export default function TestScreen() {
             try {
               await FileSystem.makeDirectoryAsync(PREVIEW_DIR, { intermediates: true });
               const uri = await gridCaptureRef.current?.capture?.({
-                format: 'jpg',
-                quality: 0.9,
+                format: 'png',
+                quality: 1,
                 result: 'tmpfile',
               });
               if (uri) {
-                const target = `${PREVIEW_DIR}clear-preview.jpg`;
+                const target = `${PREVIEW_DIR}clear-preview.png`;
                 try {
                   await FileSystem.deleteAsync(target, { idempotent: true });
                 } catch {
@@ -1063,14 +1066,14 @@ export default function TestScreen() {
           )
         );
         const uri = await gridCaptureRef.current?.capture?.({
-          format: 'jpg',
-          quality: 0.92,
+          format: 'png',
+          quality: 1,
           result: 'tmpfile',
           width: fullWidth,
           height: fullHeight,
         });
         if (uri) {
-          const target = `${PREVIEW_DIR}${activeFileId}-full.jpg`;
+          const target = `${PREVIEW_DIR}${activeFileId}-full.png`;
           try {
             await FileSystem.deleteAsync(target, { idempotent: true });
           } catch {
@@ -1120,12 +1123,9 @@ export default function TestScreen() {
       errorSource: ERROR_TILE,
       lineColor: activeLineColor,
       lineWidth: activeLineWidth,
-      backgroundColor: settings.backgroundColor,
-      backgroundLineColor: settings.backgroundLineColor,
-      backgroundLineWidth: settings.backgroundLineWidth,
       maxDimension: 0,
-      format: 'image/jpeg',
-      quality: 0.92,
+      format: 'image/png',
+      quality: 1,
     });
     const thumbnailUri = await renderTileCanvasToDataUrl({
       tiles,
@@ -1136,9 +1136,6 @@ export default function TestScreen() {
       errorSource: ERROR_TILE,
       lineColor: activeLineColor,
       lineWidth: activeLineWidth,
-      backgroundColor: settings.backgroundColor,
-      backgroundLineColor: settings.backgroundLineColor,
-      backgroundLineWidth: settings.backgroundLineWidth,
       maxDimension: 192,
     });
     upsertActiveFile({
@@ -1195,11 +1192,11 @@ export default function TestScreen() {
       }
       for (let attempt = 0; attempt < 6; attempt += 1) {
         await new Promise((resolve) => setTimeout(resolve, 120));
-        const uri = await viewShotRef.current?.capture?.({
-          format: 'png',
-          quality: 1,
-          result: 'tmpfile',
-        });
+      const uri = await viewShotRef.current?.capture?.({
+        format: 'png',
+        quality: 1,
+        result: 'tmpfile',
+      });
         if (uri) {
           const safeName = downloadTargetFile.name.replace(/[^\w-]+/g, '_');
           const target = `${FileSystem.cacheDirectory}${safeName}.png`;
@@ -1265,7 +1262,7 @@ export default function TestScreen() {
     if (!file) {
       return;
     }
-    const previewUri = file.previewUri ?? file.thumbnailUri ?? null;
+    const previewUri = isTransparentPreview(file.previewUri) ? file.previewUri : null;
     setLoadRequestId((prev) => prev + 1);
     setLoadPreviewUri(previewUri);
     setShowPreview(Boolean(previewUri));
@@ -1853,6 +1850,16 @@ export default function TestScreen() {
             },
           ]}
         >
+          <GridBackground
+            rows={gridLayout.rows}
+            columns={gridLayout.columns}
+            tileSize={gridLayout.tileSize}
+            width={gridWidth}
+            height={gridHeight}
+            backgroundColor={settings.backgroundColor}
+            lineColor={settings.backgroundLineColor}
+            lineWidth={settings.backgroundLineWidth}
+          />
           {showPreview && !showGrid && (loadPreviewUri || clearPreviewUri) && (
             <Image
               source={{ uri: clearPreviewUri ?? loadPreviewUri ?? undefined }}
@@ -1935,16 +1942,6 @@ export default function TestScreen() {
                 lastPaintedRef.current = null;
               }}
             >
-              <GridBackground
-                rows={gridLayout.rows}
-                columns={gridLayout.columns}
-                tileSize={gridLayout.tileSize}
-                width={gridWidth}
-                height={gridHeight}
-                backgroundColor={settings.backgroundColor}
-                lineColor={settings.backgroundLineColor}
-                lineWidth={settings.backgroundLineWidth}
-              />
               {rowIndices.map((rowIndex) => (
                 <ThemedView key={`row-${rowIndex}`} style={styles.row}>
                   {columnIndices.map((columnIndex) => {
@@ -1993,16 +1990,6 @@ export default function TestScreen() {
               ]}
               pointerEvents="none"
             >
-              <GridBackground
-                rows={gridLayout.rows}
-                columns={gridLayout.columns}
-                tileSize={gridLayout.tileSize}
-                width={gridWidth}
-                height={gridHeight}
-                backgroundColor={settings.backgroundColor}
-                lineColor={settings.backgroundLineColor}
-                lineWidth={settings.backgroundLineWidth}
-              />
               {rowIndices.map((rowIndex) => (
                 <ThemedView key={`row-${rowIndex}`} style={styles.row}>
                   {columnIndices.map((columnIndex) => {
