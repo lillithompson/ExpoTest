@@ -131,6 +131,7 @@ type TileCellProps = {
   isCloneSample: boolean;
   isCloneTargetOrigin: boolean;
   isCloneCursor: boolean;
+  showOverlays: boolean;
 };
 
 const TileCell = memo(
@@ -146,6 +147,7 @@ const TileCell = memo(
     isCloneSample,
     isCloneTargetOrigin,
     isCloneCursor,
+    showOverlays,
   }: TileCellProps) => {
     const tileName = tileSources[tile.imageIndex]?.name ?? '';
     const connections = useMemo(
@@ -207,12 +209,16 @@ const TileCell = memo(
           ]}
           resizeMode="cover"
         />
-        {isCloneTargetOrigin && (
+        {showOverlays && isCloneTargetOrigin && (
           <View pointerEvents="none" style={styles.cloneTargetOrigin} />
         )}
-        {isCloneCursor && <View pointerEvents="none" style={styles.cloneCursor} />}
-        {isCloneSample && <View pointerEvents="none" style={styles.cloneSample} />}
-        {showDebug && <TileDebugOverlay connections={connections} />}
+        {showOverlays && isCloneCursor && (
+          <View pointerEvents="none" style={styles.cloneCursor} />
+        )}
+        {showOverlays && isCloneSample && (
+          <View pointerEvents="none" style={styles.cloneSample} />
+        )}
+        {showOverlays && showDebug && <TileDebugOverlay connections={connections} />}
       </View>
     );
   },
@@ -222,6 +228,7 @@ const TileCell = memo(
     prev.showDebug === next.showDebug &&
     prev.strokeColor === next.strokeColor &&
     prev.strokeWidth === next.strokeWidth &&
+    prev.showOverlays === next.showOverlays &&
     prev.tileSources === next.tileSources &&
     prev.isCloneSource === next.isCloneSource &&
     prev.isCloneSample === next.isCloneSample &&
@@ -258,6 +265,7 @@ export default function TestScreen() {
   const [loadToken, setLoadToken] = useState(0);
   const [loadedToken, setLoadedToken] = useState(0);
   const [loadPreviewUri, setLoadPreviewUri] = useState<string | null>(null);
+  const [isCapturingPreview, setIsCapturingPreview] = useState(false);
   const NEW_FILE_TILE_SIZES = [25, 50, 75, 100, 150, 200] as const;
   const [viewMode, setViewMode] = useState<'modify' | 'file'>('file');
   const [brush, setBrush] = useState<
@@ -359,6 +367,7 @@ export default function TestScreen() {
         : tiles,
     [suspendTiles, tiles, gridLayout.rows, gridLayout.columns]
   );
+  const showOverlays = !isCapturingPreview;
   const gridWidth =
     gridLayout.columns * gridLayout.tileSize +
     GRID_GAP * Math.max(0, gridLayout.columns - 1);
@@ -775,6 +784,9 @@ export default function TestScreen() {
       saveTimeoutRef.current = null;
     }
     if (Platform.OS !== 'web') {
+      setIsCapturingPreview(true);
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      await new Promise((resolve) => requestAnimationFrame(resolve));
       try {
         await FileSystem.makeDirectoryAsync(PREVIEW_DIR, { intermediates: true });
       } catch {
@@ -833,6 +845,8 @@ export default function TestScreen() {
         }
       } catch {
         // ignore
+      } finally {
+        setIsCapturingPreview(false);
       }
       upsertActiveFile({
         tiles,
@@ -1513,6 +1527,27 @@ export default function TestScreen() {
               resizeMode="cover"
             />
           )}
+          {showOverlays &&
+            (settings.mirrorHorizontal || settings.mirrorVertical) && (
+              <ThemedView pointerEvents="none" style={styles.mirrorLines}>
+                {settings.mirrorVertical && (
+                  <ThemedView
+                    style={[
+                      styles.mirrorLineHorizontal,
+                      { top: gridLayout.tileSize * (gridLayout.rows / 2) },
+                    ]}
+                  />
+                )}
+                {settings.mirrorHorizontal && (
+                  <ThemedView
+                    style={[
+                      styles.mirrorLineVertical,
+                      { left: gridLayout.tileSize * (gridLayout.columns / 2) },
+                    ]}
+                  />
+                )}
+              </ThemedView>
+            )}
           {Platform.OS === 'web' ? (
             <ThemedView
               ref={setGridNode}
@@ -1557,26 +1592,6 @@ export default function TestScreen() {
                 lastPaintedRef.current = null;
               }}
             >
-              {(settings.mirrorHorizontal || settings.mirrorVertical) && (
-                <ThemedView pointerEvents="none" style={styles.mirrorLines}>
-                  {settings.mirrorVertical && (
-                    <ThemedView
-                      style={[
-                        styles.mirrorLineHorizontal,
-                        { top: gridLayout.tileSize * (gridLayout.rows / 2) },
-                      ]}
-                    />
-                  )}
-                  {settings.mirrorHorizontal && (
-                    <ThemedView
-                      style={[
-                        styles.mirrorLineVertical,
-                        { left: gridLayout.tileSize * (gridLayout.columns / 2) },
-                      ]}
-                    />
-                  )}
-                </ThemedView>
-              )}
               {rowIndices.map((rowIndex) => (
                 <ThemedView key={`row-${rowIndex}`} style={styles.row}>
                   {columnIndices.map((columnIndex) => {
@@ -1592,6 +1607,7 @@ export default function TestScreen() {
                         showDebug={settings.showDebug}
                         strokeColor={activeLineColor}
                         strokeWidth={activeLineWidth}
+                        showOverlays={showOverlays}
                         isCloneSource={
                           brush.mode === 'clone' && cloneSourceIndex === cellIndex
                         }
@@ -1612,34 +1628,14 @@ export default function TestScreen() {
             </ThemedView>
           ) : (
             <>
-              <ViewShot
-                ref={setGridNode}
-                style={[
-                  styles.grid,
-                  { opacity: showGrid ? 1 : 0, width: gridWidth, height: gridHeight },
-                ]}
-                pointerEvents="none"
-              >
-              {(settings.mirrorHorizontal || settings.mirrorVertical) && (
-                <ThemedView pointerEvents="none" style={styles.mirrorLines}>
-                  {settings.mirrorVertical && (
-                    <ThemedView
-                      style={[
-                        styles.mirrorLineHorizontal,
-                        { top: gridLayout.tileSize * (gridLayout.rows / 2) },
-                      ]}
-                    />
-                  )}
-                  {settings.mirrorHorizontal && (
-                    <ThemedView
-                      style={[
-                        styles.mirrorLineVertical,
-                        { left: gridLayout.tileSize * (gridLayout.columns / 2) },
-                      ]}
-                    />
-                  )}
-                </ThemedView>
-              )}
+            <ViewShot
+              ref={setGridNode}
+              style={[
+                styles.grid,
+                { opacity: showGrid ? 1 : 0, width: gridWidth, height: gridHeight },
+              ]}
+              pointerEvents="none"
+            >
               {rowIndices.map((rowIndex) => (
                 <ThemedView key={`row-${rowIndex}`} style={styles.row}>
                   {columnIndices.map((columnIndex) => {
@@ -1655,6 +1651,7 @@ export default function TestScreen() {
                         showDebug={settings.showDebug}
                         strokeColor={activeLineColor}
                         strokeWidth={activeLineWidth}
+                        showOverlays={showOverlays}
                         isCloneSource={
                           brush.mode === 'clone' && cloneSourceIndex === cellIndex
                         }
