@@ -255,8 +255,6 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
         lineColor: file.lineColor,
         lineWidth: file.lineWidth,
         backgroundColor: options?.backgroundColor,
-        backgroundLineColor: options?.backgroundLineColor,
-        backgroundLineWidth: options?.backgroundLineWidth,
         maxDimension: 0,
       });
       if (!dataUrl || typeof document === 'undefined') {

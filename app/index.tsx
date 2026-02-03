@@ -1225,15 +1225,6 @@ export default function TestScreen() {
       return;
     }
     const captureAndShare = async () => {
-      if (downloadTargetFile.previewUri) {
-        const canShare = await Sharing.isAvailableAsync();
-        if (!canShare) {
-          Alert.alert('Download unavailable', 'Sharing is not available on this device.');
-          return false;
-        }
-        await Sharing.shareAsync(downloadTargetFile.previewUri);
-        return true;
-      }
       const canShare = await Sharing.isAvailableAsync();
       if (!canShare) {
         Alert.alert('Download unavailable', 'Sharing is not available on this device.');
@@ -1241,11 +1232,11 @@ export default function TestScreen() {
       }
       for (let attempt = 0; attempt < 6; attempt += 1) {
         await new Promise((resolve) => setTimeout(resolve, 120));
-      const uri = await viewShotRef.current?.capture?.({
-        format: 'png',
-        quality: 1,
-        result: 'tmpfile',
-      });
+        const uri = await viewShotRef.current?.capture?.({
+          format: 'png',
+          quality: 1,
+          result: 'tmpfile',
+        });
         if (uri) {
           const safeName = downloadTargetFile.name.replace(/[^\w-]+/g, '_');
           const target = `${FileSystem.cacheDirectory}${safeName}.png`;
@@ -1475,6 +1466,7 @@ export default function TestScreen() {
                       downloadTargetFile.preferredTileSize,
                     height:
                       downloadTargetFile.grid.rows * downloadTargetFile.preferredTileSize,
+                    backgroundColor: settings.backgroundColor,
                   },
                 ]}
               >
@@ -1516,6 +1508,8 @@ export default function TestScreen() {
                                   <TileAsset
                                     source={source}
                                     name={sources[tile.imageIndex]?.name}
+                                    strokeColor={downloadTargetFile.lineColor}
+                                    strokeWidth={downloadTargetFile.lineWidth}
                                     style={[
                                       styles.captureImage,
                                       {
@@ -1561,18 +1555,6 @@ export default function TestScreen() {
                     setIsDownloading(true);
                     void (async () => {
                       try {
-                        if (downloadTargetFile.previewUri) {
-                          const canShare = await Sharing.isAvailableAsync();
-                          if (!canShare) {
-                            Alert.alert(
-                              'Download unavailable',
-                              'Sharing is not available on this device.'
-                            );
-                            return;
-                          }
-                          await Sharing.shareAsync(downloadTargetFile.previewUri);
-                          return;
-                        }
                         const canShare = await Sharing.isAvailableAsync();
                         if (!canShare) {
                           Alert.alert(
@@ -1633,8 +1615,6 @@ export default function TestScreen() {
                       const sources = TILE_MANIFEST[file.category] ?? [];
                       void downloadFile(file, sources, {
                         backgroundColor: settings.backgroundColor,
-                        backgroundLineColor: settings.backgroundLineColor,
-                        backgroundLineWidth: settings.backgroundLineWidth,
                       });
                     } else {
                       setDownloadTargetId(file.id);
