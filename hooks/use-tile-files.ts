@@ -15,6 +15,7 @@ export type TileFile = {
   lineWidth: number;
   lineColor: string;
   thumbnailUri: string | null;
+  previewUri: string | null;
   updatedAt: number;
 };
 
@@ -34,6 +35,7 @@ const defaultFile = (category: TileCategory): TileFile => ({
   lineWidth: 10,
   lineColor: '#ffffff',
   thumbnailUri: null,
+  previewUri: null,
   updatedAt: Date.now(),
 });
 
@@ -69,6 +71,7 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
               lineWidth: file.lineWidth ?? 10,
               lineColor: file.lineColor ?? '#ffffff',
               thumbnailUri: file.thumbnailUri ?? null,
+              previewUri: file.previewUri ?? null,
               updatedAt: file.updatedAt ?? Date.now(),
             }))
           : [];
@@ -126,6 +129,7 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
       lineWidth?: number;
       lineColor?: string;
       thumbnailUri?: string | null;
+      previewUri?: string | null;
     }) => {
       if (!activeFileId) {
         return;
@@ -147,6 +151,8 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
                   payload.thumbnailUri !== undefined
                     ? payload.thumbnailUri
                     : file.thumbnailUri,
+                previewUri:
+                  payload.previewUri !== undefined ? payload.previewUri : file.previewUri,
                 updatedAt: Date.now(),
               }
             : file
@@ -186,6 +192,7 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
       lineWidth: 10,
       lineColor: '#ffffff',
       thumbnailUri: null,
+      previewUri: null,
       updatedAt: Date.now(),
     };
       setFiles((prev) => {

@@ -167,7 +167,13 @@ export const renderTileCanvasToDataUrl = async ({
   lineColor,
   lineWidth,
   maxDimension = 256,
-}: Omit<ExportParams, 'fileName'> & { maxDimension?: number }): Promise<string | null> => {
+  format = 'image/png',
+  quality,
+}: Omit<ExportParams, 'fileName'> & {
+  maxDimension?: number;
+  format?: 'image/png' | 'image/jpeg';
+  quality?: number;
+}): Promise<string | null> => {
   if (Platform.OS !== 'web') {
     return null;
   }
@@ -282,10 +288,10 @@ export const renderTileCanvasToDataUrl = async ({
       if (thumbCtx) {
         thumbCtx.imageSmoothingEnabled = false;
         thumbCtx.drawImage(canvas, 0, 0, thumbCanvas.width, thumbCanvas.height);
-        return thumbCanvas.toDataURL('image/png');
+        return thumbCanvas.toDataURL(format, quality);
       }
     }
   }
 
-  return canvas.toDataURL('image/png');
+  return canvas.toDataURL(format, quality);
 };

@@ -1,6 +1,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
+  Image,
   Platform,
   Pressable,
   ScrollView,
@@ -24,7 +25,7 @@ import {
 } from '@/assets/images/tiles/manifest';
 import { TileBrushPanel } from '@/components/tile-brush-panel';
 import { TileDebugOverlay } from '@/components/tile-debug-overlay';
-import { TileAsset } from '@/components/tile-asset';
+import { TileAsset, prefetchTileAssets } from '@/components/tile-asset';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { useTileGrid } from '@/hooks/use-tile-grid';
@@ -47,6 +48,8 @@ const FILE_GRID_GAP = 12;
 const DEFAULT_CATEGORY = TILE_CATEGORIES[0];
 const BLANK_TILE = require('@/assets/images/tiles/tile_blank.svg');
 const ERROR_TILE = require('@/assets/images/tiles/tile_error.svg');
+const PREVIEW_DIR = `${FileSystem.cacheDirectory ?? ''}tile-previews/`;
+const THUMB_SIZE = 256;
 const clamp = (value: number, min: number, max: number) =>
   Math.min(max, Math.max(min, value));
 const hexToRgb = (value: string) => {
@@ -230,7 +233,9 @@ export default function TestScreen() {
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const gridRef = useRef<View>(null);
+  const gridCaptureRef = useRef<ViewShot>(null);
   const gridOffsetRef = useRef({ x: 0, y: 0 });
+  const gridTouchRef = useRef<View>(null);
   const { settings, setSettings } = usePersistedSettings();
   const [selectedCategory, setSelectedCategory] = useState<TileCategory>(
     () => DEFAULT_CATEGORY
@@ -245,6 +250,14 @@ export default function TestScreen() {
   const [downloadRenderKey, setDownloadRenderKey] = useState(0);
   const [downloadLoadedCount, setDownloadLoadedCount] = useState(0);
   const [isHydratingFile, setIsHydratingFile] = useState(false);
+  const [showGrid, setShowGrid] = useState(true);
+  const [isPrefetchingTiles, setIsPrefetchingTiles] = useState(false);
+  const [showPreview, setShowPreview] = useState(false);
+  const [suspendTiles, setSuspendTiles] = useState(false);
+  const [loadRequestId, setLoadRequestId] = useState(0);
+  const [loadToken, setLoadToken] = useState(0);
+  const [loadedToken, setLoadedToken] = useState(0);
+  const [loadPreviewUri, setLoadPreviewUri] = useState<string | null>(null);
   const NEW_FILE_TILE_SIZES = [25, 50, 75, 100, 150, 200] as const;
   const [viewMode, setViewMode] = useState<'modify' | 'file'>('file');
   const [brush, setBrush] = useState<
@@ -297,6 +310,11 @@ export default function TestScreen() {
   const fileTileSize = activeFile?.preferredTileSize ?? settings.preferredTileSize;
   const activeLineWidth = activeFile?.lineWidth ?? 10;
   const activeLineColor = activeFile?.lineColor ?? '#ffffff';
+  const debugLog = useCallback((...args: unknown[]) => {
+    if (__DEV__) {
+      console.log('[tile-load]', ...args);
+    }
+  }, []);
   const { r: activeRed, g: activeGreen, b: activeBlue } = useMemo(
     () => hexToRgb(activeLineColor),
     [activeLineColor]
@@ -329,6 +347,21 @@ export default function TestScreen() {
     mirrorHorizontal: settings.mirrorHorizontal,
     mirrorVertical: settings.mirrorVertical,
   });
+  const displayTiles = useMemo(
+    () =>
+      suspendTiles
+        ? Array.from({ length: gridLayout.rows * gridLayout.columns }, () => ({
+            imageIndex: -1,
+            rotation: 0,
+            mirrorX: false,
+            mirrorY: false,
+          }))
+        : tiles,
+    [suspendTiles, tiles, gridLayout.rows, gridLayout.columns]
+  );
+  const gridWidth =
+    gridLayout.columns * gridLayout.tileSize +
+    GRID_GAP * Math.max(0, gridLayout.columns - 1);
   const gridHeight =
     gridLayout.rows * gridLayout.tileSize +
     GRID_GAP * Math.max(0, gridLayout.rows - 1);
@@ -344,11 +377,10 @@ export default function TestScreen() {
   const longPressTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const longPressTriggeredRef = useRef(false);
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const lastLoadedFileRef = useRef<string | null>(null);
+  const loadTokenRef = useRef(0);
   const isHydratingFileRef = useRef(false);
   const viewShotRef = useRef<ViewShot>(null);
   const downloadTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pendingSwitchRef = useRef<string | null>(null);
   const downloadExpectedRef = useRef(0);
   const pendingRestoreRef = useRef<{
     fileId: string;
@@ -357,10 +389,16 @@ export default function TestScreen() {
     columns: number;
     preferredTileSize: number;
     category: TileCategory;
+    token?: number;
+    preview?: boolean;
   } | null>(null);
   const setHydrating = useCallback((value: boolean) => {
     isHydratingFileRef.current = value;
     setIsHydratingFile(value);
+  }, []);
+  const setGridNode = useCallback((node: any) => {
+    gridRef.current = node;
+    gridCaptureRef.current = node;
   }, []);
   const rowIndices = useMemo(
     () => Array.from({ length: gridLayout.rows }, (_, index) => index),
@@ -374,6 +412,11 @@ export default function TestScreen() {
     () => files.find((file) => file.id === downloadTargetId) ?? null,
     [files, downloadTargetId]
   );
+  const filesRef = useRef(files);
+
+  useEffect(() => {
+    filesRef.current = files;
+  }, [files]);
 
   useEffect(() => {
     if (brush.mode !== 'clone') {
@@ -382,50 +425,144 @@ export default function TestScreen() {
   }, [brush.mode, clearCloneSource]);
 
   useEffect(() => {
-    if (!ready || !activeFile) {
+    if (!ready || !activeFileId || viewMode !== 'modify') {
       return;
     }
-    if (
-      lastLoadedFileRef.current === activeFile.id &&
-      activeFile.category === selectedCategory &&
-      pendingSwitchRef.current !== activeFile.id
-    ) {
+    const file =
+      filesRef.current.find((entry) => entry.id === activeFileId) ?? null;
+    if (!file) {
       return;
     }
-    lastLoadedFileRef.current = activeFile.id;
-    const resolvedCategory = TILE_MANIFEST[activeFile.category]
-      ? activeFile.category
+    const resolvedCategory = TILE_MANIFEST[file.category]
+      ? file.category
       : DEFAULT_CATEGORY;
-    if (resolvedCategory !== activeFile.category) {
+    if (resolvedCategory !== file.category) {
       upsertActiveFile({
-        tiles: activeFile.tiles,
+        tiles: file.tiles,
         gridLayout: {
-          rows: activeFile.grid.rows,
-          columns: activeFile.grid.columns,
-          tileSize: activeFile.preferredTileSize,
+          rows: file.grid.rows,
+          columns: file.grid.columns,
+          tileSize: file.preferredTileSize,
         },
         category: resolvedCategory,
-        preferredTileSize: activeFile.preferredTileSize,
-        lineWidth: activeLineWidth,
-        lineColor: activeLineColor,
+        preferredTileSize: file.preferredTileSize,
+        lineWidth: file.lineWidth,
+        lineColor: file.lineColor,
       });
     }
     if (resolvedCategory !== selectedCategory) {
       setSelectedCategory(resolvedCategory);
     }
-    pendingRestoreRef.current = {
-      fileId: activeFile.id,
-      tiles: activeFile.tiles,
-      rows: activeFile.grid.rows,
-      columns: activeFile.grid.columns,
-      preferredTileSize: activeFile.preferredTileSize,
-      category: resolvedCategory,
-    };
+    const nextToken = loadTokenRef.current + 1;
+    loadTokenRef.current = nextToken;
+    setLoadToken(nextToken);
+    setLoadedToken(0);
+    const previewUri = file.previewUri ?? file.thumbnailUri ?? null;
+    setLoadPreviewUri(previewUri);
+    setShowPreview(Boolean(previewUri));
+    setShowGrid(false);
     setHydrating(true);
-    if (pendingSwitchRef.current === activeFile.id) {
-      pendingSwitchRef.current = null;
+    setSuspendTiles(true);
+    if (file.tiles.length === 0) {
+      resetTiles();
+      debugLog('clear-tiles', { fileId: file.id, token: nextToken });
     }
-  }, [activeFile, ready, selectedCategory, setHydrating]);
+    pendingRestoreRef.current = {
+      fileId: file.id,
+      tiles: file.tiles,
+      rows: file.grid.rows,
+      columns: file.grid.columns,
+      preferredTileSize: file.preferredTileSize,
+      category: resolvedCategory,
+      token: nextToken,
+      preview: Boolean(previewUri),
+    };
+    debugLog('start-load', {
+      fileId: file.id,
+      token: nextToken,
+      preview: Boolean(previewUri),
+      rows: file.grid.rows,
+      columns: file.grid.columns,
+    });
+  }, [activeFileId, loadRequestId, ready, viewMode, selectedCategory, debugLog]);
+
+  useEffect(() => {
+    if (viewMode !== 'modify') {
+      return;
+    }
+    if (isHydratingFile || isPrefetchingTiles || loadedToken !== loadToken) {
+      setShowGrid(false);
+      return;
+    }
+    setShowGrid(true);
+  }, [isHydratingFile, isPrefetchingTiles, loadedToken, loadToken, activeFileId, viewMode]);
+
+  useEffect(() => {
+    if (viewMode !== 'modify') {
+      setShowPreview(false);
+      return;
+    }
+    if (!loadPreviewUri) {
+      setShowPreview(false);
+      return;
+    }
+    if (
+      isHydratingFile ||
+      isPrefetchingTiles ||
+      !showGrid ||
+      loadedToken !== loadToken
+    ) {
+      setShowPreview(true);
+      return;
+    }
+    let raf1: number | null = null;
+    let raf2: number | null = null;
+    raf1 = requestAnimationFrame(() => {
+      raf2 = requestAnimationFrame(() => {
+        setShowPreview(false);
+      });
+    });
+    return () => {
+      if (raf1 !== null) {
+        cancelAnimationFrame(raf1);
+      }
+      if (raf2 !== null) {
+        cancelAnimationFrame(raf2);
+      }
+    };
+  }, [
+    viewMode,
+    isHydratingFile,
+    isPrefetchingTiles,
+    showGrid,
+    loadPreviewUri,
+    loadedToken,
+    loadToken,
+  ]);
+
+  useEffect(() => {
+    if (viewMode !== 'modify' || !activeFile) {
+      return;
+    }
+    let cancelled = false;
+    setIsPrefetchingTiles(true);
+    setShowGrid(false);
+    setShowPreview(Boolean(loadPreviewUri));
+    setSuspendTiles(true);
+    const sources = [BLANK_TILE, ERROR_TILE, ...tileSources.map((tile) => tile.source)];
+    void (async () => {
+      try {
+        await prefetchTileAssets(sources);
+      } finally {
+        if (!cancelled) {
+          setIsPrefetchingTiles(false);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [viewMode, activeFileId, selectedCategory, tileSources, loadPreviewUri]);
 
   useEffect(() => {
     const pending = pendingRestoreRef.current;
@@ -438,10 +575,46 @@ export default function TestScreen() {
     const gridMatches =
       pending.rows === gridLayout.rows && pending.columns === gridLayout.columns;
     const allowFallback = pending.rows === 0 || pending.columns === 0;
-    if (gridLayout.tileSize > 0 && (gridMatches || allowFallback || pending.tiles.length > 0)) {
+    if (
+      gridLayout.tileSize > 0 &&
+      pending.rows > 0 &&
+      pending.columns > 0 &&
+      (gridMatches || allowFallback || pending.tiles.length > 0)
+    ) {
       loadTiles(pending.tiles);
       pendingRestoreRef.current = null;
       setHydrating(false);
+      setSuspendTiles(false);
+      const finalize = () => {
+        setLoadedToken(pending.token ?? 0);
+        debugLog('finish-load', {
+          fileId: pending.fileId,
+          token: pending.token,
+          rows: pending.rows,
+          columns: pending.columns,
+        });
+      };
+      if (pending.preview) {
+        requestAnimationFrame(() => {
+          requestAnimationFrame(finalize);
+        });
+      } else {
+        finalize();
+      }
+      return;
+    }
+    if (gridLayout.tileSize > 0 && pending.rows === 0 && pending.columns === 0) {
+      resetTiles();
+      pendingRestoreRef.current = null;
+      setHydrating(false);
+      setSuspendTiles(false);
+      setLoadedToken(pending.token ?? 0);
+      debugLog('finish-load-empty', {
+        fileId: pending.fileId,
+        token: pending.token,
+        rows: pending.rows,
+        columns: pending.columns,
+      });
     }
   }, [
     activeFileId,
@@ -451,6 +624,8 @@ export default function TestScreen() {
     gridLayout.rows,
     loadTiles,
     setHydrating,
+    debugLog,
+    loadToken,
   ]);
 
   useEffect(() => {
@@ -466,17 +641,20 @@ export default function TestScreen() {
     }
     saveTimeoutRef.current = setTimeout(() => {
       void (async () => {
-        const thumbnailUri = await renderTileCanvasToDataUrl({
-          tiles,
-          gridLayout,
-          tileSources,
-          gridGap: GRID_GAP,
-          blankSource: BLANK_TILE,
-          errorSource: ERROR_TILE,
-          lineColor: activeLineColor,
-          lineWidth: activeLineWidth,
-          maxDimension: 192,
-        });
+        const thumbnailUri =
+          Platform.OS === 'web'
+            ? await renderTileCanvasToDataUrl({
+                tiles,
+                gridLayout,
+                tileSources,
+                gridGap: GRID_GAP,
+                blankSource: BLANK_TILE,
+                errorSource: ERROR_TILE,
+                lineColor: activeLineColor,
+                lineWidth: activeLineWidth,
+                maxDimension: 192,
+              })
+            : undefined;
         upsertActiveFile({
           tiles,
           gridLayout,
@@ -525,6 +703,28 @@ export default function TestScreen() {
       return null;
     }
     if (
+      typeof nativeEvent.locationX === 'number' &&
+      typeof nativeEvent.locationY === 'number'
+    ) {
+      return { x: nativeEvent.locationX, y: nativeEvent.locationY };
+    }
+    if (event?.touches?.[0]) {
+      const touch = event.touches[0];
+      if (
+        typeof touch.locationX === 'number' &&
+        typeof touch.locationY === 'number'
+      ) {
+        return { x: touch.locationX, y: touch.locationY };
+      }
+      if (
+        typeof touch.pageX === 'number' &&
+        typeof touch.pageY === 'number'
+      ) {
+        const offset = gridOffsetRef.current;
+        return { x: touch.pageX - offset.x, y: touch.pageY - offset.y };
+      }
+    }
+    if (
       typeof nativeEvent.pageX === 'number' &&
       typeof nativeEvent.pageY === 'number'
     ) {
@@ -533,12 +733,6 @@ export default function TestScreen() {
         x: nativeEvent.pageX - offset.x,
         y: nativeEvent.pageY - offset.y,
       };
-    }
-    if (
-      typeof nativeEvent.locationX === 'number' &&
-      typeof nativeEvent.locationY === 'number'
-    ) {
-      return { x: nativeEvent.locationX, y: nativeEvent.locationY };
     }
     return null;
   };
@@ -580,6 +774,89 @@ export default function TestScreen() {
       clearTimeout(saveTimeoutRef.current);
       saveTimeoutRef.current = null;
     }
+    if (Platform.OS !== 'web') {
+      try {
+        await FileSystem.makeDirectoryAsync(PREVIEW_DIR, { intermediates: true });
+      } catch {
+        // ignore
+      }
+      let previewUri: string | undefined;
+      let thumbnailUri: string | undefined;
+      try {
+        const fullWidth = Math.max(
+          1,
+          Math.round(
+            gridLayout.columns * gridLayout.tileSize +
+              GRID_GAP * Math.max(0, gridLayout.columns - 1)
+          )
+        );
+        const fullHeight = Math.max(
+          1,
+          Math.round(
+            gridLayout.rows * gridLayout.tileSize +
+              GRID_GAP * Math.max(0, gridLayout.rows - 1)
+          )
+        );
+        const uri = await gridCaptureRef.current?.capture?.({
+          format: 'jpg',
+          quality: 0.92,
+          result: 'tmpfile',
+          width: fullWidth,
+          height: fullHeight,
+        });
+        if (uri) {
+          const target = `${PREVIEW_DIR}${activeFileId}-full.jpg`;
+          try {
+            await FileSystem.deleteAsync(target, { idempotent: true });
+          } catch {
+            // ignore
+          }
+          await FileSystem.copyAsync({ from: uri, to: target });
+          previewUri = target;
+        }
+        const thumbUri = await gridCaptureRef.current?.capture?.({
+          format: 'png',
+          quality: 1,
+          result: 'tmpfile',
+          width: THUMB_SIZE,
+          height: THUMB_SIZE,
+        });
+        if (thumbUri) {
+          const thumbTarget = `${PREVIEW_DIR}${activeFileId}-thumb.png`;
+          try {
+            await FileSystem.deleteAsync(thumbTarget, { idempotent: true });
+          } catch {
+            // ignore
+          }
+          await FileSystem.copyAsync({ from: thumbUri, to: thumbTarget });
+          thumbnailUri = thumbTarget;
+        }
+      } catch {
+        // ignore
+      }
+      upsertActiveFile({
+        tiles,
+        gridLayout,
+        category: selectedCategory,
+        preferredTileSize: fileTileSize,
+        thumbnailUri,
+        previewUri,
+      });
+      return;
+    }
+    const previewUri = await renderTileCanvasToDataUrl({
+      tiles,
+      gridLayout,
+      tileSources,
+      gridGap: GRID_GAP,
+      blankSource: BLANK_TILE,
+      errorSource: ERROR_TILE,
+      lineColor: activeLineColor,
+      lineWidth: activeLineWidth,
+      maxDimension: 0,
+      format: 'image/jpeg',
+      quality: 0.92,
+    });
     const thumbnailUri = await renderTileCanvasToDataUrl({
       tiles,
       gridLayout,
@@ -597,6 +874,7 @@ export default function TestScreen() {
       category: selectedCategory,
       preferredTileSize: fileTileSize,
       thumbnailUri,
+      previewUri,
     });
   };
 
@@ -628,6 +906,15 @@ export default function TestScreen() {
       return;
     }
     const captureAndShare = async () => {
+      if (downloadTargetFile.previewUri) {
+        const canShare = await Sharing.isAvailableAsync();
+        if (!canShare) {
+          Alert.alert('Download unavailable', 'Sharing is not available on this device.');
+          return false;
+        }
+        await Sharing.shareAsync(downloadTargetFile.previewUri);
+        return true;
+      }
       const canShare = await Sharing.isAvailableAsync();
       if (!canShare) {
         Alert.alert('Download unavailable', 'Sharing is not available on this device.');
@@ -705,8 +992,12 @@ export default function TestScreen() {
     if (!file) {
       return;
     }
-    lastLoadedFileRef.current = null;
-    pendingSwitchRef.current = file.id;
+    const previewUri = file.previewUri ?? file.thumbnailUri ?? null;
+    setLoadRequestId((prev) => prev + 1);
+    setLoadPreviewUri(previewUri);
+    setShowPreview(Boolean(previewUri));
+    setSuspendTiles(true);
+    setShowGrid(false);
     setHydrating(true);
     setActive(file.id);
     setViewMode('modify');
@@ -951,6 +1242,18 @@ export default function TestScreen() {
                     setIsDownloading(true);
                     void (async () => {
                       try {
+                        if (downloadTargetFile.previewUri) {
+                          const canShare = await Sharing.isAvailableAsync();
+                          if (!canShare) {
+                            Alert.alert(
+                              'Download unavailable',
+                              'Sharing is not available on this device.'
+                            );
+                            return;
+                          }
+                          await Sharing.shareAsync(downloadTargetFile.previewUri);
+                          return;
+                        }
                         const canShare = await Sharing.isAvailableAsync();
                         if (!canShare) {
                           Alert.alert(
@@ -1064,7 +1367,13 @@ export default function TestScreen() {
                     key={`new-file-size-${size}`}
                     onPress={() => {
                       createFile(selectedCategory, size);
-                      lastLoadedFileRef.current = null;
+                      setLoadRequestId((prev) => prev + 1);
+                      setLoadPreviewUri(null);
+                      setShowGrid(false);
+                      setShowPreview(false);
+                      setSuspendTiles(true);
+                      setLoadedToken(0);
+                      setHydrating(true);
                       setShowNewFileModal(false);
                       setViewMode('modify');
                     }}
@@ -1188,28 +1497,200 @@ export default function TestScreen() {
             </ThemedView>
           </ThemedView>
         </ThemedView>
-        <ThemedView
-          ref={gridRef}
+        <View
           style={[
-            styles.grid,
+            styles.gridWrapper,
             {
               height: gridHeight,
-              width:
-                gridLayout.columns * gridLayout.tileSize +
-                GRID_GAP * Math.max(0, gridLayout.columns - 1),
+              width: gridWidth,
             },
           ]}
-          accessibilityRole="grid"
-          onLayout={() => {
-            gridRef.current?.measureInWindow((x: number, y: number) => {
-              gridOffsetRef.current = { x, y };
-            });
-          }}
-          {...(!isWeb
-            ? {
-                onStartShouldSetResponderCapture: () => true,
-                onMoveShouldSetResponderCapture: () => true,
-                onResponderGrant: (event: any) => {
+        >
+          {loadPreviewUri && showPreview && !showGrid && (
+            <Image
+              source={{ uri: loadPreviewUri }}
+              style={styles.gridPreview}
+              resizeMode="cover"
+            />
+          )}
+          {Platform.OS === 'web' ? (
+            <ThemedView
+              ref={setGridNode}
+              style={[styles.grid, { opacity: showGrid ? 1 : 0 }]}
+              accessibilityRole="grid"
+              pointerEvents={showGrid ? 'auto' : 'none'}
+              onLayout={(event: any) => {
+                const layout = event?.nativeEvent?.layout;
+                if (layout) {
+                  gridOffsetRef.current = { x: layout.x ?? 0, y: layout.y ?? 0 };
+                } else {
+                  gridOffsetRef.current = { x: 0, y: 0 };
+                }
+              }}
+              onMouseDown={(event: any) => {
+                const point = getRelativePoint(event);
+                if (point) {
+                  const cellIndex = getCellIndexForPoint(point.x, point.y);
+                  if (cellIndex === null) {
+                    return;
+                  }
+                  if (brush.mode === 'clone' && cloneSourceIndex === null) {
+                    setCloneSource(cellIndex);
+                    lastPaintedRef.current = null;
+                    return;
+                  }
+                  handlePaintAt(point.x, point.y);
+                }
+              }}
+              onMouseMove={(event: any) => {
+                if (event.buttons === 1) {
+                  const point = getRelativePoint(event);
+                  if (point) {
+                    handlePaintAt(point.x, point.y);
+                  }
+                }
+              }}
+              onMouseLeave={() => {
+                lastPaintedRef.current = null;
+              }}
+              onMouseUp={() => {
+                lastPaintedRef.current = null;
+              }}
+            >
+              {(settings.mirrorHorizontal || settings.mirrorVertical) && (
+                <ThemedView pointerEvents="none" style={styles.mirrorLines}>
+                  {settings.mirrorVertical && (
+                    <ThemedView
+                      style={[
+                        styles.mirrorLineHorizontal,
+                        { top: gridLayout.tileSize * (gridLayout.rows / 2) },
+                      ]}
+                    />
+                  )}
+                  {settings.mirrorHorizontal && (
+                    <ThemedView
+                      style={[
+                        styles.mirrorLineVertical,
+                        { left: gridLayout.tileSize * (gridLayout.columns / 2) },
+                      ]}
+                    />
+                  )}
+                </ThemedView>
+              )}
+              {rowIndices.map((rowIndex) => (
+                <ThemedView key={`row-${rowIndex}`} style={styles.row}>
+                  {columnIndices.map((columnIndex) => {
+                    const cellIndex = rowIndex * gridLayout.columns + columnIndex;
+                    const item = displayTiles[cellIndex];
+                    return (
+                      <TileCell
+                        key={`cell-${cellIndex}`}
+                        cellIndex={cellIndex}
+                        tileSize={gridLayout.tileSize}
+                        tile={item}
+                        tileSources={tileSources}
+                        showDebug={settings.showDebug}
+                        strokeColor={activeLineColor}
+                        strokeWidth={activeLineWidth}
+                        isCloneSource={
+                          brush.mode === 'clone' && cloneSourceIndex === cellIndex
+                        }
+                        isCloneSample={
+                          brush.mode === 'clone' && cloneSampleIndex === cellIndex
+                        }
+                        isCloneTargetOrigin={
+                          brush.mode === 'clone' && cloneAnchorIndex === cellIndex
+                        }
+                        isCloneCursor={
+                          brush.mode === 'clone' && cloneCursorIndex === cellIndex
+                        }
+                      />
+                    );
+                  })}
+                </ThemedView>
+              ))}
+            </ThemedView>
+          ) : (
+            <>
+              <ViewShot
+                ref={setGridNode}
+                style={[
+                  styles.grid,
+                  { opacity: showGrid ? 1 : 0, width: gridWidth, height: gridHeight },
+                ]}
+                pointerEvents="none"
+              >
+              {(settings.mirrorHorizontal || settings.mirrorVertical) && (
+                <ThemedView pointerEvents="none" style={styles.mirrorLines}>
+                  {settings.mirrorVertical && (
+                    <ThemedView
+                      style={[
+                        styles.mirrorLineHorizontal,
+                        { top: gridLayout.tileSize * (gridLayout.rows / 2) },
+                      ]}
+                    />
+                  )}
+                  {settings.mirrorHorizontal && (
+                    <ThemedView
+                      style={[
+                        styles.mirrorLineVertical,
+                        { left: gridLayout.tileSize * (gridLayout.columns / 2) },
+                      ]}
+                    />
+                  )}
+                </ThemedView>
+              )}
+              {rowIndices.map((rowIndex) => (
+                <ThemedView key={`row-${rowIndex}`} style={styles.row}>
+                  {columnIndices.map((columnIndex) => {
+                    const cellIndex = rowIndex * gridLayout.columns + columnIndex;
+                    const item = displayTiles[cellIndex];
+                    return (
+                      <TileCell
+                        key={`cell-${cellIndex}`}
+                        cellIndex={cellIndex}
+                        tileSize={gridLayout.tileSize}
+                        tile={item}
+                        tileSources={tileSources}
+                        showDebug={settings.showDebug}
+                        strokeColor={activeLineColor}
+                        strokeWidth={activeLineWidth}
+                        isCloneSource={
+                          brush.mode === 'clone' && cloneSourceIndex === cellIndex
+                        }
+                        isCloneSample={
+                          brush.mode === 'clone' && cloneSampleIndex === cellIndex
+                        }
+                        isCloneTargetOrigin={
+                          brush.mode === 'clone' && cloneAnchorIndex === cellIndex
+                        }
+                        isCloneCursor={
+                          brush.mode === 'clone' && cloneCursorIndex === cellIndex
+                        }
+                      />
+                    );
+                  })}
+                </ThemedView>
+              ))}
+              </ViewShot>
+              <View
+                ref={gridTouchRef}
+                style={StyleSheet.absoluteFillObject}
+                pointerEvents={showGrid ? 'auto' : 'none'}
+                onLayout={(event: any) => {
+                  const layout = event?.nativeEvent?.layout;
+                  if (layout) {
+                    gridOffsetRef.current = { x: layout.x ?? 0, y: layout.y ?? 0 };
+                  } else {
+                    gridOffsetRef.current = { x: 0, y: 0 };
+                  }
+                }}
+                onStartShouldSetResponder={() => true}
+                onMoveShouldSetResponder={() => true}
+                onStartShouldSetResponderCapture={() => true}
+                onMoveShouldSetResponderCapture={() => true}
+                onResponderTerminationRequest={() => false}
+                onResponderGrant={(event: any) => {
                   const point = getRelativePoint(event);
                   if (point) {
                     const cellIndex = getCellIndexForPoint(point.x, point.y);
@@ -1234,8 +1715,8 @@ export default function TestScreen() {
                       lastPaintedRef.current = null;
                     }
                   }
-                },
-                onResponderMove: (event: any) => {
+                }}
+                onResponderMove={(event: any) => {
                   const point = getRelativePoint(event);
                   if (point) {
                     if (longPressTimeoutRef.current) {
@@ -1244,8 +1725,8 @@ export default function TestScreen() {
                     }
                     handlePaintAt(point.x, point.y);
                   }
-                },
-                onResponderRelease: () => {
+                }}
+                onResponderRelease={() => {
                   if (longPressTimeoutRef.current) {
                     clearTimeout(longPressTimeoutRef.current);
                     longPressTimeoutRef.current = null;
@@ -1254,97 +1735,19 @@ export default function TestScreen() {
                     lastPaintedRef.current = null;
                   }
                   lastPaintedRef.current = null;
-                },
-                onResponderTerminate: () => {
+                }}
+                onResponderTerminate={() => {
                   if (longPressTimeoutRef.current) {
                     clearTimeout(longPressTimeoutRef.current);
                     longPressTimeoutRef.current = null;
                   }
                   longPressTriggeredRef.current = false;
                   lastPaintedRef.current = null;
-                },
-              }
-            : {
-                onMouseDown: (event: any) => {
-                  const point = getRelativePoint(event);
-                  if (point) {
-                    const cellIndex = getCellIndexForPoint(point.x, point.y);
-                    if (cellIndex === null) {
-                      return;
-                    }
-                    if (brush.mode === 'clone' && cloneSourceIndex === null) {
-                      setCloneSource(cellIndex);
-                      lastPaintedRef.current = null;
-                      return;
-                    }
-                    handlePaintAt(point.x, point.y);
-                  }
-                },
-                onMouseMove: (event: any) => {
-                  if (event.buttons === 1) {
-                    const point = getRelativePoint(event);
-                    if (point) {
-                      handlePaintAt(point.x, point.y);
-                    }
-                  }
-                },
-                onMouseLeave: () => {
-                  lastPaintedRef.current = null;
-                },
-                onMouseUp: () => {
-                  lastPaintedRef.current = null;
-                },
-              })}
-        >
-          {(settings.mirrorHorizontal || settings.mirrorVertical) && (
-            <ThemedView pointerEvents="none" style={styles.mirrorLines}>
-              {settings.mirrorVertical && (
-                <ThemedView
-                  style={[
-                    styles.mirrorLineHorizontal,
-                    { top: gridLayout.tileSize * (gridLayout.rows / 2) },
-                  ]}
-                />
-              )}
-              {settings.mirrorHorizontal && (
-                <ThemedView
-                  style={[
-                    styles.mirrorLineVertical,
-                    { left: gridLayout.tileSize * (gridLayout.columns / 2) },
-                  ]}
-                />
-              )}
-            </ThemedView>
+                }}
+              />
+            </>
           )}
-          {rowIndices.map((rowIndex) => (
-            <ThemedView key={`row-${rowIndex}`} style={styles.row}>
-              {columnIndices.map((columnIndex) => {
-                const cellIndex = rowIndex * gridLayout.columns + columnIndex;
-                const item = tiles[cellIndex];
-                return (
-                  <TileCell
-                    key={`cell-${cellIndex}`}
-                    cellIndex={cellIndex}
-                    tileSize={gridLayout.tileSize}
-                    tile={item}
-                    tileSources={tileSources}
-                    showDebug={settings.showDebug}
-                    strokeColor={activeLineColor}
-                    strokeWidth={activeLineWidth}
-                    isCloneSource={brush.mode === 'clone' && cloneSourceIndex === cellIndex}
-                    isCloneSample={brush.mode === 'clone' && cloneSampleIndex === cellIndex}
-                    isCloneTargetOrigin={
-                      brush.mode === 'clone' && cloneAnchorIndex === cellIndex
-                    }
-                    isCloneCursor={
-                      brush.mode === 'clone' && cloneCursorIndex === cellIndex
-                    }
-                  />
-                );
-              })}
-            </ThemedView>
-          ))}
-        </ThemedView>
+        </View>
         <TileBrushPanel
           tileSources={tileSources}
           selected={brush}
@@ -1970,6 +2373,13 @@ const styles = StyleSheet.create({
     alignContent: 'flex-start',
     gap: GRID_GAP,
     backgroundColor: '#3F3F3F',
+  },
+  gridWrapper: {
+    position: 'relative',
+    backgroundColor: '#3F3F3F',
+  },
+  gridPreview: {
+    ...StyleSheet.absoluteFillObject,
   },
   row: {
     flexDirection: 'row',

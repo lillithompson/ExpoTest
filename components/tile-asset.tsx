@@ -14,6 +14,8 @@ type Props = {
   onLoad?: () => void;
 };
 
+const svgXmlCache = new Map<string, string>();
+
 const resolveSourceUri = (source: unknown) => {
   if (!source) {
     return null;
@@ -115,6 +117,36 @@ const stripOuterBorder = (xml: string) => {
   return xml.replace(/<rect\b[^>]*(x=["']0\.5["']|y=["']0\.5["'])[^>]*\/?>/gi, '');
 };
 
+export const prefetchTileAssets = async (sources: unknown[]) => {
+  const tasks = sources.map(async (source) => {
+    const uri = resolveSourceUri(source);
+    if (!uri || !uri.toLowerCase().includes('.svg') || svgXmlCache.has(uri)) {
+      return;
+    }
+    let resolvedUri = uri;
+    if (typeof source === 'number') {
+      const asset = Asset.fromModule(source);
+      if (!asset.downloaded && Platform.OS !== 'web') {
+        await asset.downloadAsync();
+      }
+      resolvedUri = asset.localUri ?? asset.uri ?? uri;
+    }
+    if (svgXmlCache.has(resolvedUri)) {
+      return;
+    }
+    try {
+      const xml =
+        Platform.OS === 'web'
+          ? await fetch(resolvedUri).then((response) => response.text())
+          : await FileSystem.readAsStringAsync(resolvedUri);
+      svgXmlCache.set(resolvedUri, xml);
+    } catch {
+      // ignore prefetch errors
+    }
+  });
+  await Promise.all(tasks);
+};
+
 export function TileAsset({
   source,
   name,
@@ -124,6 +156,7 @@ export function TileAsset({
   resizeMode,
   onLoad,
 }: Props) {
+  const sourceRef = useRef(source);
   const uri = useMemo(() => resolveSourceUri(source), [source]);
   const isSvg =
     (name ?? '').toLowerCase().endsWith('.svg') ||
@@ -132,6 +165,10 @@ export function TileAsset({
   const [svgXml, setSvgXml] = useState<string | null>(null);
   const [svgXmlWithOverrides, setSvgXmlWithOverrides] = useState<string | null>(null);
   const loadCalledRef = useRef(false);
+
+  useEffect(() => {
+    sourceRef.current = source;
+  }, [source]);
 
   useEffect(() => {
     if (!isSvg) {
@@ -145,11 +182,17 @@ export function TileAsset({
       if (uri) {
         if (!cancelled) {
           setSvgUri(uri);
+          const cached = svgXmlCache.get(uri);
+          if (cached) {
+            setSvgXml(cached);
+            return;
+          }
           if (Platform.OS === 'web') {
             try {
               const response = await fetch(uri);
               const xml = await response.text();
               if (!cancelled) {
+                svgXmlCache.set(uri, xml);
                 setSvgXml(xml);
               }
             } catch {
@@ -159,6 +202,7 @@ export function TileAsset({
             try {
               const xml = await FileSystem.readAsStringAsync(uri);
               if (!cancelled) {
+                svgXmlCache.set(uri, xml);
                 setSvgXml(xml);
               }
             } catch {
@@ -170,8 +214,14 @@ export function TileAsset({
                   }
                   const resolved = asset.localUri ?? asset.uri ?? null;
                   if (resolved) {
+                    const cachedResolved = svgXmlCache.get(resolved);
+                    if (cachedResolved) {
+                      setSvgXml(cachedResolved);
+                      return;
+                    }
                     const xml = await FileSystem.readAsStringAsync(resolved);
                     if (!cancelled) {
+                      svgXmlCache.set(resolved, xml);
                       setSvgXml(xml);
                     }
                   }
@@ -184,8 +234,9 @@ export function TileAsset({
         }
         return;
       }
-      if (typeof source === 'number') {
-        const asset = Asset.fromModule(source);
+      const fallbackSource = sourceRef.current;
+      if (typeof fallbackSource === 'number') {
+        const asset = Asset.fromModule(fallbackSource);
         if (!asset.downloaded && Platform.OS !== 'web') {
           await asset.downloadAsync();
         }
@@ -195,9 +246,15 @@ export function TileAsset({
           if (resolved) {
             if (Platform.OS === 'web') {
               try {
+                const cachedResolved = svgXmlCache.get(resolved);
+                if (cachedResolved) {
+                  setSvgXml(cachedResolved);
+                  return;
+                }
                 const response = await fetch(resolved);
                 const xml = await response.text();
                 if (!cancelled) {
+                  svgXmlCache.set(resolved, xml);
                   setSvgXml(xml);
                 }
               } catch {
@@ -205,8 +262,14 @@ export function TileAsset({
               }
             } else {
               try {
+                const cachedResolved = svgXmlCache.get(resolved);
+                if (cachedResolved) {
+                  setSvgXml(cachedResolved);
+                  return;
+                }
                 const xml = await FileSystem.readAsStringAsync(resolved);
                 if (!cancelled) {
+                  svgXmlCache.set(resolved, xml);
                   setSvgXml(xml);
                 }
               } catch {
@@ -221,7 +284,7 @@ export function TileAsset({
     return () => {
       cancelled = true;
     };
-  }, [isSvg, source, uri]);
+  }, [isSvg, uri]);
 
   useEffect(() => {
     if (!svgXml) {
