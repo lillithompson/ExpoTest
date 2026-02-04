@@ -12,6 +12,7 @@ export type TileSetTile = {
   preferredTileSize: number;
   thumbnailUri: string | null;
   previewUri: string | null;
+  expectedConnectivity: string;
   updatedAt: number;
 };
 
@@ -57,12 +58,13 @@ export const useTileSets = () => {
             id: tile.id ?? createId('tile'),
             name: tile.name ?? 'Tile',
             tiles: tile.tiles ?? [],
-            grid: tile.grid ?? { rows: 0, columns: 0 },
-            preferredTileSize: tile.preferredTileSize ?? 45,
-            thumbnailUri: tile.thumbnailUri ?? null,
-            previewUri: tile.previewUri ?? null,
-            updatedAt: tile.updatedAt ?? Date.now(),
-          })),
+              grid: tile.grid ?? { rows: 0, columns: 0 },
+              preferredTileSize: tile.preferredTileSize ?? 45,
+              thumbnailUri: tile.thumbnailUri ?? null,
+              previewUri: tile.previewUri ?? null,
+              expectedConnectivity: tile.expectedConnectivity ?? '00000000',
+              updatedAt: tile.updatedAt ?? Date.now(),
+            })),
           updatedAt: set.updatedAt ?? Date.now(),
         } as TileSet;
       });
@@ -160,6 +162,7 @@ export const useTileSets = () => {
             preferredTileSize: 45,
             thumbnailUri: null,
             previewUri: null,
+            expectedConnectivity: '00000000',
             updatedAt: Date.now(),
           };
           return {

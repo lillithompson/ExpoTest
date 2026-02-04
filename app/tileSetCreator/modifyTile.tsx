@@ -237,6 +237,7 @@ export default function ModifyTileScreen() {
 
   const tileSet = tileSets.find((set) => set.id === setId) ?? null;
   const tileEntry = tileSet?.tiles.find((tile) => tile.id === tileId) ?? null;
+  const expectedConnectivity = tileEntry?.expectedConnectivity ?? '00000000';
   const tileSources = tileSet ? TILE_MANIFEST[tileSet.category] ?? [] : [];
   const activePatterns = tileSet ? patternsByCategory.get(tileSet.category) ?? [] : [];
   const selectedPattern = activePatterns[0] ?? null;
@@ -250,6 +251,7 @@ export default function ModifyTileScreen() {
   >({ mode: 'random' });
   const [paletteRotations, setPaletteRotations] = useState<Record<number, number>>({});
   const [paletteMirrors, setPaletteMirrors] = useState<Record<number, boolean>>({});
+  const [showTileSettings, setShowTileSettings] = useState(false);
 
   const safeWidth = Math.max(0, width);
   const safeHeight = Math.max(0, height - insets.top);
@@ -286,6 +288,10 @@ export default function ModifyTileScreen() {
     gridGap: GRID_GAP,
     preferredTileSize: tileEntry?.preferredTileSize ?? 45,
     allowEdgeConnections: settings.allowEdgeConnections,
+    randomRequiresLegal: true,
+    randomDisallowEdgeConnections: true,
+    expectedConnectivity,
+    enforceExpectedConnectivity: expectedConnectivity !== '00000000',
     fixedRows: tileSet?.resolution ?? 0,
     fixedColumns: tileSet?.resolution ?? 0,
     brush,
@@ -525,6 +531,11 @@ export default function ModifyTileScreen() {
       pick(topRow, leftCol, 7), // NW
     ];
   }, [tiles, tileSources, gridLayout.columns, gridLayout.rows]);
+  const currentConnectivity = borderConnectionStatus
+    ? borderConnectionStatus.map((value) => (value ? '1' : '0')).join('')
+    : '00000000';
+  const isBadState = expectedConnectivity !== currentConnectivity;
+  const expectedBits = expectedConnectivity.split('').map((value) => value === '1');
 
   if (!tileSet || !tileEntry) {
     return (
@@ -538,20 +549,34 @@ export default function ModifyTileScreen() {
 
   return (
     <ThemedView style={[styles.screen, { paddingTop: insets.top }]}>
-      <ThemedView style={styles.titleContainer}>
-        <ThemedView style={styles.headerRow}>
+      <ThemedView
+        style={[
+          styles.titleContainer,
+          isBadState && styles.titleContainerBad,
+        ]}
+      >
+        <ThemedView style={[styles.headerRow, isBadState && styles.headerRowBad]}>
           <Pressable
-            onPress={() => router.back()}
+            onPress={() => {
+              if (router.canGoBack()) {
+                router.back();
+                return;
+              }
+              router.replace({
+                pathname: '/tileSetCreator/editor',
+                params: { setId },
+              });
+            }}
             style={styles.navButton}
             accessibilityRole="button"
             accessibilityLabel="Back to tile set editor"
           >
             <ThemedText type="defaultSemiBold" style={styles.navButtonText}>
-              &lt; Modify Tile
+              &lt; {expectedConnectivity}
             </ThemedText>
           </Pressable>
           <ThemedView style={styles.controls}>
-            <ToolbarButton label="Clear" icon="trash-can-outline" onPress={resetTiles} />
+            <ToolbarButton label="Clear" icon="refresh" onPress={resetTiles} />
             <ToolbarButton
               label="Fill"
               icon="format-color-fill"
@@ -579,6 +604,11 @@ export default function ModifyTileScreen() {
                   mirrorVertical: !prev.mirrorVertical,
                 }))
               }
+            />
+            <ToolbarButton
+              label="Tile Settings"
+              icon="tune-vertical-variant"
+              onPress={() => setShowTileSettings(true)}
             />
           </ThemedView>
         </ThemedView>
@@ -624,10 +654,18 @@ export default function ModifyTileScreen() {
               )}
             </View>
           )}
-        {borderConnectionStatus && gridWidth > 0 && gridHeight > 0 && (
-          <View pointerEvents="none" style={styles.borderConnectionLines}>
-            {borderConnectionStatus.map((isConnected, index) => {
-              const dotSize = Math.max(6, Math.round(gridLayout.tileSize * 0.22));
+        {expectedConnectivity && gridWidth > 0 && gridHeight > 0 && (
+          <View pointerEvents="none" style={styles.borderExpectedLines}>
+            {expectedConnectivity.split('').map((value, index) => {
+              const currentBits = borderConnectionStatus
+                ? borderConnectionStatus.map((v) => (v ? '1' : '0')).join('')
+                : '00000000';
+              const expectedOn = value === '1';
+              const currentOn = currentBits[index] === '1';
+              if (!expectedOn && !currentOn) {
+                return null;
+              }
+              const dotSize = Math.max(6, Math.round(gridLayout.tileSize * 0.2));
               const dotOffset = dotSize / 2;
               const positions = [
                 { left: gridWidth / 2 - dotOffset, top: -dotOffset }, // N
@@ -639,21 +677,42 @@ export default function ModifyTileScreen() {
                 { left: -dotOffset, top: gridHeight / 2 - dotOffset }, // W
                 { left: -dotOffset, top: -dotOffset }, // NW
               ];
+              if (expectedOn) {
+                return (
+                  <View
+                    key={`border-expected-${index}`}
+                    style={[
+                      styles.expectedConnectionDot,
+                      currentOn
+                        ? styles.expectedConnectionDotOn
+                        : styles.expectedConnectionDotOff,
+                      {
+                        width: dotSize,
+                        height: dotSize,
+                        borderRadius: dotSize / 2,
+                        left: positions[index].left,
+                        top: positions[index].top,
+                      },
+                    ]}
+                  />
+                );
+              }
               return (
                 <View
-                  key={`border-conn-${index}`}
+                  key={`border-unexpected-${index}`}
                   style={[
-                    styles.connectionDot,
-                    isConnected ? styles.connectionDotOn : styles.connectionDotOff,
+                    styles.unexpectedConnection,
                     {
                       width: dotSize,
                       height: dotSize,
-                      borderRadius: dotSize / 2,
                       left: positions[index].left,
                       top: positions[index].top,
                     },
                   ]}
-                />
+                >
+                  <View style={styles.unexpectedConnectionLine} />
+                  <View style={[styles.unexpectedConnectionLine, styles.unexpectedConnectionLineAlt]} />
+                </View>
               );
             })}
           </View>
@@ -818,6 +877,45 @@ export default function ModifyTileScreen() {
         itemSize={brushItemSize}
         rowGap={BRUSH_PANEL_ROW_GAP}
       />
+      {showTileSettings && (
+        <ThemedView style={styles.overlay} accessibilityRole="dialog">
+          <Pressable
+            style={styles.overlayBackdrop}
+            onPress={() => setShowTileSettings(false)}
+            accessibilityRole="button"
+            accessibilityLabel="Close tile settings"
+          />
+          <ThemedView style={styles.overlayPanel}>
+            <ThemedText type="title">Tile Settings</ThemedText>
+            <ThemedText type="defaultSemiBold">Expected Connectivity</ThemedText>
+            <ThemedView style={styles.checkboxRow}>
+              {expectedBits.map((isOn, index) => (
+                <Pressable
+                  key={`expected-${index}`}
+                  onPress={() => {
+                    if (!tileSet || !tileEntry) {
+                      return;
+                    }
+                    const nextBits = expectedBits.map((value, i) =>
+                      i === index ? !value : value
+                    );
+                    const next = nextBits.map((value) => (value ? '1' : '0')).join('');
+                    updateTileInSet(tileSet.id, tileEntry.id, (tile) => ({
+                      ...tile,
+                      expectedConnectivity: next,
+                      updatedAt: Date.now(),
+                    }));
+                  }}
+                  style={[styles.checkbox, isOn && styles.checkboxOn]}
+                  accessibilityRole="checkbox"
+                  accessibilityLabel={`Toggle expected connection ${index + 1}`}
+                  accessibilityState={{ checked: isOn }}
+                />
+              ))}
+            </ThemedView>
+          </ThemedView>
+        </ThemedView>
+      )}
     </ThemedView>
   );
 }
@@ -836,6 +934,9 @@ const styles = StyleSheet.create({
     width: '100%',
     backgroundColor: '#e5e5e5',
   },
+  titleContainerBad: {
+    backgroundColor: '#f2c9c9',
+  },
   headerRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -843,6 +944,9 @@ const styles = StyleSheet.create({
     width: '100%',
     paddingHorizontal: 6,
     backgroundColor: '#e5e5e5',
+  },
+  headerRowBad: {
+    backgroundColor: '#f2c9c9',
   },
   controls: {
     flexDirection: 'row',
@@ -908,6 +1012,11 @@ const styles = StyleSheet.create({
     zIndex: 3,
     backgroundColor: 'transparent',
   },
+  borderExpectedLines: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 4,
+    backgroundColor: 'transparent',
+  },
   row: {
     flexDirection: 'row',
     gap: GRID_GAP,
@@ -944,8 +1053,69 @@ const styles = StyleSheet.create({
   connectionDotOn: {
     backgroundColor: 'rgba(34, 197, 94, 0.5)',
   },
-  connectionDotOff: {
-    backgroundColor: 'rgba(239, 68, 68, 0.5)',
+  connectionDotNeutral: {
+    backgroundColor: 'rgba(148, 163, 184, 0.6)',
+  },
+  expectedConnectionDot: {
+    position: 'absolute',
+  },
+  expectedConnectionDotOn: {
+    backgroundColor: 'rgba(34, 197, 94, 0.75)',
+  },
+  expectedConnectionDotOff: {
+    backgroundColor: 'rgba(239, 68, 68, 0.75)',
+  },
+  unexpectedConnection: {
+    position: 'absolute',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  unexpectedConnectionLine: {
+    position: 'absolute',
+    width: '100%',
+    height: 2,
+    backgroundColor: 'rgba(239, 68, 68, 0.85)',
+    transform: [{ rotate: '45deg' }],
+  },
+  unexpectedConnectionLineAlt: {
+    transform: [{ rotate: '-45deg' }],
+  },
+  overlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 30,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'transparent',
+  },
+  overlayBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+  },
+  overlayPanel: {
+    width: '85%',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#1f1f1f',
+    padding: 16,
+    backgroundColor: '#fff',
+    gap: 12,
+  },
+  checkboxRow: {
+    flexDirection: 'row',
+    flexWrap: 'nowrap',
+    gap: 6,
+    justifyContent: 'space-between',
+  },
+  checkbox: {
+    width: 18,
+    height: 18,
+    borderRadius: 3,
+    borderWidth: 1,
+    borderColor: '#1f1f1f',
+    backgroundColor: '#fff',
+  },
+  checkboxOn: {
+    backgroundColor: '#22c55e',
   },
   tileImage: {
     width: '100%',

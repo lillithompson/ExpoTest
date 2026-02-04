@@ -343,9 +343,7 @@ export default function TileSetEditorScreen() {
       <ThemedView style={styles.fileHeader}>
         <View style={styles.headerLeft}>
           <Pressable
-            onPress={() => {
-              router.back();
-            }}
+            onPress={() => router.replace('/tileSetCreator')}
             style={styles.backButton}
             accessibilityRole="button"
             accessibilityLabel="Back to tile sets"
@@ -355,9 +353,9 @@ export default function TileSetEditorScreen() {
             </ThemedText>
           </Pressable>
           <Pressable
-            onPress={() => router.push('/')}
+            onPress={() => router.replace('/tileSetCreator')}
             accessibilityRole="button"
-            accessibilityLabel="Go to files"
+            accessibilityLabel="Go to tile sets"
           >
             <ThemedText type="defaultSemiBold" style={styles.fileTitle}>
               {tileSet.name}
@@ -675,6 +673,11 @@ export default function TileSetEditorScreen() {
                           west,
                           pick(topRow, leftCol, 7),
                         ];
+                        const currentConnectivity = statuses
+                          .map((value) => (value ? '1' : '0'))
+                          .join('');
+                        const expectedConnectivity = tile.expectedConnectivity ?? '00000000';
+                        const isBadState = expectedConnectivity !== currentConnectivity;
                         const dotSize = Math.max(4, Math.round(cardWidth * 0.08));
                         const dotOffset = dotSize / 2;
                         const positions = [
@@ -687,22 +690,32 @@ export default function TileSetEditorScreen() {
                           { left: -dotOffset, top: cardWidth / 2 - dotOffset }, // W
                           { left: -dotOffset, top: -dotOffset }, // NW
                         ];
-                        return statuses.map((isConnected, index) => (
-                          <View
-                            key={`thumb-conn-${tile.id}-${index}`}
-                            style={[
-                              styles.thumbConnectionDot,
-                              isConnected ? styles.thumbConnectionDotOn : styles.thumbConnectionDotOff,
-                              {
-                                width: dotSize,
-                                height: dotSize,
-                                borderRadius: dotSize / 2,
-                                left: positions[index].left,
-                                top: positions[index].top,
-                              },
-                            ]}
-                          />
-                        ));
+                        return (
+                          <>
+                            {isBadState && <View style={styles.thumbBadOverlay} />}
+                            {statuses.map((isConnected, index) => {
+                              if (!isConnected) {
+                                return null;
+                              }
+                              return (
+                                <View
+                                  key={`thumb-conn-${tile.id}-${index}`}
+                                  style={[
+                                    styles.thumbConnectionDot,
+                                    styles.thumbConnectionDotOn,
+                                    {
+                                      width: dotSize,
+                                      height: dotSize,
+                                      borderRadius: dotSize / 2,
+                                      left: positions[index].left,
+                                      top: positions[index].top,
+                                    },
+                                  ]}
+                                />
+                              );
+                            })}
+                          </>
+                        );
                       })()}
                     </View>
                   )}
@@ -931,6 +944,10 @@ const styles = StyleSheet.create({
   thumbConnectionOverlay: {
     ...StyleSheet.absoluteFillObject,
     zIndex: 3,
+  },
+  thumbBadOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(239, 68, 68, 0.35)',
   },
   thumbConnectionDot: {
     position: 'absolute',
