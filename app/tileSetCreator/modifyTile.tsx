@@ -454,6 +454,15 @@ export default function ModifyTileScreen() {
     paintCellIndex(cellIndex);
   };
 
+  const rowIndices = useMemo(
+    () => Array.from({ length: gridLayout.rows }, (_, index) => index),
+    [gridLayout.rows]
+  );
+  const columnIndices = useMemo(
+    () => Array.from({ length: gridLayout.columns }, (_, index) => index),
+    [gridLayout.columns]
+  );
+
   if (!tileSet || !tileEntry) {
     return (
       <ThemedView style={[styles.screen, { paddingTop: insets.top }]}>
@@ -463,15 +472,6 @@ export default function ModifyTileScreen() {
       </ThemedView>
     );
   }
-
-  const rowIndices = useMemo(
-    () => Array.from({ length: gridLayout.rows }, (_, index) => index),
-    [gridLayout.rows]
-  );
-  const columnIndices = useMemo(
-    () => Array.from({ length: gridLayout.columns }, (_, index) => index),
-    [gridLayout.columns]
-  );
 
   return (
     <ThemedView style={[styles.screen, { paddingTop: insets.top }]}>
@@ -531,6 +531,36 @@ export default function ModifyTileScreen() {
           lineColor={settings.backgroundLineColor}
           lineWidth={settings.backgroundLineWidth}
         />
+        {(settings.mirrorHorizontal || settings.mirrorVertical) &&
+          gridWidth > 0 &&
+          gridHeight > 0 && (
+            <View pointerEvents="none" style={styles.mirrorLines}>
+              {settings.mirrorHorizontal && (
+                <View
+                  style={[
+                    styles.mirrorLineVertical,
+                    {
+                      left: gridWidth / 2 - 1,
+                      height: gridHeight,
+                      width: 2,
+                    },
+                  ]}
+                />
+              )}
+              {settings.mirrorVertical && (
+                <View
+                  style={[
+                    styles.mirrorLineHorizontal,
+                    {
+                      top: gridHeight / 2 - 1,
+                      width: gridWidth,
+                      height: 2,
+                    },
+                  ]}
+                />
+              )}
+            </View>
+          )}
         <ViewShot ref={thumbnailShotRef} style={{ width: gridWidth, height: gridHeight }}>
           <ThemedView
             style={[styles.grid, { width: gridWidth, height: gridHeight }]}
@@ -762,6 +792,19 @@ const styles = StyleSheet.create({
     alignContent: 'flex-start',
     gap: GRID_GAP,
     backgroundColor: 'transparent',
+  },
+  mirrorLines: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 2,
+    backgroundColor: 'transparent',
+  },
+  mirrorLineHorizontal: {
+    position: 'absolute',
+    backgroundColor: '#3b82f6',
+  },
+  mirrorLineVertical: {
+    position: 'absolute',
+    backgroundColor: '#3b82f6',
   },
   row: {
     flexDirection: 'row',
