@@ -1,0 +1,10 @@
+<svg width="256" height="256" viewBox="0 0 256 256" fill="none" xmlns="http://www.w3.org/2000/svg">
+<path d="M128 218.51C103.006 193.516 103.006 152.994 128 128" stroke="#FF0000" stroke-width="10"/>
+<path d="M128 218.509C152.994 193.516 152.994 152.993 128 128" stroke="#FF0000" stroke-width="10"/>
+<path d="M128 128C103.006 103.007 103.006 62.4841 128 37.4905" stroke="#FF0000" stroke-width="10"/>
+<path d="M128 128C152.994 103.006 152.994 62.4838 128 37.4903" stroke="#FF0000" stroke-width="10"/>
+<path d="M37.4903 128C62.4838 103.007 103.006 103.007 128 128" stroke="#FF0000" stroke-width="10"/>
+<path d="M37.4903 128C62.4838 152.994 103.006 152.994 128 128" stroke="#FF0000" stroke-width="10"/>
+<path d="M128 128C152.994 103.006 193.516 103.006 218.51 128" stroke="#FF0000" stroke-width="10"/>
+<path d="M128 128C152.994 152.993 193.516 152.993 218.51 128" stroke="#FF0000" stroke-width="10"/>
+</svg>

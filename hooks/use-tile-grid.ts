@@ -451,18 +451,42 @@ export const useTileGrid = ({
     const nextConnections = tileSources.map((source) =>
       parseTileConnections(source.name)
     );
-    const nextLookup = new Map<string, number[]>();
+    const nextLookup = new Map<
+      string,
+      Array<{ index: number; rotation: number; mirrorX: boolean; mirrorY: boolean }>
+    >();
     nextConnections.forEach((connections, index) => {
-      const key = toConnectionKey(connections);
-      if (!key) {
+      if (!connections) {
         return;
       }
-      const existing = nextLookup.get(key);
-      if (existing) {
-        existing.push(index);
-      } else {
-        nextLookup.set(key, [index]);
-      }
+      const rotations = [0, 90, 180, 270];
+      const mirrors = [
+        { mirrorX: false, mirrorY: false },
+        { mirrorX: true, mirrorY: false },
+        { mirrorX: false, mirrorY: true },
+        { mirrorX: true, mirrorY: true },
+      ];
+      rotations.forEach((rotation) => {
+        mirrors.forEach(({ mirrorX, mirrorY }) => {
+          const transformed = transformConnections(
+            connections,
+            rotation,
+            mirrorX,
+            mirrorY
+          );
+          const key = toConnectionKey(transformed);
+          if (!key) {
+            return;
+          }
+          const existing = nextLookup.get(key);
+          const entry = { index, rotation, mirrorX, mirrorY };
+          if (existing) {
+            existing.push(entry);
+          } else {
+            nextLookup.set(key, [entry]);
+          }
+        });
+      });
     });
 
     setTiles((prev) =>
@@ -478,7 +502,16 @@ export const useTileGrid = ({
           return { imageIndex: -1, rotation: 0, mirrorX: false, mirrorY: false };
         }
         const previousConnections = parseTileConnections(previousSource.name);
-        const previousKey = toConnectionKey(previousConnections);
+        if (!previousConnections) {
+          return { imageIndex: -1, rotation: 0, mirrorX: false, mirrorY: false };
+        }
+        const transformedPrevious = transformConnections(
+          previousConnections,
+          tile.rotation,
+          tile.mirrorX,
+          tile.mirrorY
+        );
+        const previousKey = toConnectionKey(transformedPrevious);
         if (!previousKey) {
           return { imageIndex: -1, rotation: 0, mirrorX: false, mirrorY: false };
         }
@@ -486,9 +519,12 @@ export const useTileGrid = ({
         if (!candidates || candidates.length === 0) {
           return { imageIndex: -1, rotation: 0, mirrorX: false, mirrorY: false };
         }
+        const match = candidates[0];
         return {
-          ...tile,
-          imageIndex: candidates[0],
+          imageIndex: match.index,
+          rotation: match.rotation,
+          mirrorX: match.mirrorX,
+          mirrorY: match.mirrorY,
         };
       })
     );

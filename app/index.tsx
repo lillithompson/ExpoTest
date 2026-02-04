@@ -17,6 +17,7 @@ import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import ViewShot from 'react-native-view-shot';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import {
@@ -38,7 +39,7 @@ import {
   renderTileCanvasToDataUrl,
   renderTileCanvasToSvg,
 } from '@/utils/tile-export';
-import { getTransformedConnectionsForName } from '@/utils/tile-compat';
+import { getTransformedConnectionsForName, parseTileConnections, transformConnections } from '@/utils/tile-compat';
 import { normalizeTiles, type Tile } from '@/utils/tile-grid';
 
 const GRID_GAP = 0;
@@ -149,6 +150,9 @@ const hsvToRgb = (h: number, s: number, v: number) => {
     b: Math.round((bPrime + m) * 255),
   };
 };
+
+const toConnectionKey = (connections: boolean[] | null) =>
+  connections ? connections.map((value) => (value ? '1' : '0')).join('') : null;
 
 type HsvColorPickerProps = {
   label: string;
@@ -503,6 +507,7 @@ const TileCell = memo(
 export default function TestScreen() {
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
+  const router = useRouter();
   const gridRef = useRef<View>(null);
   const gridCaptureRef = useRef<ViewShot>(null);
   const gridOffsetRef = useRef({ x: 0, y: 0 });
@@ -765,6 +770,96 @@ export default function TestScreen() {
     filesRef.current = files;
   }, [files]);
 
+  const remapTilesForCategory = useCallback(
+    (nextCategory: TileCategory, currentTiles: Tile[]) => {
+      const prevSources = tileSources;
+      const nextSources = TILE_MANIFEST[nextCategory] ?? [];
+      if (prevSources === nextSources) {
+        return currentTiles;
+      }
+      const totalCells = gridLayout.rows * gridLayout.columns;
+      const normalized = normalizeTiles(
+        currentTiles,
+        totalCells,
+        prevSources.length
+      );
+      if (normalized.length === 0) {
+        return normalized;
+      }
+      const nextLookup = new Map<
+        string,
+        Array<{ index: number; rotation: number; mirrorX: boolean; mirrorY: boolean }>
+      >();
+      nextSources.forEach((source, index) => {
+        const base = parseTileConnections(source.name);
+        if (!base) {
+          return;
+        }
+        const rotations = [0, 90, 180, 270];
+        const mirrors = [
+          { mirrorX: false, mirrorY: false },
+          { mirrorX: true, mirrorY: false },
+          { mirrorX: false, mirrorY: true },
+          { mirrorX: true, mirrorY: true },
+        ];
+        rotations.forEach((rotation) => {
+          mirrors.forEach(({ mirrorX, mirrorY }) => {
+            const key = toConnectionKey(
+              transformConnections(base, rotation, mirrorX, mirrorY)
+            );
+            if (!key) {
+              return;
+            }
+            const existing = nextLookup.get(key);
+            const entry = { index, rotation, mirrorX, mirrorY };
+            if (existing) {
+              existing.push(entry);
+            } else {
+              nextLookup.set(key, [entry]);
+            }
+          });
+        });
+      });
+
+      return normalized.map((tile) => {
+        if (!tile || tile.imageIndex < 0) {
+          return tile;
+        }
+        const previousSource = prevSources[tile.imageIndex];
+        if (!previousSource) {
+          return { imageIndex: -1, rotation: 0, mirrorX: false, mirrorY: false };
+        }
+        const previousConnections = parseTileConnections(previousSource.name);
+        if (!previousConnections) {
+          return { imageIndex: -1, rotation: 0, mirrorX: false, mirrorY: false };
+        }
+        const renderedKey = toConnectionKey(
+          transformConnections(
+            previousConnections,
+            tile.rotation,
+            tile.mirrorX,
+            tile.mirrorY
+          )
+        );
+        if (!renderedKey) {
+          return { imageIndex: -1, rotation: 0, mirrorX: false, mirrorY: false };
+        }
+        const candidates = nextLookup.get(renderedKey);
+        if (!candidates || candidates.length === 0) {
+          return { imageIndex: -1, rotation: 0, mirrorX: false, mirrorY: false };
+        }
+        const match = candidates[0];
+        return {
+          imageIndex: match.index,
+          rotation: match.rotation,
+          mirrorX: match.mirrorX,
+          mirrorY: match.mirrorY,
+        };
+      });
+    },
+    [gridLayout.columns, gridLayout.rows, tileSources]
+  );
+
   useEffect(() => {
     setLineWidthDraft(activeLineWidth);
   }, [activeLineWidth]);
@@ -989,7 +1084,7 @@ export default function TestScreen() {
   ]);
 
   useEffect(() => {
-    if (!ready || !activeFileId) {
+    if (!ready || !activeFileId || viewMode !== 'modify') {
       return;
     }
     const pending = pendingRestoreRef.current;
@@ -1043,6 +1138,7 @@ export default function TestScreen() {
     activeFileId,
     upsertActiveFile,
     isHydratingFile,
+    viewMode,
   ]);
 
 
@@ -1306,7 +1402,7 @@ export default function TestScreen() {
   }, [patternSelection, gridLayout.columns, tiles]);
 
   const persistActiveFileNow = async () => {
-    if (!ready || !activeFileId) {
+    if (!ready || !activeFileId || viewMode !== 'modify') {
       return;
     }
     if (saveTimeoutRef.current) {
@@ -1633,9 +1729,17 @@ export default function TestScreen() {
           />
         )}
         <ThemedView style={styles.fileHeader}>
-          <ThemedText type="title" style={styles.fileTitle}>
-            File
-          </ThemedText>
+          <Pressable
+            onPress={() => {
+              router.push('/tileSetCreator');
+            }}
+            accessibilityRole="button"
+            accessibilityLabel="Open tile sets"
+          >
+            <ThemedText type="title" style={styles.fileTitle}>
+              File
+            </ThemedText>
+          </Pressable>
           <ThemedView style={styles.fileHeaderActions}>
             <ToolbarButton
               label="Create new tile canvas file"
@@ -3073,10 +3177,12 @@ export default function TestScreen() {
                   <Pressable
                     key={category}
                     onPress={() => {
+                      const remappedTiles = remapTilesForCategory(category, tiles);
                       setSelectedCategory(category);
                       if (activeFileId) {
+                        loadTiles(remappedTiles);
                         upsertActiveFile({
-                          tiles,
+                          tiles: remappedTiles,
                           gridLayout,
                           category,
                           preferredTileSize: fileTileSize,
