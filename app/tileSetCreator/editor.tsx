@@ -579,29 +579,6 @@ export default function TileSetEditorScreen() {
               </ThemedView>
             </ThemedView>
             <ThemedView style={styles.sectionGroup}>
-              <ThemedText type="defaultSemiBold">Resolution</ThemedText>
-              <ThemedView style={styles.inlineOptions}>
-                {Array.from({ length: 7 }, (_, index) => index + 2).map((value) => (
-                  <Pressable
-                    key={value}
-                    onPress={() =>
-                      updateTileSet(tileSet.id, (set) => ({
-                        ...set,
-                        resolution: value,
-                        updatedAt: Date.now(),
-                      }))
-                    }
-                    style={[
-                      styles.overlayItem,
-                      value === tileSet.resolution && styles.overlayItemSelected,
-                    ]}
-                  >
-                    <ThemedText type="defaultSemiBold">{value}</ThemedText>
-                  </Pressable>
-                ))}
-              </ThemedView>
-            </ThemedView>
-            <ThemedView style={styles.sectionGroup}>
               <ThemedView style={styles.sectionHeader}>
                 <ThemedText type="defaultSemiBold">Line Width</ThemedText>
                 <ThemedText type="defaultSemiBold">
