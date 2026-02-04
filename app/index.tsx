@@ -551,7 +551,7 @@ export default function TestScreen() {
     {}
   );
   const [paletteMirrors, setPaletteMirrors] = useState<Record<number, boolean>>({});
-  const { patternsByCategory, createPattern } = useTilePatterns();
+  const { patternsByCategory, createPattern, deletePatterns } = useTilePatterns();
   const [selectedPatternId, setSelectedPatternId] = useState<string | null>(null);
   const [isPatternCreationMode, setIsPatternCreationMode] = useState(false);
   const [patternSelection, setPatternSelection] = useState<{
@@ -560,6 +560,9 @@ export default function TestScreen() {
   } | null>(null);
   const [showPatternSaveModal, setShowPatternSaveModal] = useState(false);
   const [showPatternChooser, setShowPatternChooser] = useState(false);
+  const [isPatternSelectMode, setIsPatternSelectMode] = useState(false);
+  const [selectedPatternIds, setSelectedPatternIds] = useState<Set<string>>(new Set());
+  const patternSelectAnim = useRef(new Animated.Value(0)).current;
   const [patternRotations, setPatternRotations] = useState<Record<string, number>>(
     {}
   );
@@ -779,6 +782,14 @@ export default function TestScreen() {
       useNativeDriver: false,
     }).start();
   }, [isSelectMode, selectBarAnim]);
+
+  useEffect(() => {
+    Animated.timing(patternSelectAnim, {
+      toValue: isPatternSelectMode ? 1 : 0,
+      duration: 180,
+      useNativeDriver: false,
+    }).start();
+  }, [isPatternSelectMode, patternSelectAnim]);
 
   useEffect(() => {
     if (activeFile?.category && TILE_MANIFEST[activeFile.category]) {
@@ -1250,6 +1261,50 @@ export default function TestScreen() {
     setBrush({ mode: 'pattern' });
   };
 
+  const pendingPatternPreview = useMemo(() => {
+    if (!patternSelection || gridLayout.columns === 0) {
+      return null;
+    }
+    const { minRow, maxRow, minCol, maxCol } = getSelectionBounds(
+      patternSelection.start,
+      patternSelection.end
+    );
+    const width = maxCol - minCol + 1;
+    const height = maxRow - minRow + 1;
+    if (width <= 0 || height <= 0) {
+      return null;
+    }
+    const tileSize = Math.max(
+      8,
+      Math.floor(120 / Math.max(1, height))
+    );
+    const tilesPreview: Array<{
+      tile: Tile;
+      index: number;
+    }> = [];
+    for (let row = minRow; row <= maxRow; row += 1) {
+      for (let col = minCol; col <= maxCol; col += 1) {
+        const index = row * gridLayout.columns + col;
+        tilesPreview.push({
+          tile:
+            tiles[index] ?? {
+              imageIndex: -1,
+              rotation: 0,
+              mirrorX: false,
+              mirrorY: false,
+            },
+          index,
+        });
+      }
+    }
+    return {
+      width,
+      height,
+      tileSize,
+      tiles: tilesPreview,
+    };
+  }, [patternSelection, gridLayout.columns, tiles]);
+
   const persistActiveFileNow = async () => {
     if (!ready || !activeFileId) {
       return;
@@ -1443,6 +1498,32 @@ export default function TestScreen() {
       deleteFile(fileId);
     });
     clearSelection();
+  };
+
+  const toggleSelectPattern = (patternId: string) => {
+    setSelectedPatternIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(patternId)) {
+        next.delete(patternId);
+      } else {
+        next.add(patternId);
+      }
+      return next;
+    });
+  };
+
+  const clearPatternSelection = () => {
+    setSelectedPatternIds(new Set());
+    setIsPatternSelectMode(false);
+  };
+
+  const deleteSelectedPatterns = () => {
+    if (selectedPatternIds.size === 0) {
+      clearPatternSelection();
+      return;
+    }
+    deletePatterns(Array.from(selectedPatternIds));
+    clearPatternSelection();
   };
 
   const handleDownloadPng = async () => {
@@ -2525,7 +2606,7 @@ export default function TestScreen() {
             </>
           )}
         </View>
-        {isPatternCreationMode && (
+        {isPatternCreationMode && !showPatternSaveModal && (
           <View
             pointerEvents="box-none"
             style={[
@@ -2540,7 +2621,7 @@ export default function TestScreen() {
             </View>
           </View>
         )}
-        {isPatternCreationMode && (
+        {isPatternCreationMode && !showPatternSaveModal && (
           <View
             pointerEvents="auto"
             style={[
@@ -2640,38 +2721,85 @@ export default function TestScreen() {
                 setIsPatternCreationMode(false);
                 setShowPatternChooser(false);
                 setBrush({ mode: 'pattern' });
+                clearPatternSelection();
               }}
               accessibilityRole="button"
               accessibilityLabel="Close pattern picker"
             />
             <ThemedView style={styles.patternModalPanel}>
               <ThemedView style={styles.patternModalHeader}>
-                <Pressable
-                  onPress={() => {
-                    setBrush({ mode: 'pattern' });
-                    setIsPatternCreationMode(true);
-                    setPatternSelection(null);
-                    setShowPatternChooser(false);
-                  }}
-                  style={styles.patternModalNew}
-                  accessibilityRole="button"
-                  accessibilityLabel="Create new pattern"
-                >
-                  <ThemedText type="defaultSemiBold">New</ThemedText>
-                </Pressable>
-                <Pressable
-                  onPress={() => {
-                    setIsPatternCreationMode(false);
-                    setShowPatternChooser(false);
-                    setBrush({ mode: 'pattern' });
-                  }}
-                  style={styles.patternModalClose}
-                  accessibilityRole="button"
-                  accessibilityLabel="Close patterns"
-                >
-                  <ThemedText type="defaultSemiBold">X</ThemedText>
-                </Pressable>
+                <ThemedText type="title" style={styles.patternModalTitle}>
+                  Patterns
+                </ThemedText>
+                <View style={styles.patternModalActions}>
+                  <Pressable
+                    onPress={() => {
+                      setBrush({ mode: 'pattern' });
+                      setIsPatternCreationMode(true);
+                      setPatternSelection(null);
+                      setShowPatternChooser(false);
+                    }}
+                    style={styles.patternHeaderIcon}
+                    accessibilityRole="button"
+                    accessibilityLabel="Create new pattern"
+                  >
+                    <MaterialCommunityIcons name="plus" size={24} color="#fff" />
+                  </Pressable>
+                  <Pressable
+                    onPress={() => {
+                      setIsPatternSelectMode(true);
+                    }}
+                    style={styles.patternHeaderIcon}
+                    accessibilityRole="button"
+                    accessibilityLabel="Select patterns"
+                  >
+                    <MaterialCommunityIcons
+                      name="checkbox-marked-outline"
+                      size={22}
+                      color="#fff"
+                    />
+                  </Pressable>
+                </View>
               </ThemedView>
+              <Animated.View
+                style={[
+                  styles.patternSelectBar,
+                  {
+                    height: patternSelectAnim.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [0, 44],
+                    }),
+                    opacity: patternSelectAnim,
+                  },
+                ]}
+                pointerEvents={isPatternSelectMode ? 'auto' : 'none'}
+              >
+                <Pressable
+                  onPress={deleteSelectedPatterns}
+                  style={styles.patternSelectDelete}
+                  accessibilityRole="button"
+                  accessibilityLabel="Delete selected patterns"
+                >
+                  <ThemedText type="defaultSemiBold" style={styles.patternSelectDeleteText}>
+                    Delete
+                  </ThemedText>
+                </Pressable>
+                <ThemedText type="defaultSemiBold" style={styles.patternSelectCount}>
+                  {selectedPatternIds.size > 0
+                    ? `${selectedPatternIds.size} selected`
+                    : ''}
+                </ThemedText>
+                <Pressable
+                  onPress={clearPatternSelection}
+                  style={styles.patternSelectButton}
+                  accessibilityRole="button"
+                  accessibilityLabel="Exit selection mode"
+                >
+                  <ThemedText type="defaultSemiBold" style={styles.patternSelectExitText}>
+                    X
+                  </ThemedText>
+                </Pressable>
+              </Animated.View>
               <ScrollView
                 style={styles.patternModalScroll}
                 contentContainerStyle={styles.patternModalContent}
@@ -2700,18 +2828,28 @@ export default function TestScreen() {
                     <Pressable
                       key={pattern.id}
                       onPress={() => {
+                        if (isPatternSelectMode) {
+                          toggleSelectPattern(pattern.id);
+                          return;
+                        }
                         setSelectedPatternId(pattern.id);
                         setIsPatternCreationMode(false);
                         setBrush({ mode: 'pattern' });
                         setShowPatternChooser(false);
                       }}
                       onLongPress={() => {
+                        if (isPatternSelectMode) {
+                          return;
+                        }
                         setPatternRotations((prev) => ({
                           ...prev,
                           [pattern.id]: ((prev[pattern.id] ?? 0) + 270) % 360,
                         }));
                       }}
                       onPressIn={() => {
+                        if (isPatternSelectMode) {
+                          return;
+                        }
                         const now = Date.now();
                         const lastTap = patternLastTapRef.current;
                         if (
@@ -2731,7 +2869,9 @@ export default function TestScreen() {
                       style={[
                         styles.patternThumb,
                         { width: thumbWidth, height: thumbHeight },
-                        selectedPattern?.id === pattern.id &&
+                        (isPatternSelectMode
+                          ? selectedPatternIds.has(pattern.id)
+                          : selectedPattern?.id === pattern.id) &&
                           styles.patternThumbSelected,
                       ]}
                       accessibilityRole="button"
@@ -2827,6 +2967,70 @@ export default function TestScreen() {
             />
             <ThemedView style={styles.overlayPanel}>
               <ThemedText type="title">Save Pattern</ThemedText>
+              {pendingPatternPreview && (
+                <View
+                  style={[
+                    styles.patternSavePreview,
+                    {
+                      width: pendingPatternPreview.width * pendingPatternPreview.tileSize,
+                      height: pendingPatternPreview.height * pendingPatternPreview.tileSize,
+                    },
+                  ]}
+                >
+                  {Array.from({ length: pendingPatternPreview.height }, (_, rowIndex) => (
+                    <View
+                      key={`pattern-save-row-${rowIndex}`}
+                      style={{ flexDirection: 'row' }}
+                    >
+                      {Array.from(
+                        { length: pendingPatternPreview.width },
+                        (_, colIndex) => {
+                          const index = rowIndex * pendingPatternPreview.width + colIndex;
+                          const tileData = pendingPatternPreview.tiles[index];
+                          const tile = tileData?.tile;
+                          const tileName =
+                            tile && tile.imageIndex >= 0
+                              ? tileSources[tile.imageIndex]?.name ?? ''
+                              : '';
+                          const source =
+                            tile && tile.imageIndex >= 0
+                              ? tileSources[tile.imageIndex]?.source ?? null
+                              : null;
+                          return (
+                            <View
+                              key={`pattern-save-cell-${index}`}
+                              style={{
+                                width: pendingPatternPreview.tileSize,
+                                height: pendingPatternPreview.tileSize,
+                                backgroundColor: 'transparent',
+                              }}
+                            >
+                              {source && tile && (
+                                <TileAsset
+                                  source={source}
+                                  name={tileName}
+                                  strokeColor={activeLineColor}
+                                  strokeWidth={activeLineWidth}
+                                  style={{
+                                    width: '100%',
+                                    height: '100%',
+                                    transform: [
+                                      { scaleX: tile.mirrorX ? -1 : 1 },
+                                      { scaleY: tile.mirrorY ? -1 : 1 },
+                                      { rotate: `${tile.rotation}deg` },
+                                    ],
+                                  }}
+                                  resizeMode="cover"
+                                />
+                              )}
+                            </View>
+                          );
+                        }
+                      )}
+                    </View>
+                  ))}
+                </View>
+              )}
               <ThemedText type="defaultSemiBold">
                 Save the selected tiles as a new pattern?
               </ThemedText>
@@ -3367,24 +3571,70 @@ const styles = StyleSheet.create({
     width: '90%',
     maxHeight: '80%',
     borderRadius: 12,
-    backgroundColor: '#e5e5e5',
+    backgroundColor: '#3f3f3f',
     borderWidth: 1,
     borderColor: '#1f1f1f',
-    padding: 12,
+    padding: 0,
+    overflow: 'hidden',
   },
   patternModalHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    marginBottom: 0,
+    backgroundColor: '#2a2a2a',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 0,
+  },
+  patternModalTitle: {
+    color: '#fff',
+  },
+  patternModalActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'transparent',
+  },
+  patternHeaderIcon: {
+    width: 32,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'transparent',
+  },
+  patternSelectBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 12,
+    backgroundColor: '#1f1f1f',
+    overflow: 'hidden',
     marginBottom: 10,
-    backgroundColor: '#d4d4d4',
-    paddingHorizontal: 8,
-    paddingVertical: 6,
     borderRadius: 8,
   },
-  patternModalNew: {
-    paddingHorizontal: 4,
-    paddingVertical: 4,
+  patternSelectButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 8,
+  },
+  patternSelectDelete: {
+    paddingVertical: 8,
+    paddingHorizontal: 8,
+  },
+  patternSelectDeleteText: {
+    color: '#dc2626',
+  },
+  patternSelectExitText: {
+    color: '#fff',
+  },
+  patternSelectCount: {
+    color: '#9ca3af',
+  },
+  patternSavePreview: {
+    alignSelf: 'center',
+    borderWidth: 1,
+    borderColor: '#1f1f1f',
+    backgroundColor: '#000',
   },
   patternCreationOverlay: {
     ...StyleSheet.absoluteFillObject,
@@ -3418,6 +3668,8 @@ const styles = StyleSheet.create({
   },
   patternModalScroll: {
     flexGrow: 0,
+    paddingHorizontal: 12,
+    paddingTop: 12,
   },
   patternModalContent: {
     flexDirection: 'row',
