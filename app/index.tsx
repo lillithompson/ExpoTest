@@ -934,7 +934,7 @@ export default function TestScreen() {
     setHydrating(true);
     setSuspendTiles(true);
     clearCloneSource();
-    if (brush.mode === 'clone') {
+    if (brush.mode === 'clone' || brush.mode === 'pattern') {
       setBrush({ mode: 'random' });
     }
     if (file.tiles.length === 0) {
