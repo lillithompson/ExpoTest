@@ -833,17 +833,29 @@ export const useTileGrid = ({
         return;
       }
       const nextTiles = buildInitialTiles(totalCells);
-      for (let row = 0; row < gridLayout.rows; row += 1) {
-        for (let col = 0; col < gridLayout.columns; col += 1) {
-          const targetIndex = row * gridLayout.columns + col;
+      if (mirrorHorizontal || mirrorVertical) {
+        for (const index of getDrivenCellIndices()) {
+          const row = Math.floor(index / gridLayout.columns);
+          const col = index % gridLayout.columns;
           const tile = getPatternTileForPosition(row, col);
-          if (tile) {
-            nextTiles[targetIndex] = {
-              imageIndex: tile.imageIndex,
-              rotation: tile.rotation,
-              mirrorX: tile.mirrorX,
-              mirrorY: tile.mirrorY,
-            };
+          if (!tile) {
+            continue;
+          }
+          applyPlacementsToArrayOverride(nextTiles, getMirroredPlacements(index, tile));
+        }
+      } else {
+        for (let row = 0; row < gridLayout.rows; row += 1) {
+          for (let col = 0; col < gridLayout.columns; col += 1) {
+            const targetIndex = row * gridLayout.columns + col;
+            const tile = getPatternTileForPosition(row, col);
+            if (tile) {
+              nextTiles[targetIndex] = {
+                imageIndex: tile.imageIndex,
+                rotation: tile.rotation,
+                mirrorX: tile.mirrorX,
+                mirrorY: tile.mirrorY,
+              };
+            }
           }
         }
       }
@@ -926,22 +938,49 @@ export const useTileGrid = ({
         return;
       }
       const nextTiles = [...normalizeTiles(tiles, totalCells, tileSourcesLength)];
-      for (let row = 0; row < gridLayout.rows; row += 1) {
-        for (let col = 0; col < gridLayout.columns; col += 1) {
-          const targetIndex = row * gridLayout.columns + col;
-          if (nextTiles[targetIndex].imageIndex >= 0) {
+      const drivenSet = new Set(getDrivenCellIndices());
+      if (mirrorHorizontal || mirrorVertical) {
+        for (let index = 0; index < totalCells; index += 1) {
+          if (nextTiles[index].imageIndex >= 0) {
             continue;
           }
+          const targets = getMirrorTargets(index);
+          if (targets.some((target) => nextTiles[target]?.imageIndex >= 0)) {
+            drivenSet.add(index);
+          }
+        }
+      }
+      if (mirrorHorizontal || mirrorVertical) {
+        for (const index of drivenSet) {
+          if (nextTiles[index].imageIndex >= 0) {
+            continue;
+          }
+          const row = Math.floor(index / gridLayout.columns);
+          const col = index % gridLayout.columns;
           const tile = getPatternTileForPosition(row, col);
           if (!tile) {
             continue;
           }
-          nextTiles[targetIndex] = {
-            imageIndex: tile.imageIndex,
-            rotation: tile.rotation,
-            mirrorX: tile.mirrorX,
-            mirrorY: tile.mirrorY,
-          };
+          applyPlacementsToArray(nextTiles, getMirroredPlacements(index, tile), index);
+        }
+      } else {
+        for (let row = 0; row < gridLayout.rows; row += 1) {
+          for (let col = 0; col < gridLayout.columns; col += 1) {
+            const targetIndex = row * gridLayout.columns + col;
+            if (nextTiles[targetIndex].imageIndex >= 0) {
+              continue;
+            }
+            const tile = getPatternTileForPosition(row, col);
+            if (!tile) {
+              continue;
+            }
+            nextTiles[targetIndex] = {
+              imageIndex: tile.imageIndex,
+              rotation: tile.rotation,
+              mirrorX: tile.mirrorX,
+              mirrorY: tile.mirrorY,
+            };
+          }
         }
       }
       withBulkUpdate(() => {
