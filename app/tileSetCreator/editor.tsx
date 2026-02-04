@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Animated,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -19,6 +20,8 @@ import { TileAsset } from '@/components/tile-asset';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { useTileSets } from '@/hooks/use-tile-sets';
+import { getTransformedConnectionsForName, oppositeDirectionIndex } from '@/utils/tile-compat';
+import { exportTileCanvasAsSvg } from '@/utils/tile-export';
 
 const HEADER_HEIGHT = 50;
 const FILE_GRID_COLUMNS_MOBILE = 3;
@@ -457,6 +460,96 @@ export default function TileSetEditorScreen() {
                     });
                   }
                 }}
+                onLongPress={() => {
+                  if (Platform.OS !== 'web' || isSelectMode) {
+                    return;
+                  }
+                  if (typeof window === 'undefined') {
+                    return;
+                  }
+                  const ok = window.confirm('Download this tile as SVG?');
+                  if (!ok) {
+                    return;
+                  }
+                  const bitPattern = (() => {
+                    if (tile.grid.columns <= 0 || tile.grid.rows <= 0) {
+                      return '00000000';
+                    }
+                    const total = tile.grid.columns * tile.grid.rows;
+                    const rendered = tile.tiles.map((tileItem) => {
+                      if (!tileItem || tileItem.imageIndex < 0) {
+                        return null;
+                      }
+                      const name = sources[tileItem.imageIndex]?.name ?? '';
+                      return getTransformedConnectionsForName(
+                        name,
+                        tileItem.rotation ?? 0,
+                        tileItem.mirrorX ?? false,
+                        tileItem.mirrorY ?? false
+                      );
+                    });
+                    const indexAt = (row: number, col: number) =>
+                      row * tile.grid.columns + col;
+                    const pick = (row: number, col: number, dirIndex: number) => {
+                      const index = indexAt(row, col);
+                      if (index < 0 || index >= total) {
+                        return false;
+                      }
+                      const current = rendered[index];
+                      return Boolean(current?.[dirIndex]);
+                    };
+                    const topRow = 0;
+                    const bottomRow = tile.grid.rows - 1;
+                    const leftCol = 0;
+                    const rightCol = tile.grid.columns - 1;
+                    const midCol = Math.floor(tile.grid.columns / 2);
+                    const midRow = Math.floor(tile.grid.rows / 2);
+                    const hasEvenCols = tile.grid.columns % 2 === 0;
+                    const hasEvenRows = tile.grid.rows % 2 === 0;
+                    const leftMidCol = hasEvenCols ? tile.grid.columns / 2 - 1 : midCol;
+                    const rightMidCol = hasEvenCols ? tile.grid.columns / 2 : midCol;
+                    const topMidRow = hasEvenRows ? tile.grid.rows / 2 - 1 : midRow;
+                    const bottomMidRow = hasEvenRows ? tile.grid.rows / 2 : midRow;
+                    const north = hasEvenCols
+                      ? pick(topRow, leftMidCol, 1) || pick(topRow, rightMidCol, 7)
+                      : pick(topRow, midCol, 0);
+                    const south = hasEvenCols
+                      ? pick(bottomRow, leftMidCol, 3) || pick(bottomRow, rightMidCol, 5)
+                      : pick(bottomRow, midCol, 4);
+                    const east = hasEvenRows
+                      ? pick(topMidRow, rightCol, 3) || pick(bottomMidRow, rightCol, 1)
+                      : pick(midRow, rightCol, 2);
+                    const west = hasEvenRows
+                      ? pick(topMidRow, leftCol, 5) || pick(bottomMidRow, leftCol, 7)
+                      : pick(midRow, leftCol, 6);
+                    const status = [
+                      north,
+                      pick(topRow, rightCol, 1),
+                      east,
+                      pick(bottomRow, rightCol, 3),
+                      south,
+                      pick(bottomRow, leftCol, 5),
+                      west,
+                      pick(topRow, leftCol, 7),
+                    ];
+                    return status.map((value) => (value ? '1' : '0')).join('');
+                  })();
+                  void exportTileCanvasAsSvg({
+                    tiles: tile.tiles,
+                    gridLayout: {
+                      rows: tile.grid.rows,
+                      columns: tile.grid.columns,
+                      tileSize: tile.preferredTileSize,
+                    },
+                    tileSources: sources,
+                    gridGap: 0,
+                    errorSource: null,
+                    lineColor: tileSet.lineColor,
+                    lineWidth: tileSet.lineWidth,
+                    backgroundColor: null,
+                    fileName: `${tileSet.name}_${bitPattern}.svg`,
+                  });
+                }}
                 accessibilityRole="button"
                 accessibilityLabel={`Open ${tile.name}`}
               >
@@ -467,7 +560,7 @@ export default function TileSetEditorScreen() {
                     { width: cardWidth, aspectRatio: thumbAspect },
                   ]}
                 >
-                  {tile.thumbnailUri ? (
+              {tile.thumbnailUri ? (
                     <TileAsset
                       source={{ uri: tile.thumbnailUri }}
                       name="thumbnail.png"
@@ -518,6 +611,100 @@ export default function TileSetEditorScreen() {
                         </ThemedView>
                       ))}
                     </ThemedView>
+                  )}
+                  {tile.grid.columns > 0 && tile.grid.rows > 0 && (
+                    <View pointerEvents="none" style={styles.thumbConnectionOverlay}>
+                      {(() => {
+                        const total = tile.grid.columns * tile.grid.rows;
+                        const tileSources = sources;
+                        const rendered = tile.tiles.map((tileItem) => {
+                          if (!tileItem || tileItem.imageIndex < 0) {
+                            return null;
+                          }
+                          const name = tileSources[tileItem.imageIndex]?.name ?? '';
+                          return getTransformedConnectionsForName(
+                            name,
+                            tileItem.rotation ?? 0,
+                            tileItem.mirrorX ?? false,
+                            tileItem.mirrorY ?? false
+                          );
+                        });
+                        const indexAt = (row: number, col: number) =>
+                          row * tile.grid.columns + col;
+                        const pick = (row: number, col: number, dirIndex: number) => {
+                          const index = indexAt(row, col);
+                          if (index < 0 || index >= total) {
+                            return false;
+                          }
+                          const current = rendered[index];
+                          return Boolean(current?.[dirIndex]);
+                        };
+                        const topRow = 0;
+                        const bottomRow = tile.grid.rows - 1;
+                        const leftCol = 0;
+                        const rightCol = tile.grid.columns - 1;
+                        const midCol = Math.floor(tile.grid.columns / 2);
+                        const midRow = Math.floor(tile.grid.rows / 2);
+                        const hasEvenCols = tile.grid.columns % 2 === 0;
+                        const hasEvenRows = tile.grid.rows % 2 === 0;
+                        const leftMidCol = hasEvenCols ? tile.grid.columns / 2 - 1 : midCol;
+                        const rightMidCol = hasEvenCols ? tile.grid.columns / 2 : midCol;
+                        const topMidRow = hasEvenRows ? tile.grid.rows / 2 - 1 : midRow;
+                        const bottomMidRow = hasEvenRows ? tile.grid.rows / 2 : midRow;
+                        const north = hasEvenCols
+                          ? pick(topRow, leftMidCol, 1) || pick(topRow, rightMidCol, 7)
+                          : pick(topRow, midCol, 0);
+                        const south = hasEvenCols
+                          ? pick(bottomRow, leftMidCol, 3) ||
+                            pick(bottomRow, rightMidCol, 5)
+                          : pick(bottomRow, midCol, 4);
+                        const east = hasEvenRows
+                          ? pick(topMidRow, rightCol, 3) ||
+                            pick(bottomMidRow, rightCol, 1)
+                          : pick(midRow, rightCol, 2);
+                        const west = hasEvenRows
+                          ? pick(topMidRow, leftCol, 5) || pick(bottomMidRow, leftCol, 7)
+                          : pick(midRow, leftCol, 6);
+                        const statuses = [
+                          north,
+                          pick(topRow, rightCol, 1),
+                          east,
+                          pick(bottomRow, rightCol, 3),
+                          south,
+                          pick(bottomRow, leftCol, 5),
+                          west,
+                          pick(topRow, leftCol, 7),
+                        ];
+                        const dotSize = Math.max(4, Math.round(cardWidth * 0.08));
+                        const dotOffset = dotSize / 2;
+                        const positions = [
+                          { left: cardWidth / 2 - dotOffset, top: -dotOffset }, // N
+                          { left: cardWidth - dotOffset, top: -dotOffset }, // NE
+                          { left: cardWidth - dotOffset, top: cardWidth / 2 - dotOffset }, // E
+                          { left: cardWidth - dotOffset, top: cardWidth - dotOffset }, // SE
+                          { left: cardWidth / 2 - dotOffset, top: cardWidth - dotOffset }, // S
+                          { left: -dotOffset, top: cardWidth - dotOffset }, // SW
+                          { left: -dotOffset, top: cardWidth / 2 - dotOffset }, // W
+                          { left: -dotOffset, top: -dotOffset }, // NW
+                        ];
+                        return statuses.map((isConnected, index) => (
+                          <View
+                            key={`thumb-conn-${tile.id}-${index}`}
+                            style={[
+                              styles.thumbConnectionDot,
+                              isConnected ? styles.thumbConnectionDotOn : styles.thumbConnectionDotOff,
+                              {
+                                width: dotSize,
+                                height: dotSize,
+                                borderRadius: dotSize / 2,
+                                left: positions[index].left,
+                                top: positions[index].top,
+                              },
+                            ]}
+                          />
+                        ));
+                      })()}
+                    </View>
                   )}
                 </ThemedView>
               </Pressable>
@@ -720,6 +907,7 @@ const styles = StyleSheet.create({
     borderColor: '#1f1f1f',
     backgroundColor: '#111',
     padding: 4,
+    overflow: 'hidden',
   },
   fileThumbSelected: {
     borderColor: '#22c55e',
@@ -739,6 +927,19 @@ const styles = StyleSheet.create({
   fileThumbImage: {
     width: '100%',
     height: '100%',
+  },
+  thumbConnectionOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 3,
+  },
+  thumbConnectionDot: {
+    position: 'absolute',
+  },
+  thumbConnectionDotOn: {
+    backgroundColor: 'rgba(34, 197, 94, 0.55)',
+  },
+  thumbConnectionDotOff: {
+    backgroundColor: 'rgba(239, 68, 68, 0.55)',
   },
   emptyText: {
     color: '#fff',
