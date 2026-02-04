@@ -287,7 +287,7 @@ export default function ModifyTileScreen() {
     availableHeight,
     gridGap: GRID_GAP,
     preferredTileSize: tileEntry?.preferredTileSize ?? 45,
-    allowEdgeConnections: settings.allowEdgeConnections,
+    allowEdgeConnections: true,
     randomRequiresLegal: true,
     randomDisallowEdgeConnections: true,
     expectedConnectivity,

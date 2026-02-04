@@ -40,7 +40,7 @@ export default function TileSetCreatorScreen() {
   const [showSettingsOverlay, setShowSettingsOverlay] = useState(false);
   const [newCategory, setNewCategory] = useState<TileCategory>(DEFAULT_CATEGORY);
   const [newResolution, setNewResolution] = useState(4);
-  const [newName, setNewName] = useState('New Tile Set');
+  const [newName, setNewName] = useState('4x4 (New)');
   const [isCreating, setIsCreating] = useState(false);
   const [createProgress, setCreateProgress] = useState({ current: 0, total: 51 });
   const progressAnim = useRef(new Animated.Value(0)).current;
@@ -97,9 +97,10 @@ export default function TileSetCreatorScreen() {
   };
 
   const openCreateModal = () => {
-    setNewName('New Tile Set');
+    const defaultResolution = 4;
+    setNewName(`${defaultResolution}x${defaultResolution} (New)`);
     setNewCategory(DEFAULT_CATEGORY);
-    setNewResolution(4);
+    setNewResolution(defaultResolution);
     setShowCreateModal(true);
   };
 
@@ -343,6 +344,13 @@ export default function TileSetCreatorScreen() {
                   key={value}
                   onPress={() => {
                     setNewResolution(value);
+                    setNewName((prev) => {
+                      const trimmed = prev.trim();
+                      if (trimmed.length > 0 && trimmed !== 'New Tile Set') {
+                        return prev;
+                      }
+                      return `${value}x${value} (New)`;
+                    });
                   }}
                   style={[
                     styles.overlayItem,
@@ -369,7 +377,9 @@ export default function TileSetCreatorScreen() {
                   setCreateProgress({ current: 0, total: 51 });
                   void (async () => {
                     const id = await createTileSetAsync({
-                      name: newName.trim() || 'New Tile Set',
+                      name:
+                        newName.trim() ||
+                        `${newResolution}x${newResolution} (New)`,
                       category: newCategory,
                       resolution: newResolution,
                       onProgress: (current, total) =>
