@@ -101,14 +101,15 @@ export function TileBrushPanel({
               !isRandom && !isErase && !isClone && !isPattern
                 ? getMirror(entry.index)
                 : false;
-            const previewRotation = selectedPattern?.rotation ?? 0;
+            const previewRotationCW = ((selectedPattern?.rotation ?? 0) + 360) % 360;
+            const previewRotationCCW = (360 - previewRotationCW) % 360;
             const previewMirrorX = selectedPattern?.mirrorX ?? false;
             const previewWidth =
-              previewRotation % 180 === 0
+              previewRotationCW % 180 === 0
                 ? selectedPattern?.width ?? 0
                 : selectedPattern?.height ?? 0;
             const previewHeight =
-              previewRotation % 180 === 0
+              previewRotationCW % 180 === 0
                 ? selectedPattern?.height ?? 0
                 : selectedPattern?.width ?? 0;
             const previewMax = Math.max(10, Math.floor(itemSize * 0.6));
@@ -222,19 +223,19 @@ export function TileBrushPanel({
                               }
                               let sourceRow = mappedRow;
                               let sourceCol = mappedCol;
-                              if (previewRotation === 90) {
-                                sourceRow =
-                                  (selectedPattern?.height ?? 0) - 1 - mappedCol;
-                                sourceCol = mappedRow;
-                              } else if (previewRotation === 180) {
+                              if (previewRotationCCW === 90) {
+                                sourceRow = mappedCol;
+                                sourceCol =
+                                  (selectedPattern?.width ?? 0) - 1 - mappedRow;
+                              } else if (previewRotationCCW === 180) {
                                 sourceRow =
                                   (selectedPattern?.height ?? 0) - 1 - mappedRow;
                                 sourceCol =
                                   (selectedPattern?.width ?? 0) - 1 - mappedCol;
-                              } else if (previewRotation === 270) {
-                                sourceRow = mappedCol;
-                                sourceCol =
-                                  (selectedPattern?.width ?? 0) - 1 - mappedRow;
+                              } else if (previewRotationCCW === 270) {
+                                sourceRow =
+                                  (selectedPattern?.height ?? 0) - 1 - mappedCol;
+                                sourceCol = mappedRow;
                               }
                               const index =
                                 sourceRow * (selectedPattern?.width ?? 0) + sourceCol;
@@ -266,7 +267,7 @@ export function TileBrushPanel({
                                         transform: [
                                           { scaleX: tile.mirrorX ? -1 : 1 },
                                           { scaleY: tile.mirrorY ? -1 : 1 },
-                                          { rotate: `${tile.rotation}deg` },
+                                          { rotate: `${(tile.rotation + previewRotationCW) % 360}deg` },
                                         ],
                                       }}
                                       resizeMode="cover"

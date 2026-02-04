@@ -2806,13 +2806,14 @@ export default function TestScreen() {
                 showsVerticalScrollIndicator
               >
                 {activePatterns.map((pattern) => {
-                  const rotation =
+                  const rotationCW =
                     ((patternRotations[pattern.id] ?? 0) + 360) % 360;
+                  const rotationCCW = (360 - rotationCW) % 360;
                   const mirrorX = patternMirrors[pattern.id] ?? false;
                   const rotatedWidth =
-                    rotation % 180 === 0 ? pattern.width : pattern.height;
+                    rotationCW % 180 === 0 ? pattern.width : pattern.height;
                   const rotatedHeight =
-                    rotation % 180 === 0 ? pattern.height : pattern.width;
+                    rotationCW % 180 === 0 ? pattern.height : pattern.width;
                   const tileSize = Math.max(
                     8,
                     Math.floor(
@@ -2843,7 +2844,7 @@ export default function TestScreen() {
                         }
                         setPatternRotations((prev) => ({
                           ...prev,
-                          [pattern.id]: ((prev[pattern.id] ?? 0) + 270) % 360,
+                          [pattern.id]: ((prev[pattern.id] ?? 0) + 90) % 360,
                         }));
                       }}
                       onPressIn={() => {
@@ -2889,30 +2890,30 @@ export default function TestScreen() {
                             key={`pattern-row-${pattern.id}-${rowIndex}`}
                             style={{ flexDirection: 'row' }}
                           >
-                            {Array.from({ length: rotatedWidth }, (_, colIndex) => {
-                              let mappedRow = rowIndex;
-                              let mappedCol = colIndex;
-                              if (mirrorX) {
-                                mappedCol = rotatedWidth - 1 - mappedCol;
-                              }
-                              let sourceRow = mappedRow;
-                              let sourceCol = mappedCol;
-                              if (rotation === 90) {
-                                sourceRow = pattern.height - 1 - mappedCol;
-                                sourceCol = mappedRow;
-                              } else if (rotation === 180) {
-                                sourceRow = pattern.height - 1 - mappedRow;
-                                sourceCol = pattern.width - 1 - mappedCol;
-                              } else if (rotation === 270) {
+                          {Array.from({ length: rotatedWidth }, (_, colIndex) => {
+                            let mappedRow = rowIndex;
+                            let mappedCol = colIndex;
+                            if (mirrorX) {
+                              mappedCol = rotatedWidth - 1 - mappedCol;
+                            }
+                            let sourceRow = mappedRow;
+                            let sourceCol = mappedCol;
+                              if (rotationCCW === 90) {
                                 sourceRow = mappedCol;
                                 sourceCol = pattern.width - 1 - mappedRow;
+                              } else if (rotationCCW === 180) {
+                                sourceRow = pattern.height - 1 - mappedRow;
+                                sourceCol = pattern.width - 1 - mappedCol;
+                              } else if (rotationCCW === 270) {
+                                sourceRow = pattern.height - 1 - mappedCol;
+                                sourceCol = mappedRow;
                               }
-                              const index = sourceRow * pattern.width + sourceCol;
-                              const tile = pattern.tiles[index];
-                              const tileName =
-                                tile && tile.imageIndex >= 0
-                                  ? tileSources[tile.imageIndex]?.name ?? ''
-                                  : '';
+                            const index = sourceRow * pattern.width + sourceCol;
+                            const tile = pattern.tiles[index];
+                            const tileName =
+                              tile && tile.imageIndex >= 0
+                                ? tileSources[tile.imageIndex]?.name ?? ''
+                                : '';
                               const source =
                                 tile && tile.imageIndex >= 0
                                   ? tileSources[tile.imageIndex]?.source ?? ERROR_TILE
@@ -2936,9 +2937,9 @@ export default function TestScreen() {
                                         width: '100%',
                                         height: '100%',
                                         transform: [
-                                          { scaleX: tile.mirrorX ? -1 : 1 },
+                                          { scaleX: tile.mirrorX !== mirrorX ? -1 : 1 },
                                           { scaleY: tile.mirrorY ? -1 : 1 },
-                                          { rotate: `${tile.rotation}deg` },
+                                          { rotate: `${(tile.rotation + rotationCW) % 360}deg` },
                                         ],
                                       }}
                                       resizeMode="cover"

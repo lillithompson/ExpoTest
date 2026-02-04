@@ -604,9 +604,10 @@ export const useTileGrid = ({
     if (!pattern || pattern.width <= 0 || pattern.height <= 0) {
       return null;
     }
-    const rotation = ((pattern.rotation % 360) + 360) % 360;
-    const rotW = rotation % 180 === 0 ? pattern.width : pattern.height;
-    const rotH = rotation % 180 === 0 ? pattern.height : pattern.width;
+    const rotationCW = ((pattern.rotation % 360) + 360) % 360;
+    const rotationCCW = (360 - rotationCW) % 360;
+    const rotW = rotationCW % 180 === 0 ? pattern.width : pattern.height;
+    const rotH = rotationCW % 180 === 0 ? pattern.height : pattern.width;
     const localRow = ((row % rotH) + rotH) % rotH;
     const localCol = ((col % rotW) + rotW) % rotW;
     let mappedRow = localRow;
@@ -616,15 +617,15 @@ export const useTileGrid = ({
     }
     let sourceRow = mappedRow;
     let sourceCol = mappedCol;
-    if (rotation === 90) {
-      sourceRow = pattern.height - 1 - mappedCol;
-      sourceCol = mappedRow;
-    } else if (rotation === 180) {
-      sourceRow = pattern.height - 1 - mappedRow;
-      sourceCol = pattern.width - 1 - mappedCol;
-    } else if (rotation === 270) {
+    if (rotationCCW === 90) {
       sourceRow = mappedCol;
       sourceCol = pattern.width - 1 - mappedRow;
+    } else if (rotationCCW === 180) {
+      sourceRow = pattern.height - 1 - mappedRow;
+      sourceCol = pattern.width - 1 - mappedCol;
+    } else if (rotationCCW === 270) {
+      sourceRow = pattern.height - 1 - mappedCol;
+      sourceCol = mappedRow;
     }
     const patternIndex = sourceRow * pattern.width + sourceCol;
     const patternTile = pattern.tiles[patternIndex];
@@ -633,7 +634,7 @@ export const useTileGrid = ({
     }
     return {
       imageIndex: patternTile.imageIndex,
-      rotation: (patternTile.rotation + rotation) % 360,
+      rotation: (patternTile.rotation + rotationCW) % 360,
       mirrorX: patternTile.mirrorX !== pattern.mirrorX,
       mirrorY: patternTile.mirrorY,
     };
