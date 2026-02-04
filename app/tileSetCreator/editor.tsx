@@ -19,12 +19,16 @@ import { TILE_CATEGORIES, TILE_MANIFEST } from '@/assets/images/tiles/manifest';
 import { TileAsset } from '@/components/tile-asset';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { useTileSets } from '@/hooks/use-tile-sets';
-import { getTransformedConnectionsForName, oppositeDirectionIndex } from '@/utils/tile-compat';
+import { generateTileForExpected, useTileSets, type TileSetTile } from '@/hooks/use-tile-sets';
+import {
+  getTransformedConnectionsForName,
+  mirrorConnections,
+  rotateConnections,
+} from '@/utils/tile-compat';
 import { exportTileCanvasAsSvg } from '@/utils/tile-export';
 
 const HEADER_HEIGHT = 50;
-const FILE_GRID_COLUMNS_MOBILE = 3;
+const FILE_GRID_COLUMNS_MOBILE = 4;
 const FILE_GRID_SIDE_PADDING = 12;
 const FILE_GRID_GAP = 12;
 const clamp = (value: number, min: number, max: number) =>
@@ -109,6 +113,101 @@ const hsvToRgb = (h: number, s: number, v: number) => {
     g: Math.round((gPrime + m) * 255),
     b: Math.round((bPrime + m) * 255),
   };
+};
+const createId = (prefix: string) =>
+  `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+const parseBits = (value: string) => value.split('').map((digit) => digit === '1');
+const toBits = (connections: boolean[] | null) =>
+  connections ? connections.map((value) => (value ? '1' : '0')).join('') : '00000000';
+const canonicalConnectivity = (bits: string) => {
+  const base = parseBits(bits);
+  const rotations = [0, 1, 2, 3];
+  const mirrors = [
+    { mirrorX: false, mirrorY: false },
+    { mirrorX: true, mirrorY: false },
+    { mirrorX: false, mirrorY: true },
+    { mirrorX: true, mirrorY: true },
+  ];
+  const variants: string[] = [];
+  rotations.forEach((rot) => {
+    const rotated = rotateConnections(base as any, rot);
+    mirrors.forEach((mirror) => {
+      variants.push(toBits(mirrorConnections(rotated as any, mirror.mirrorX, mirror.mirrorY)));
+    });
+  });
+  return variants.sort()[0];
+};
+const getCanonicalPatterns = () => {
+  const patterns = new Set<string>();
+  for (let i = 0; i < 256; i += 1) {
+    const bits = i.toString(2).padStart(8, '0');
+    patterns.add(canonicalConnectivity(bits));
+  }
+  return Array.from(patterns.values()).sort();
+};
+const getBorderStatus = (tile: TileSetTile, sources: Array<{ name?: string }>) => {
+  const rows = tile.grid.rows;
+  const columns = tile.grid.columns;
+  if (rows <= 0 || columns <= 0) {
+    return { statuses: Array(8).fill(false), bits: '00000000' };
+  }
+  const total = rows * columns;
+  const rendered = tile.tiles.map((tileItem) => {
+    if (!tileItem || tileItem.imageIndex < 0) {
+      return null;
+    }
+    const name = sources[tileItem.imageIndex]?.name ?? '';
+    return getTransformedConnectionsForName(
+      name,
+      tileItem.rotation ?? 0,
+      tileItem.mirrorX ?? false,
+      tileItem.mirrorY ?? false
+    );
+  });
+  const indexAt = (row: number, col: number) => row * columns + col;
+  const pick = (row: number, col: number, dirIndex: number) => {
+    const index = indexAt(row, col);
+    if (index < 0 || index >= total) {
+      return false;
+    }
+    const current = rendered[index];
+    return Boolean(current?.[dirIndex]);
+  };
+  const topRow = 0;
+  const bottomRow = rows - 1;
+  const leftCol = 0;
+  const rightCol = columns - 1;
+  const midCol = Math.floor(columns / 2);
+  const midRow = Math.floor(rows / 2);
+  const hasEvenCols = columns % 2 === 0;
+  const hasEvenRows = rows % 2 === 0;
+  const leftMidCol = hasEvenCols ? columns / 2 - 1 : midCol;
+  const rightMidCol = hasEvenCols ? columns / 2 : midCol;
+  const topMidRow = hasEvenRows ? rows / 2 - 1 : midRow;
+  const bottomMidRow = hasEvenRows ? rows / 2 : midRow;
+  const north = hasEvenCols
+    ? pick(topRow, leftMidCol, 1) || pick(topRow, rightMidCol, 7)
+    : pick(topRow, midCol, 0);
+  const south = hasEvenCols
+    ? pick(bottomRow, leftMidCol, 3) || pick(bottomRow, rightMidCol, 5)
+    : pick(bottomRow, midCol, 4);
+  const east = hasEvenRows
+    ? pick(topMidRow, rightCol, 3) || pick(bottomMidRow, rightCol, 1)
+    : pick(midRow, rightCol, 2);
+  const west = hasEvenRows
+    ? pick(topMidRow, leftCol, 5) || pick(bottomMidRow, leftCol, 7)
+    : pick(midRow, leftCol, 6);
+  const statuses = [
+    north,
+    pick(topRow, rightCol, 1),
+    east,
+    pick(bottomRow, rightCol, 3),
+    south,
+    pick(bottomRow, leftCol, 5),
+    west,
+    pick(topRow, leftCol, 7),
+  ];
+  return { statuses, bits: statuses.map((value) => (value ? '1' : '0')).join('') };
 };
 
 type HsvColorPickerProps = {
@@ -246,16 +345,22 @@ export default function TileSetEditorScreen() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const selectBarAnim = useRef(new Animated.Value(0)).current;
   const [showSettingsOverlay, setShowSettingsOverlay] = useState(false);
+  const [showContextMenu, setShowContextMenu] = useState(false);
+  const [contextTileId, setContextTileId] = useState<string | null>(null);
+  const missingBannerAnim = useRef(new Animated.Value(0)).current;
   const [nameDraft, setNameDraft] = useState('');
   const [lineWidthDraft, setLineWidthDraft] = useState(3);
 
   const contentWidth = Math.max(0, width);
-  const cardWidth = Math.floor(
-    (contentWidth -
-      FILE_GRID_SIDE_PADDING * 2 -
-      FILE_GRID_GAP * (FILE_GRID_COLUMNS_MOBILE - 1)) /
-      FILE_GRID_COLUMNS_MOBILE
-  );
+  const cardWidth =
+    Platform.OS === 'web'
+      ? 100
+      : Math.floor(
+          (contentWidth -
+            FILE_GRID_SIDE_PADDING * 2 -
+            FILE_GRID_GAP * (FILE_GRID_COLUMNS_MOBILE - 1)) /
+            FILE_GRID_COLUMNS_MOBILE
+        );
 
   useEffect(() => {
     Animated.timing(selectBarAnim, {
@@ -278,6 +383,29 @@ export default function TileSetEditorScreen() {
     setNameDraft(tileSet.name);
     setLineWidthDraft(tileSet.lineWidth);
   }, [tileSet?.id, tileSet?.name, tileSet?.lineWidth]);
+
+  const canonicalPatterns = useMemo(() => getCanonicalPatterns(), []);
+  const missingPatterns = useMemo(() => {
+    if (!tileSet) {
+      return [];
+    }
+    const present = new Set(
+      tileSet.tiles.map((tile) =>
+        canonicalConnectivity(tile.expectedConnectivity ?? '00000000')
+      )
+    );
+    return canonicalPatterns.filter((pattern) => !present.has(pattern));
+  }, [tileSet, canonicalPatterns]);
+
+  useEffect(() => {
+    Animated.timing(missingBannerAnim, {
+      toValue: missingPatterns.length > 0 ? 1 : 0,
+      duration: 220,
+      useNativeDriver: false,
+    }).start();
+  }, [missingPatterns.length, missingBannerAnim]);
+
+  const contextTile = tileSet?.tiles.find((tile) => tile.id === contextTileId) ?? null;
 
   const toggleSelect = (id: string) => {
     setSelectedIds((prev) => {
@@ -323,6 +451,69 @@ export default function TileSetEditorScreen() {
       name: trimmed.length > 0 ? trimmed : set.name,
       updatedAt: Date.now(),
     }));
+  };
+  const closeContextMenu = () => {
+    setShowContextMenu(false);
+    setContextTileId(null);
+  };
+  const duplicateTile = (tile: TileSetTile) => {
+    updateTileSet(tileSet.id, (set) => {
+      const nextTile: TileSetTile = {
+        ...tile,
+        id: createId('tile'),
+        name: `${tile.name} Copy`,
+        updatedAt: Date.now(),
+      };
+      return {
+        ...set,
+        tiles: [nextTile, ...set.tiles],
+        updatedAt: Date.now(),
+      };
+    });
+  };
+  const downloadTileSvg = (tile: TileSetTile) => {
+    if (Platform.OS !== 'web' || typeof window === 'undefined') {
+      return;
+    }
+    const { bits } = getBorderStatus(tile, sources);
+    void exportTileCanvasAsSvg({
+      tiles: tile.tiles,
+      gridLayout: {
+        rows: tile.grid.rows,
+        columns: tile.grid.columns,
+        tileSize: tile.preferredTileSize,
+      },
+      tileSources: sources,
+      gridGap: 0,
+      errorSource: null,
+      lineColor: tileSet.lineColor,
+      lineWidth: tileSet.lineWidth,
+      backgroundColor: null,
+      fileName: `${tileSet.name}_${bits}.svg`,
+    });
+  };
+  const createMissingTiles = () => {
+    if (missingPatterns.length === 0) {
+      return;
+    }
+    updateTileSet(tileSet.id, (set) => {
+      const created = missingPatterns.map((pattern, index) => ({
+        id: createId('tile'),
+        name: `Tile ${set.tiles.length + index + 1}`,
+        tiles: generateTileForExpected(pattern, set.resolution, set.category),
+        grid: { rows: set.resolution, columns: set.resolution },
+        preferredTileSize: 45,
+        thumbnailUri: null,
+        previewUri: null,
+        expectedConnectivity: pattern,
+        updatedAt: Date.now(),
+      }));
+      return {
+        ...set,
+        tiles: [...created, ...set.tiles],
+        updatedAt: Date.now(),
+      };
+    });
   };
 
   return (
@@ -397,6 +588,38 @@ export default function TileSetEditorScreen() {
       </ThemedView>
       <Animated.View
         style={[
+          styles.missingBanner,
+          {
+            height: missingBannerAnim.interpolate({
+              inputRange: [0, 1],
+              outputRange: [0, 40],
+            }),
+            opacity: missingBannerAnim,
+          },
+        ]}
+      >
+        <ThemedText
+          type="defaultSemiBold"
+          style={styles.missingBannerText}
+          numberOfLines={1}
+        >
+          {missingPatterns.length > 0
+            ? `missing: ${missingPatterns.join(', ')}`
+            : ''}
+        </ThemedText>
+        <Pressable
+          onPress={createMissingTiles}
+          style={styles.missingBannerButton}
+          accessibilityRole="button"
+          accessibilityLabel="Create missing tiles"
+        >
+          <ThemedText type="defaultSemiBold" style={styles.missingBannerButtonText}>
+            Create now
+          </ThemedText>
+        </Pressable>
+      </Animated.View>
+      <Animated.View
+        style={[
           styles.fileSelectBar,
           {
             height: selectBarAnim.interpolate({
@@ -438,7 +661,16 @@ export default function TileSetEditorScreen() {
         showsVerticalScrollIndicator
       >
         {[...tileSet.tiles]
-          .sort((a, b) => b.updatedAt - a.updatedAt)
+          .sort((a, b) => {
+            const countOnes = (value: string) =>
+              value.split('').reduce((sum, bit) => sum + (bit === '1' ? 1 : 0), 0);
+            const countA = countOnes(a.expectedConnectivity ?? '00000000');
+            const countB = countOnes(b.expectedConnectivity ?? '00000000');
+            if (countB !== countA) {
+              return countB - countA;
+            }
+            return b.updatedAt - a.updatedAt;
+          })
           .map((tile) => {
             const thumbAspect =
               tile.grid.columns > 0 && tile.grid.rows > 0
@@ -462,91 +694,8 @@ export default function TileSetEditorScreen() {
                   if (Platform.OS !== 'web' || isSelectMode) {
                     return;
                   }
-                  if (typeof window === 'undefined') {
-                    return;
-                  }
-                  const ok = window.confirm('Download this tile as SVG?');
-                  if (!ok) {
-                    return;
-                  }
-                  const bitPattern = (() => {
-                    if (tile.grid.columns <= 0 || tile.grid.rows <= 0) {
-                      return '00000000';
-                    }
-                    const total = tile.grid.columns * tile.grid.rows;
-                    const rendered = tile.tiles.map((tileItem) => {
-                      if (!tileItem || tileItem.imageIndex < 0) {
-                        return null;
-                      }
-                      const name = sources[tileItem.imageIndex]?.name ?? '';
-                      return getTransformedConnectionsForName(
-                        name,
-                        tileItem.rotation ?? 0,
-                        tileItem.mirrorX ?? false,
-                        tileItem.mirrorY ?? false
-                      );
-                    });
-                    const indexAt = (row: number, col: number) =>
-                      row * tile.grid.columns + col;
-                    const pick = (row: number, col: number, dirIndex: number) => {
-                      const index = indexAt(row, col);
-                      if (index < 0 || index >= total) {
-                        return false;
-                      }
-                      const current = rendered[index];
-                      return Boolean(current?.[dirIndex]);
-                    };
-                    const topRow = 0;
-                    const bottomRow = tile.grid.rows - 1;
-                    const leftCol = 0;
-                    const rightCol = tile.grid.columns - 1;
-                    const midCol = Math.floor(tile.grid.columns / 2);
-                    const midRow = Math.floor(tile.grid.rows / 2);
-                    const hasEvenCols = tile.grid.columns % 2 === 0;
-                    const hasEvenRows = tile.grid.rows % 2 === 0;
-                    const leftMidCol = hasEvenCols ? tile.grid.columns / 2 - 1 : midCol;
-                    const rightMidCol = hasEvenCols ? tile.grid.columns / 2 : midCol;
-                    const topMidRow = hasEvenRows ? tile.grid.rows / 2 - 1 : midRow;
-                    const bottomMidRow = hasEvenRows ? tile.grid.rows / 2 : midRow;
-                    const north = hasEvenCols
-                      ? pick(topRow, leftMidCol, 1) || pick(topRow, rightMidCol, 7)
-                      : pick(topRow, midCol, 0);
-                    const south = hasEvenCols
-                      ? pick(bottomRow, leftMidCol, 3) || pick(bottomRow, rightMidCol, 5)
-                      : pick(bottomRow, midCol, 4);
-                    const east = hasEvenRows
-                      ? pick(topMidRow, rightCol, 3) || pick(bottomMidRow, rightCol, 1)
-                      : pick(midRow, rightCol, 2);
-                    const west = hasEvenRows
-                      ? pick(topMidRow, leftCol, 5) || pick(bottomMidRow, leftCol, 7)
-                      : pick(midRow, leftCol, 6);
-                    const status = [
-                      north,
-                      pick(topRow, rightCol, 1),
-                      east,
-                      pick(bottomRow, rightCol, 3),
-                      south,
-                      pick(bottomRow, leftCol, 5),
-                      west,
-                      pick(topRow, leftCol, 7),
-                    ];
-                    return status.map((value) => (value ? '1' : '0')).join('');
-                  })();
-                  void exportTileCanvasAsSvg({
-                    tiles: tile.tiles,
-                    gridLayout: {
-                      rows: tile.grid.rows,
-                      columns: tile.grid.columns,
-                      tileSize: tile.preferredTileSize,
-                    },
-                    tileSources: sources,
-                    gridGap: 0,
-                    errorSource: null,
-                    lineColor: tileSet.lineColor,
-                    lineWidth: tileSet.lineWidth,
-                    backgroundColor: null,
-                    fileName: `${tileSet.name}_${bitPattern}.svg`,
-                  });
+                  setContextTileId(tile.id);
+                  setShowContextMenu(true);
                 }}
                 accessibilityRole="button"
                 accessibilityLabel={`Open ${tile.name}`}
@@ -613,69 +762,8 @@ export default function TileSetEditorScreen() {
                   {tile.grid.columns > 0 && tile.grid.rows > 0 && (
                     <View pointerEvents="none" style={styles.thumbConnectionOverlay}>
                       {(() => {
-                        const total = tile.grid.columns * tile.grid.rows;
-                        const tileSources = sources;
-                        const rendered = tile.tiles.map((tileItem) => {
-                          if (!tileItem || tileItem.imageIndex < 0) {
-                            return null;
-                          }
-                          const name = tileSources[tileItem.imageIndex]?.name ?? '';
-                          return getTransformedConnectionsForName(
-                            name,
-                            tileItem.rotation ?? 0,
-                            tileItem.mirrorX ?? false,
-                            tileItem.mirrorY ?? false
-                          );
-                        });
-                        const indexAt = (row: number, col: number) =>
-                          row * tile.grid.columns + col;
-                        const pick = (row: number, col: number, dirIndex: number) => {
-                          const index = indexAt(row, col);
-                          if (index < 0 || index >= total) {
-                            return false;
-                          }
-                          const current = rendered[index];
-                          return Boolean(current?.[dirIndex]);
-                        };
-                        const topRow = 0;
-                        const bottomRow = tile.grid.rows - 1;
-                        const leftCol = 0;
-                        const rightCol = tile.grid.columns - 1;
-                        const midCol = Math.floor(tile.grid.columns / 2);
-                        const midRow = Math.floor(tile.grid.rows / 2);
-                        const hasEvenCols = tile.grid.columns % 2 === 0;
-                        const hasEvenRows = tile.grid.rows % 2 === 0;
-                        const leftMidCol = hasEvenCols ? tile.grid.columns / 2 - 1 : midCol;
-                        const rightMidCol = hasEvenCols ? tile.grid.columns / 2 : midCol;
-                        const topMidRow = hasEvenRows ? tile.grid.rows / 2 - 1 : midRow;
-                        const bottomMidRow = hasEvenRows ? tile.grid.rows / 2 : midRow;
-                        const north = hasEvenCols
-                          ? pick(topRow, leftMidCol, 1) || pick(topRow, rightMidCol, 7)
-                          : pick(topRow, midCol, 0);
-                        const south = hasEvenCols
-                          ? pick(bottomRow, leftMidCol, 3) ||
-                            pick(bottomRow, rightMidCol, 5)
-                          : pick(bottomRow, midCol, 4);
-                        const east = hasEvenRows
-                          ? pick(topMidRow, rightCol, 3) ||
-                            pick(bottomMidRow, rightCol, 1)
-                          : pick(midRow, rightCol, 2);
-                        const west = hasEvenRows
-                          ? pick(topMidRow, leftCol, 5) || pick(bottomMidRow, leftCol, 7)
-                          : pick(midRow, leftCol, 6);
-                        const statuses = [
-                          north,
-                          pick(topRow, rightCol, 1),
-                          east,
-                          pick(bottomRow, rightCol, 3),
-                          south,
-                          pick(bottomRow, leftCol, 5),
-                          west,
-                          pick(topRow, leftCol, 7),
-                        ];
-                        const currentConnectivity = statuses
-                          .map((value) => (value ? '1' : '0'))
-                          .join('');
+                        const { statuses, bits } = getBorderStatus(tile, sources);
+                        const currentConnectivity = bits;
                         const expectedConnectivity = tile.expectedConnectivity ?? '00000000';
                         const isBadState = expectedConnectivity !== currentConnectivity;
                         const dotSize = Math.max(4, Math.round(cardWidth * 0.08));
@@ -724,6 +812,65 @@ export default function TileSetEditorScreen() {
             );
           })}
       </ScrollView>
+      {showContextMenu && contextTile && (
+        <ThemedView style={styles.contextOverlay} accessibilityRole="dialog">
+          <Pressable style={styles.contextBackdrop} onPress={closeContextMenu} />
+          <ThemedView style={styles.contextMenu}>
+            <ThemedText type="defaultSemiBold" style={styles.contextTitle}>
+              {contextTile.name}
+            </ThemedText>
+            <Pressable
+              onPress={() => {
+                duplicateTile(contextTile);
+                closeContextMenu();
+              }}
+              style={styles.contextAction}
+              accessibilityRole="button"
+              accessibilityLabel="Duplicate tile"
+            >
+              <ThemedText type="defaultSemiBold" style={styles.contextActionText}>
+                Duplicate
+              </ThemedText>
+            </Pressable>
+            <Pressable
+              onPress={() => {
+                downloadTileSvg(contextTile);
+                closeContextMenu();
+              }}
+              style={styles.contextAction}
+              accessibilityRole="button"
+              accessibilityLabel="Download tile as SVG"
+            >
+              <ThemedText type="defaultSemiBold" style={styles.contextActionText}>
+                Download SVG
+              </ThemedText>
+            </Pressable>
+            <Pressable
+              onPress={() => {
+                deleteTileFromSet(tileSet.id, contextTile.id);
+                closeContextMenu();
+              }}
+              style={styles.contextAction}
+              accessibilityRole="button"
+              accessibilityLabel="Delete tile"
+            >
+              <ThemedText type="defaultSemiBold" style={styles.contextDeleteText}>
+                Delete
+              </ThemedText>
+            </Pressable>
+            <Pressable
+              onPress={closeContextMenu}
+              style={[styles.contextAction, styles.contextCancel]}
+              accessibilityRole="button"
+              accessibilityLabel="Close menu"
+            >
+              <ThemedText type="defaultSemiBold" style={styles.contextActionText}>
+                Cancel
+              </ThemedText>
+            </Pressable>
+          </ThemedView>
+        </ThemedView>
+      )}
       {showSettingsOverlay && (
         <ThemedView style={[styles.settingsScreen, { paddingTop: insets.top }]} accessibilityRole="dialog">
           <ThemedView style={styles.settingsHeader}>
@@ -842,6 +989,31 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     backgroundColor: '#e5e5e5',
   },
+  missingBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+    gap: 8,
+    backgroundColor: '#7f1d1d',
+    overflow: 'hidden',
+  },
+  missingBannerText: {
+    flex: 1,
+    color: '#fee2e2',
+    fontSize: 12,
+  },
+  missingBannerButton: {
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#fecaca',
+  },
+  missingBannerButtonText: {
+    color: '#fee2e2',
+    fontSize: 12,
+  },
   headerLeft: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -957,6 +1129,41 @@ const styles = StyleSheet.create({
   },
   thumbConnectionDotOff: {
     backgroundColor: 'rgba(239, 68, 68, 0.55)',
+  },
+  contextOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 30,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  contextBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0, 0, 0, 0.45)',
+  },
+  contextMenu: {
+    width: 240,
+    padding: 12,
+    gap: 6,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#111',
+    backgroundColor: '#fff',
+  },
+  contextTitle: {
+    color: '#111',
+    marginBottom: 4,
+  },
+  contextAction: {
+    paddingVertical: 6,
+  },
+  contextActionText: {
+    color: '#111',
+  },
+  contextDeleteText: {
+    color: '#b91c1c',
+  },
+  contextCancel: {
+    marginTop: 2,
   },
   emptyText: {
     color: '#fff',

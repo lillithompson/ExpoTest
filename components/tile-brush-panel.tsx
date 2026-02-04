@@ -31,6 +31,8 @@ type Props = {
   height: number;
   itemSize: number;
   rowGap: number;
+  rows?: number;
+  showPattern?: boolean;
 };
 
 export function TileBrushPanel({
@@ -46,11 +48,14 @@ export function TileBrushPanel({
   height,
   itemSize,
   rowGap,
+  rows = 2,
+  showPattern = true,
 }: Props) {
   const [containerWidth, setContainerWidth] = useState(0);
   const [contentWidth, setContentWidth] = useState(0);
   const showIndicator = contentWidth > containerWidth;
-  const columnHeight = itemSize * 2 + rowGap;
+  const rowCount = Math.max(1, rows);
+  const columnHeight = itemSize * rowCount + rowGap * Math.max(0, rowCount - 1);
   const lastTapRef = useRef<{ time: number; index: number } | null>(null);
 
   return (
@@ -72,7 +77,7 @@ export function TileBrushPanel({
             { type: 'random' as const },
             { type: 'clone' as const },
             { type: 'erase' as const },
-            { type: 'pattern' as const },
+          ...(showPattern ? [{ type: 'pattern' as const }] : []),
             ...tileSources.map((tile, index) => ({
               type: 'fixed' as const,
               tile,
@@ -92,7 +97,8 @@ export function TileBrushPanel({
                   : isPattern
                     ? selected.mode === 'pattern'
                     : selected.mode === 'fixed' && selected.index === entry.index;
-            const isTopRow = idx % 2 === 0;
+            const rowIndex = idx % rowCount;
+            const isLastRow = rowIndex === rowCount - 1;
             const rotation =
               !isRandom && !isErase && !isClone && !isPattern
                 ? getRotation(entry.index)
@@ -170,7 +176,7 @@ export function TileBrushPanel({
                   { width: itemSize, height: itemSize },
                   !isSelected && styles.itemDimmed,
                   isSelected && styles.itemSelected,
-                  isTopRow ? { marginBottom: rowGap } : styles.itemBottom,
+                  !isLastRow ? { marginBottom: rowGap } : styles.itemBottom,
                 ]}
                 accessibilityRole="button"
                 accessibilityLabel={

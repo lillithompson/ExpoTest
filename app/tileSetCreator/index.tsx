@@ -32,7 +32,7 @@ export default function TileSetCreatorScreen() {
   const { width } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { tileSets, createTileSet, deleteTileSet } = useTileSets();
+  const { tileSets, createTileSet, createTileSetAsync, deleteTileSet } = useTileSets();
   const [isSelectMode, setIsSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const selectBarAnim = useRef(new Animated.Value(0)).current;
@@ -41,6 +41,9 @@ export default function TileSetCreatorScreen() {
   const [newCategory, setNewCategory] = useState<TileCategory>(DEFAULT_CATEGORY);
   const [newResolution, setNewResolution] = useState(4);
   const [newName, setNewName] = useState('New Tile Set');
+  const [isCreating, setIsCreating] = useState(false);
+  const [createProgress, setCreateProgress] = useState({ current: 0, total: 51 });
+  const progressAnim = useRef(new Animated.Value(0)).current;
 
   const contentWidth = Math.max(0, width);
   const fileCardWidth = Math.floor(
@@ -57,6 +60,24 @@ export default function TileSetCreatorScreen() {
       useNativeDriver: false,
     }).start();
   }, [isSelectMode, selectBarAnim]);
+
+  useEffect(() => {
+    if (!isCreating) {
+      progressAnim.setValue(0);
+      return;
+    }
+    const loop = Animated.loop(
+      Animated.timing(progressAnim, {
+        toValue: 1,
+        duration: 900,
+        useNativeDriver: true,
+      })
+    );
+    loop.start();
+    return () => {
+      loop.stop();
+    };
+  }, [isCreating, progressAnim]);
 
   const toggleSelect = (id: string) => {
     setSelectedIds((prev) => {
@@ -343,16 +364,23 @@ export default function TileSetCreatorScreen() {
               </Pressable>
               <Pressable
                 onPress={() => {
-                  const id = createTileSet({
-                    name: newName.trim() || 'New Tile Set',
-                    category: newCategory,
-                    resolution: newResolution,
-                  });
+                  setIsCreating(true);
                   setShowCreateModal(false);
-                  router.push({
-                    pathname: '/tileSetCreator/editor',
-                    params: { setId: id },
-                  });
+                  setCreateProgress({ current: 0, total: 51 });
+                  void (async () => {
+                    const id = await createTileSetAsync({
+                      name: newName.trim() || 'New Tile Set',
+                      category: newCategory,
+                      resolution: newResolution,
+                      onProgress: (current, total) =>
+                        setCreateProgress({ current, total }),
+                    });
+                    setIsCreating(false);
+                    router.push({
+                      pathname: '/tileSetCreator/editor',
+                      params: { setId: id },
+                    });
+                  })();
                 }}
                 style={[styles.actionButton, styles.actionButtonPrimary]}
                 accessibilityRole="button"
@@ -385,6 +413,32 @@ export default function TileSetCreatorScreen() {
               <ThemedText type="defaultSemiBold">Close</ThemedText>
             </Pressable>
           </ThemedView>
+        </ThemedView>
+      )}
+      {isCreating && (
+        <ThemedView style={styles.overlay} accessibilityRole="alert">
+          <View style={styles.progressPanel}>
+            <ThemedText type="defaultSemiBold">
+              Creating tile set... {createProgress.current}/{createProgress.total}
+            </ThemedText>
+            <View style={styles.progressTrack}>
+              <Animated.View
+                style={[
+                  styles.progressBar,
+                  {
+                    transform: [
+                      {
+                        translateX: progressAnim.interpolate({
+                          inputRange: [0, 1],
+                          outputRange: [-120, 120],
+                        }),
+                      },
+                    ],
+                  },
+                ]}
+              />
+            </View>
+          </View>
         </ThemedView>
       )}
     </ThemedView>
@@ -558,6 +612,29 @@ const styles = StyleSheet.create({
   },
   actionButtonText: {
     color: '#fff',
+  },
+  progressPanel: {
+    width: '70%',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#1f1f1f',
+    padding: 16,
+    backgroundColor: '#fff',
+    gap: 12,
+    alignItems: 'center',
+  },
+  progressTrack: {
+    width: '100%',
+    height: 10,
+    borderRadius: 6,
+    backgroundColor: '#e5e7eb',
+    overflow: 'hidden',
+  },
+  progressBar: {
+    width: '50%',
+    height: '100%',
+    borderRadius: 6,
+    backgroundColor: '#22c55e',
   },
   overlayItem: {
     paddingVertical: 10,
