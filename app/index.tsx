@@ -32,7 +32,7 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { useTileGrid } from '@/hooks/use-tile-grid';
 import { usePersistedSettings } from '@/hooks/use-persisted-settings';
-import { useTileFiles } from '@/hooks/use-tile-files';
+import { useTileFiles, type TileFile } from '@/hooks/use-tile-files';
 import { useTilePatterns } from '@/hooks/use-tile-patterns';
 import {
   exportTileCanvasAsSvg,
@@ -54,7 +54,9 @@ const BRUSH_PANEL_ROW_GAP = 1;
 const FILE_GRID_COLUMNS_MOBILE = 3;
 const FILE_GRID_SIDE_PADDING = 12;
 const FILE_GRID_GAP = 12;
-const DEFAULT_CATEGORY = TILE_CATEGORIES[0];
+const DEFAULT_CATEGORY = (TILE_CATEGORIES as string[]).includes('angular')
+  ? ('angular' as TileCategory)
+  : TILE_CATEGORIES[0];
 const ERROR_TILE = require('@/assets/images/tiles/tile_error.svg');
 const PREVIEW_DIR = `${FileSystem.cacheDirectory ?? ''}tile-previews/`;
 const THUMB_SIZE = 256;
@@ -153,6 +155,29 @@ const hsvToRgb = (h: number, s: number, v: number) => {
 
 const toConnectionKey = (connections: boolean[] | null) =>
   connections ? connections.map((value) => (value ? '1' : '0')).join('') : null;
+const normalizeCategories = (value: TileCategory[] | null | undefined) => {
+  if (!value || value.length === 0) {
+    return [DEFAULT_CATEGORY];
+  }
+  const valid = value.filter((entry) =>
+    (TILE_CATEGORIES as string[]).includes(entry)
+  );
+  return valid.length > 0 ? valid : [DEFAULT_CATEGORY];
+};
+const getSourcesForCategories = (categories: TileCategory[]) =>
+  categories.flatMap((category) => TILE_MANIFEST[category] ?? []);
+const categoriesMatch = (a: TileCategory[], b: TileCategory[]) =>
+  a.length === b.length && a.every((value, index) => value === b[index]);
+const getSourcesForFile = (file: TileFile) =>
+  getSourcesForCategories(
+    normalizeCategories(
+      file.categories && file.categories.length > 0
+        ? file.categories
+        : file.category
+          ? [file.category]
+          : []
+    )
+  );
 
 type HsvColorPickerProps = {
   label: string;
@@ -513,10 +538,13 @@ export default function TestScreen() {
   const gridOffsetRef = useRef({ x: 0, y: 0 });
   const gridTouchRef = useRef<View>(null);
   const { settings, setSettings } = usePersistedSettings();
-  const [selectedCategory, setSelectedCategory] = useState<TileCategory>(
-    () => DEFAULT_CATEGORY
+  const [selectedCategories, setSelectedCategories] = useState<TileCategory[]>(
+    () => [DEFAULT_CATEGORY]
   );
   const [showFileSettingsOverlay, setShowFileSettingsOverlay] = useState(false);
+  const [tileSetSelectionError, setTileSetSelectionError] = useState<string | null>(
+    null
+  );
   const [showSettingsOverlay, setShowSettingsOverlay] = useState(false);
   const [showNewFileModal, setShowNewFileModal] = useState(false);
   const [fileMenuTargetId, setFileMenuTargetId] = useState<string | null>(null);
@@ -610,14 +638,18 @@ export default function TestScreen() {
     ready,
   } = useTileFiles(DEFAULT_CATEGORY);
 
-  const activeCategory =
-    activeFile && TILE_MANIFEST[activeFile.category]
-      ? activeFile.category
-      : selectedCategory;
-  const tileSources = TILE_MANIFEST[activeCategory] ?? [];
+  const activeCategories = useMemo(
+    () => normalizeCategories(selectedCategories),
+    [selectedCategories]
+  );
+  const primaryCategory = activeCategories[0] ?? DEFAULT_CATEGORY;
+  const tileSources = useMemo(
+    () => getSourcesForCategories(activeCategories),
+    [activeCategories]
+  );
   const activePatterns = useMemo(
-    () => patternsByCategory.get(activeCategory) ?? [],
-    [patternsByCategory, activeCategory]
+    () => patternsByCategory.get(primaryCategory) ?? [],
+    [patternsByCategory, primaryCategory]
   );
   const selectedPattern = useMemo(() => {
     if (!selectedPatternId) {
@@ -732,7 +764,7 @@ export default function TestScreen() {
     rows: number;
     columns: number;
     preferredTileSize: number;
-    category: TileCategory;
+    categories: TileCategory[];
     token?: number;
     preview?: boolean;
   } | null>(null);
@@ -770,11 +802,14 @@ export default function TestScreen() {
     filesRef.current = files;
   }, [files]);
 
-  const remapTilesForCategory = useCallback(
-    (nextCategory: TileCategory, currentTiles: Tile[]) => {
+  const remapTilesForCategories = useCallback(
+    (nextCategories: TileCategory[], currentTiles: Tile[]) => {
       const prevSources = tileSources;
-      const nextSources = TILE_MANIFEST[nextCategory] ?? [];
-      if (prevSources === nextSources) {
+      const nextSources = getSourcesForCategories(nextCategories);
+      const sameSources =
+        prevSources.length === nextSources.length &&
+        prevSources.every((source, index) => source === nextSources[index]);
+      if (sameSources) {
         return currentTiles;
       }
       const totalCells = gridLayout.rows * gridLayout.columns;
@@ -829,6 +864,15 @@ export default function TestScreen() {
         if (!previousSource) {
           return { imageIndex: -1, rotation: 0, mirrorX: false, mirrorY: false };
         }
+        const nextIndex = nextSources.indexOf(previousSource);
+        if (nextIndex >= 0) {
+          return {
+            imageIndex: nextIndex,
+            rotation: tile.rotation,
+            mirrorX: tile.mirrorX,
+            mirrorY: tile.mirrorY,
+          };
+        }
         const previousConnections = parseTileConnections(previousSource.name);
         if (!previousConnections) {
           return { imageIndex: -1, rotation: 0, mirrorX: false, mirrorY: false };
@@ -879,6 +923,12 @@ export default function TestScreen() {
   }, [isSelectMode, selectBarAnim]);
 
   useEffect(() => {
+    if (!showFileSettingsOverlay && tileSetSelectionError) {
+      setTileSetSelectionError(null);
+    }
+  }, [showFileSettingsOverlay, tileSetSelectionError]);
+
+  useEffect(() => {
     Animated.timing(patternSelectAnim, {
       toValue: isPatternSelectMode ? 1 : 0,
       duration: 180,
@@ -887,12 +937,26 @@ export default function TestScreen() {
   }, [isPatternSelectMode, patternSelectAnim]);
 
   useEffect(() => {
-    if (activeFile?.category && TILE_MANIFEST[activeFile.category]) {
-      if (activeFile.category !== selectedCategory) {
-        setSelectedCategory(activeFile.category);
+    if (activeFile?.categories && activeFile.categories.length > 0) {
+      const normalized = normalizeCategories(activeFile.categories);
+      const same =
+        normalized.length === selectedCategories.length &&
+        normalized.every((value, index) => value === selectedCategories[index]);
+      if (!same) {
+        setSelectedCategories(normalized);
+      }
+      return;
+    }
+    if (activeFile?.category) {
+      const normalized = normalizeCategories([activeFile.category]);
+      const same =
+        normalized.length === selectedCategories.length &&
+        normalized.every((value, index) => value === selectedCategories[index]);
+      if (!same) {
+        setSelectedCategories(normalized);
       }
     }
-  }, [activeFile?.category, selectedCategory]);
+  }, [activeFile?.categories, activeFile?.category, selectedCategories]);
 
   useEffect(() => {
     if (!ready || !activeFileId || viewMode !== 'modify') {
@@ -903,10 +967,18 @@ export default function TestScreen() {
     if (!file) {
       return;
     }
-    const resolvedCategory = TILE_MANIFEST[file.category]
-      ? file.category
-      : DEFAULT_CATEGORY;
-    if (resolvedCategory !== file.category) {
+    const resolvedCategories = normalizeCategories(
+      file.categories && file.categories.length > 0
+        ? file.categories
+        : file.category
+          ? [file.category]
+          : []
+    );
+    if (
+      !file.categories ||
+      file.categories.length !== resolvedCategories.length ||
+      file.categories.some((value, index) => value !== resolvedCategories[index])
+    ) {
       upsertActiveFile({
         tiles: file.tiles,
         gridLayout: {
@@ -914,14 +986,18 @@ export default function TestScreen() {
           columns: file.grid.columns,
           tileSize: file.preferredTileSize,
         },
-        category: resolvedCategory,
+        category: resolvedCategories[0] ?? DEFAULT_CATEGORY,
+        categories: resolvedCategories,
         preferredTileSize: file.preferredTileSize,
         lineWidth: file.lineWidth,
         lineColor: file.lineColor,
       });
     }
-    if (resolvedCategory !== selectedCategory) {
-      setSelectedCategory(resolvedCategory);
+    const same =
+      resolvedCategories.length === selectedCategories.length &&
+      resolvedCategories.every((value, index) => value === selectedCategories[index]);
+    if (!same) {
+      setSelectedCategories(resolvedCategories);
     }
     const nextToken = loadTokenRef.current + 1;
     loadTokenRef.current = nextToken;
@@ -946,11 +1022,11 @@ export default function TestScreen() {
       rows: file.grid.rows,
       columns: file.grid.columns,
       preferredTileSize: file.preferredTileSize,
-      category: resolvedCategory,
+      categories: resolvedCategories,
       token: nextToken,
       preview: Boolean(previewUri),
     };
-  }, [activeFileId, loadRequestId, ready, viewMode, selectedCategory, clearCloneSource]);
+  }, [activeFileId, loadRequestId, ready, viewMode, selectedCategories, clearCloneSource]);
 
   useEffect(() => {
     if (viewMode !== 'modify') {
@@ -1030,14 +1106,14 @@ export default function TestScreen() {
     return () => {
       cancelled = true;
     };
-  }, [viewMode, activeFileId, selectedCategory, tileSources, loadPreviewUri]);
+  }, [viewMode, activeFileId, tileSources, loadPreviewUri]);
 
   useEffect(() => {
     const pending = pendingRestoreRef.current;
     if (!pending || activeFileId !== pending.fileId) {
       return;
     }
-    if (pending.category !== selectedCategory) {
+    if (!categoriesMatch(pending.categories, activeCategories)) {
       return;
     }
     const gridMatches =
@@ -1074,7 +1150,7 @@ export default function TestScreen() {
     }
   }, [
     activeFileId,
-    selectedCategory,
+    activeCategories,
     gridLayout.tileSize,
     gridLayout.columns,
     gridLayout.rows,
@@ -1116,7 +1192,8 @@ export default function TestScreen() {
         upsertActiveFile({
           tiles,
           gridLayout,
-          category: selectedCategory,
+          category: primaryCategory,
+          categories: activeCategories,
           preferredTileSize: fileTileSize,
           thumbnailUri,
         });
@@ -1130,7 +1207,8 @@ export default function TestScreen() {
   }, [
     tiles,
     gridLayout,
-    selectedCategory,
+    primaryCategory,
+    activeCategories,
     fileTileSize,
     activeLineColor,
     activeLineWidth,
@@ -1336,7 +1414,7 @@ export default function TestScreen() {
       }
     }
     const patternId = createPattern({
-      category: activeCategory,
+      category: primaryCategory,
       width,
       height,
       tiles: nextTiles,
@@ -1477,7 +1555,8 @@ export default function TestScreen() {
       upsertActiveFile({
         tiles,
         gridLayout,
-        category: selectedCategory,
+        category: primaryCategory,
+        categories: activeCategories,
         preferredTileSize: fileTileSize,
         thumbnailUri,
         previewUri,
@@ -1511,7 +1590,8 @@ export default function TestScreen() {
     upsertActiveFile({
       tiles,
       gridLayout,
-      category: selectedCategory,
+      category: primaryCategory,
+      categories: activeCategories,
       preferredTileSize: fileTileSize,
       thumbnailUri,
       previewUri,
@@ -1534,7 +1614,7 @@ export default function TestScreen() {
     if (downloadPreviewUri) {
       expected = 1;
     } else {
-      const sources = TILE_MANIFEST[downloadTargetFile.category] ?? [];
+      const sources = getSourcesForFile(downloadTargetFile);
       const total = downloadTargetFile.grid.rows * downloadTargetFile.grid.columns;
       const normalized = normalizeTiles(downloadTargetFile.tiles, total, sources.length);
       expected = normalized.filter(
@@ -1662,7 +1742,7 @@ export default function TestScreen() {
     }
     setIsDownloading(true);
     try {
-      const sources = TILE_MANIFEST[downloadTargetFile.category] ?? [];
+      const sources = getSourcesForFile(downloadTargetFile);
       const svg = await renderTileCanvasToSvg({
         tiles: downloadTargetFile.tiles,
         gridLayout: {
@@ -1810,7 +1890,7 @@ export default function TestScreen() {
           {[...files]
             .sort((a, b) => b.updatedAt - a.updatedAt)
             .map((file) => {
-            const sources = TILE_MANIFEST[file.category] ?? [];
+            const sources = getSourcesForFile(file);
             const thumbAspect =
               file.grid.columns > 0 && file.grid.rows > 0
                 ? file.grid.columns / file.grid.rows
@@ -1935,7 +2015,7 @@ export default function TestScreen() {
                   />
                 ) : (
                   (() => {
-                    const sources = TILE_MANIFEST[downloadTargetFile.category] ?? [];
+                    const sources = getSourcesForFile(downloadTargetFile);
                     const total =
                       downloadTargetFile.grid.rows * downloadTargetFile.grid.columns;
                     const tiles = normalizeTiles(
@@ -2102,7 +2182,7 @@ export default function TestScreen() {
                   const file = files.find((entry) => entry.id === fileMenuTargetId);
                   if (file) {
                     if (Platform.OS === 'web') {
-                      const sources = TILE_MANIFEST[file.category] ?? [];
+                      const sources = getSourcesForFile(file);
                       void downloadFile(file, sources, {
                         backgroundColor: includeDownloadBackground
                           ? settings.backgroundColor
@@ -2127,7 +2207,7 @@ export default function TestScreen() {
                   onPress={() => {
                     const file = files.find((entry) => entry.id === fileMenuTargetId);
                     if (file) {
-                      const sources = TILE_MANIFEST[file.category] ?? [];
+                      const sources = getSourcesForFile(file);
                       void exportTileCanvasAsSvg({
                         tiles: file.tiles,
                         gridLayout: {
@@ -2196,7 +2276,7 @@ export default function TestScreen() {
                   <Pressable
                     key={`new-file-size-${size}`}
                     onPress={() => {
-                      createFile(selectedCategory, size);
+                      createFile(DEFAULT_CATEGORY, size);
                       setLoadRequestId((prev) => prev + 1);
                       setLoadPreviewUri(null);
                       setShowGrid(false);
@@ -3164,43 +3244,66 @@ export default function TestScreen() {
           <ThemedView style={styles.overlay} accessibilityRole="dialog">
             <Pressable
               style={styles.overlayBackdrop}
-              onPress={() => setShowFileSettingsOverlay(false)}
+              onPress={() => {
+                if (selectedCategories.length === 0) {
+                  setTileSetSelectionError('Select at least one tile set.');
+                  return;
+                }
+                setShowFileSettingsOverlay(false);
+              }}
               accessibilityRole="button"
               accessibilityLabel="Close file settings"
             />
             <ThemedView style={styles.overlayPanel}>
               <ThemedText type="title">File Settings</ThemedText>
               <ThemedView style={styles.sectionGroup}>
-                <ThemedText type="defaultSemiBold">Tile Set</ThemedText>
+                <ThemedText type="defaultSemiBold">Tile Sets</ThemedText>
               <ThemedView style={styles.overlayList}>
                 {TILE_CATEGORIES.map((category) => (
                   <Pressable
                     key={category}
                     onPress={() => {
-                      const remappedTiles = remapTilesForCategory(category, tiles);
-                      setSelectedCategory(category);
+                      const isSelected = selectedCategories.includes(category);
+                      if (isSelected && selectedCategories.length === 1) {
+                        setTileSetSelectionError('Select at least one tile set.');
+                        return;
+                      }
+                      const nextCategories = isSelected
+                        ? selectedCategories.filter((entry) => entry !== category)
+                        : [...selectedCategories, category];
+                      const remappedTiles = remapTilesForCategories(
+                        nextCategories,
+                        tiles
+                      );
+                      setTileSetSelectionError(null);
+                      setSelectedCategories(nextCategories);
                       if (activeFileId) {
                         loadTiles(remappedTiles);
                         upsertActiveFile({
                           tiles: remappedTiles,
                           gridLayout,
-                          category,
+                          category: nextCategories[0] ?? DEFAULT_CATEGORY,
+                          categories: nextCategories,
                           preferredTileSize: fileTileSize,
                           lineWidth: activeLineWidth,
                           lineColor: activeLineColor,
                         });
                       }
-                      setShowFileSettingsOverlay(false);
                     }}
                     style={[
                       styles.overlayItem,
-                      category === selectedCategory && styles.overlayItemSelected,
+                      selectedCategories.includes(category) && styles.overlayItemSelected,
                     ]}
                   >
                     <ThemedText type="defaultSemiBold">{category}</ThemedText>
                   </Pressable>
                 ))}
               </ThemedView>
+              {tileSetSelectionError && (
+                <ThemedText type="defaultSemiBold" style={styles.errorText}>
+                  {tileSetSelectionError}
+                </ThemedText>
+              )}
               </ThemedView>
               <ThemedView style={styles.sectionGroup}>
                 <ThemedView style={styles.sectionHeader}>
@@ -3222,7 +3325,8 @@ export default function TestScreen() {
                     upsertActiveFile({
                       tiles,
                       gridLayout,
-                      category: selectedCategory,
+                      category: primaryCategory,
+                      categories: activeCategories,
                       preferredTileSize: fileTileSize,
                       lineWidth: value,
                       lineColor: activeLineColor,
@@ -3243,7 +3347,8 @@ export default function TestScreen() {
                   upsertActiveFile({
                     tiles,
                     gridLayout,
-                    category: selectedCategory,
+                    category: primaryCategory,
+                    categories: activeCategories,
                     preferredTileSize: fileTileSize,
                     lineWidth: activeLineWidth,
                     lineColor: value,
@@ -3532,6 +3637,10 @@ const styles = StyleSheet.create({
   },
   overlayItemSelected: {
     borderColor: '#22c55e',
+  },
+  errorText: {
+    color: '#ef4444',
+    marginTop: 6,
   },
   screen: {
     flex: 1,

@@ -11,6 +11,7 @@ export type TileFile = {
   tiles: Tile[];
   grid: { rows: number; columns: number };
   category: TileCategory;
+  categories: TileCategory[];
   preferredTileSize: number;
   lineWidth: number;
   lineColor: string;
@@ -31,6 +32,7 @@ const defaultFile = (category: TileCategory): TileFile => ({
   tiles: [],
   grid: { rows: 0, columns: 0 },
   category,
+  categories: [category],
   preferredTileSize: 45,
   lineWidth: 10,
   lineColor: '#ffffff',
@@ -38,6 +40,17 @@ const defaultFile = (category: TileCategory): TileFile => ({
   previewUri: null,
   updatedAt: Date.now(),
 });
+
+const normalizeCategories = (value: unknown, fallback: TileCategory) => {
+  if (!Array.isArray(value)) {
+    return [fallback];
+  }
+  const valid = value.filter(
+    (entry): entry is TileCategory =>
+      typeof entry === 'string' && (TILE_CATEGORIES as string[]).includes(entry)
+  );
+  return valid.length > 0 ? valid : [fallback];
+};
 
 export const useTileFiles = (defaultCategory: TileCategory) => {
   const [files, setFiles] = useState<TileFile[]>([]);
@@ -61,19 +74,26 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
         const isValidCategory = (value: unknown): value is TileCategory =>
           typeof value === 'string' && (TILE_CATEGORIES as string[]).includes(value);
         const parsed = filesRaw
-          ? (JSON.parse(filesRaw) as Array<Partial<TileFile>>).map((file) => ({
-              id: file.id ?? createId(),
-              name: file.name ?? 'Canvas',
-              tiles: file.tiles ?? [],
-              grid: file.grid ?? { rows: 0, columns: 0 },
-              category: isValidCategory(file.category) ? file.category : fallbackCategory,
-              preferredTileSize: file.preferredTileSize ?? 45,
-              lineWidth: file.lineWidth ?? 10,
-              lineColor: file.lineColor ?? '#ffffff',
-              thumbnailUri: file.thumbnailUri ?? null,
-              previewUri: file.previewUri ?? null,
-              updatedAt: file.updatedAt ?? Date.now(),
-            }))
+          ? (JSON.parse(filesRaw) as Array<Partial<TileFile>>).map((file) => {
+              const safeCategory = isValidCategory(file.category)
+                ? file.category
+                : fallbackCategory;
+              const categories = normalizeCategories(file.categories, safeCategory);
+              return {
+                id: file.id ?? createId(),
+                name: file.name ?? 'Canvas',
+                tiles: file.tiles ?? [],
+                grid: file.grid ?? { rows: 0, columns: 0 },
+                category: categories[0] ?? safeCategory,
+                categories,
+                preferredTileSize: file.preferredTileSize ?? 45,
+                lineWidth: file.lineWidth ?? 10,
+                lineColor: file.lineColor ?? '#ffffff',
+                thumbnailUri: file.thumbnailUri ?? null,
+                previewUri: file.previewUri ?? null,
+                updatedAt: file.updatedAt ?? Date.now(),
+              };
+            })
           : [];
         const activeId = activeRaw || null;
         if (parsed.length === 0) {
@@ -124,6 +144,7 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
       tiles: Tile[];
       gridLayout: GridLayout;
       category: TileCategory;
+      categories?: TileCategory[];
       preferredTileSize: number;
       lineWidth?: number;
       lineColor?: string;
@@ -140,7 +161,11 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
                 ...file,
                 tiles: payload.tiles,
                 grid: { rows: payload.gridLayout.rows, columns: payload.gridLayout.columns },
-                category: payload.category,
+                category: payload.categories?.[0] ?? payload.category,
+                categories:
+                  payload.categories ??
+                  file.categories ??
+                  (payload.category ? [payload.category] : [file.category]),
                 preferredTileSize: payload.preferredTileSize,
                 lineWidth:
                   payload.lineWidth !== undefined ? payload.lineWidth : file.lineWidth,
@@ -186,14 +211,15 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
         name: `Canvas ${Date.now()}`,
         tiles: [],
         grid: { rows: 0, columns: 0 },
-      category,
-      preferredTileSize,
-      lineWidth: 10,
-      lineColor: '#ffffff',
-      thumbnailUri: null,
-      previewUri: null,
-      updatedAt: Date.now(),
-    };
+        category,
+        categories: [category],
+        preferredTileSize,
+        lineWidth: 10,
+        lineColor: '#ffffff',
+        thumbnailUri: null,
+        previewUri: null,
+        updatedAt: Date.now(),
+      };
       setFiles((prev) => {
         const next = [nextFile, ...prev];
         void persistFiles(next, nextFile.id);

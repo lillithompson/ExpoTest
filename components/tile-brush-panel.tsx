@@ -134,7 +134,7 @@ export function TileBrushPanel({
                         ? 'clone'
                         : isPattern
                           ? 'pattern'
-                          : entry.tile.name
+                          : `tile-${entry.index}`
                 }
                 onPressIn={() =>
                   onSelect(
