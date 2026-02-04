@@ -462,6 +462,69 @@ export default function ModifyTileScreen() {
     () => Array.from({ length: gridLayout.columns }, (_, index) => index),
     [gridLayout.columns]
   );
+  const borderConnectionStatus = useMemo(() => {
+    if (gridLayout.rows <= 0 || gridLayout.columns <= 0) {
+      return null;
+    }
+    const totalCells = gridLayout.rows * gridLayout.columns;
+    const rendered = tiles.map((tile) => {
+      if (!tile || tile.imageIndex < 0) {
+        return null;
+      }
+      const name = tileSources[tile.imageIndex]?.name ?? '';
+      return getTransformedConnectionsForName(
+        name,
+        tile.rotation,
+        tile.mirrorX,
+        tile.mirrorY
+      );
+    });
+    const indexAt = (row: number, col: number) => row * gridLayout.columns + col;
+    const pick = (row: number, col: number, dirIndex: number) => {
+      const index = indexAt(row, col);
+      if (index < 0 || index >= totalCells) {
+        return false;
+      }
+      const current = rendered[index];
+      return Boolean(current?.[dirIndex]);
+    };
+    const topRow = 0;
+    const bottomRow = gridLayout.rows - 1;
+    const leftCol = 0;
+    const rightCol = gridLayout.columns - 1;
+    const midCol = Math.floor(gridLayout.columns / 2);
+    const midRow = Math.floor(gridLayout.rows / 2);
+    const hasEvenCols = gridLayout.columns % 2 === 0;
+    const hasEvenRows = gridLayout.rows % 2 === 0;
+    const leftMidCol = hasEvenCols ? gridLayout.columns / 2 - 1 : midCol;
+    const rightMidCol = hasEvenCols ? gridLayout.columns / 2 : midCol;
+    const topMidRow = hasEvenRows ? gridLayout.rows / 2 - 1 : midRow;
+    const bottomMidRow = hasEvenRows ? gridLayout.rows / 2 : midRow;
+
+    const north = hasEvenCols
+      ? pick(topRow, leftMidCol, 1) || pick(topRow, rightMidCol, 7)
+      : pick(topRow, midCol, 0);
+    const south = hasEvenCols
+      ? pick(bottomRow, leftMidCol, 3) || pick(bottomRow, rightMidCol, 5)
+      : pick(bottomRow, midCol, 4);
+    const east = hasEvenRows
+      ? pick(topMidRow, rightCol, 3) || pick(bottomMidRow, rightCol, 1)
+      : pick(midRow, rightCol, 2);
+    const west = hasEvenRows
+      ? pick(topMidRow, leftCol, 5) || pick(bottomMidRow, leftCol, 7)
+      : pick(midRow, leftCol, 6);
+
+    return [
+      north, // N
+      pick(topRow, rightCol, 1), // NE
+      east, // E
+      pick(bottomRow, rightCol, 3), // SE
+      south, // S
+      pick(bottomRow, leftCol, 5), // SW
+      west, // W
+      pick(topRow, leftCol, 7), // NW
+    ];
+  }, [tiles, tileSources, gridLayout.columns, gridLayout.rows]);
 
   if (!tileSet || !tileEntry) {
     return (
@@ -561,6 +624,40 @@ export default function ModifyTileScreen() {
               )}
             </View>
           )}
+        {borderConnectionStatus && gridWidth > 0 && gridHeight > 0 && (
+          <View pointerEvents="none" style={styles.borderConnectionLines}>
+            {borderConnectionStatus.map((isConnected, index) => {
+              const dotSize = Math.max(6, Math.round(gridLayout.tileSize * 0.22));
+              const dotOffset = dotSize / 2;
+              const positions = [
+                { left: gridWidth / 2 - dotOffset, top: -dotOffset }, // N
+                { left: gridWidth - dotOffset, top: -dotOffset }, // NE
+                { left: gridWidth - dotOffset, top: gridHeight / 2 - dotOffset }, // E
+                { left: gridWidth - dotOffset, top: gridHeight - dotOffset }, // SE
+                { left: gridWidth / 2 - dotOffset, top: gridHeight - dotOffset }, // S
+                { left: -dotOffset, top: gridHeight - dotOffset }, // SW
+                { left: -dotOffset, top: gridHeight / 2 - dotOffset }, // W
+                { left: -dotOffset, top: -dotOffset }, // NW
+              ];
+              return (
+                <View
+                  key={`border-conn-${index}`}
+                  style={[
+                    styles.connectionDot,
+                    isConnected ? styles.connectionDotOn : styles.connectionDotOff,
+                    {
+                      width: dotSize,
+                      height: dotSize,
+                      borderRadius: dotSize / 2,
+                      left: positions[index].left,
+                      top: positions[index].top,
+                    },
+                  ]}
+                />
+              );
+            })}
+          </View>
+        )}
         <ViewShot ref={thumbnailShotRef} style={{ width: gridWidth, height: gridHeight }}>
           <ThemedView
             style={[styles.grid, { width: gridWidth, height: gridHeight }]}
@@ -806,6 +903,11 @@ const styles = StyleSheet.create({
     position: 'absolute',
     backgroundColor: '#3b82f6',
   },
+  borderConnectionLines: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 3,
+    backgroundColor: 'transparent',
+  },
   row: {
     flexDirection: 'row',
     gap: GRID_GAP,
@@ -834,6 +936,16 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     borderWidth: 2,
     borderColor: 'rgba(239, 68, 68, 0.3)',
+  },
+  connectionDot: {
+    position: 'absolute',
+    zIndex: 3,
+  },
+  connectionDotOn: {
+    backgroundColor: 'rgba(34, 197, 94, 0.5)',
+  },
+  connectionDotOff: {
+    backgroundColor: 'rgba(239, 68, 68, 0.5)',
   },
   tileImage: {
     width: '100%',
