@@ -1,11 +1,6 @@
 <svg width="256" height="256" viewBox="0 0 256 256" fill="none" xmlns="http://www.w3.org/2000/svg">
 <g clip-path="url(#clip0_0_108)">
-<path d="M128 128V256" stroke="white" stroke-width="10"/>
-<path d="M256 256L128 128" stroke="white" stroke-width="10"/>
-<path d="M128 128L4.38125e-06 4.38125e-06" stroke="white" stroke-width="10"/>
-<path d="M0 256L128 128" stroke="white" stroke-width="10"/>
-<path d="M128 128L256 1.51708e-05" stroke="white" stroke-width="10"/>
-<path d="M127.755 128L-0.244995 128" stroke="white" stroke-width="10"/>
+<path d="M128 128L256 3.47229e-05M128 128L3.675e-05 4.55125e-05M128 128L-0.244979 128M128 128L4.38125e-06 256M128 128L256 256M128 128L128 256" stroke="white" stroke-width="10"/>
 </g>
 <defs>
 <clipPath id="clip0_0_108">

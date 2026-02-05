@@ -746,9 +746,17 @@ export default function TestScreen() {
       TITLE_SPACING -
       gridHeight
   );
+  const brushRows =
+    Platform.OS === 'ios' &&
+    (brushPanelHeight - BRUSH_PANEL_ROW_GAP * 2) / 3 >= 75
+      ? 3
+      : 2;
   const brushItemSize = Math.max(
     0,
-    Math.floor((brushPanelHeight - BRUSH_PANEL_ROW_GAP) / 2)
+    Math.floor(
+      (brushPanelHeight - BRUSH_PANEL_ROW_GAP * Math.max(0, brushRows - 1)) /
+        brushRows
+    )
   );
   const lastPaintedRef = useRef<number | null>(null);
   const longPressTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -2921,6 +2929,7 @@ export default function TestScreen() {
           height={brushPanelHeight}
           itemSize={brushItemSize}
           rowGap={BRUSH_PANEL_ROW_GAP}
+          rows={brushRows}
         />
         {showPatternModal && (
           <View style={styles.patternModal} accessibilityRole="dialog">
@@ -3330,56 +3339,6 @@ export default function TestScreen() {
                 </ThemedText>
               )}
               </ThemedView>
-              <ThemedView style={styles.sectionGroup}>
-                <ThemedView style={styles.sectionHeader}>
-                  <ThemedText type="defaultSemiBold">Line Width</ThemedText>
-                  <ThemedText type="defaultSemiBold">
-                    {lineWidthDraft.toFixed(1)}
-                  </ThemedText>
-                </ThemedView>
-                <Slider
-                  minimumValue={1}
-                  maximumValue={20}
-                  step={0.1}
-                  value={lineWidthDraft}
-                  onValueChange={(value) => setLineWidthDraft(value)}
-                  onSlidingComplete={(value) => {
-                    if (!activeFileId) {
-                      return;
-                    }
-                    upsertActiveFile({
-                      tiles,
-                      gridLayout,
-                      category: primaryCategory,
-                      categories: activeCategories,
-                      preferredTileSize: fileTileSize,
-                      lineWidth: value,
-                      lineColor: activeLineColor,
-                    });
-                  }}
-                  minimumTrackTintColor="#22c55e"
-                  maximumTrackTintColor="#e5e7eb"
-                  thumbTintColor="#22c55e"
-                />
-              </ThemedView>
-              <HsvColorPicker
-                label="Line Color"
-                color={activeLineColor}
-                onChange={(value) => {
-                  if (!activeFileId) {
-                    return;
-                  }
-                  upsertActiveFile({
-                    tiles,
-                    gridLayout,
-                    category: primaryCategory,
-                    categories: activeCategories,
-                    preferredTileSize: fileTileSize,
-                    lineWidth: activeLineWidth,
-                    lineColor: value,
-                  });
-                }}
-              />
             </ThemedView>
           </ThemedView>
         )}

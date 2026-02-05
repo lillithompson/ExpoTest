@@ -385,7 +385,11 @@ export default function ModifyTileScreen() {
     0,
     contentHeight - HEADER_HEIGHT - CONTENT_PADDING * 2 - TITLE_SPACING - gridHeight
   );
-  const brushRows = Platform.OS === 'ios' ? 4 : 2;
+  const brushRows =
+    Platform.OS === 'ios' &&
+    (brushPanelHeight - BRUSH_PANEL_ROW_GAP * 2) / 3 >= 75
+      ? 3
+      : 2;
   const brushItemSize = Math.max(
     0,
     Math.floor(
@@ -974,6 +978,7 @@ export default function ModifyTileScreen() {
           height={brushPanelHeight}
           itemSize={brushItemSize}
           rowGap={BRUSH_PANEL_ROW_GAP}
+          rows={brushRows}
         />
       </View>
     </ThemedView>

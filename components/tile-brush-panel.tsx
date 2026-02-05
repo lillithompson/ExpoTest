@@ -497,7 +497,7 @@ export function TileBrushPanel({
           <View style={styles.modalPanel}>
             <ThemedText type="title" style={styles.modalTitle}>
               {favoriteDialog?.mode === 'remove'
-                ? 'Remove from favorites?'
+                ? 'Unfavorite?'
                 : 'Favorite this tile?'}
             </ThemedText>
             {favoriteDialog?.mode === 'add' && (
