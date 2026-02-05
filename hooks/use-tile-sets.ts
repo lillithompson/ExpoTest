@@ -129,7 +129,7 @@ const getTileConnectivityBits = (tile: TileSetTile, sources: TileSource[]) => {
   return toConnectionKey(statuses) ?? '00000000';
 };
 
-const BAKE_VERSION = 3;
+const BAKE_VERSION = 4;
 const buildBakeSignature = (set: TileSet) => {
   const tileSignature = set.tiles.map((tile) => `${tile.id}:${tile.updatedAt}`).join('|');
   return `${BAKE_VERSION}:${set.updatedAt}:${set.lineColor}:${set.lineWidth}:${tileSignature}`;
@@ -300,7 +300,7 @@ export const useTileSets = () => {
             lineWidth: undefined,
             backgroundColor: null,
             sourceXmlCache: svgSourceCacheRef.current,
-            outputSize: 256,
+            outputSize: set.resolution * 256,
           });
           if (!svg) {
             bakedSources.push(prevSource ?? { name: fileName, source: ERROR_TILE });

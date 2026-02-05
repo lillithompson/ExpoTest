@@ -215,9 +215,11 @@ export const renderTileCanvasToSvg = async ({
   backgroundColor,
   sourceXmlCache,
   outputSize,
+  strokeScaleByName,
 }: Omit<ExportParams, 'blankSource' | 'backgroundLineColor' | 'backgroundLineWidth' | 'fileName'> & {
   sourceXmlCache?: Map<string, string>;
   outputSize?: number;
+  strokeScaleByName?: Map<string, number>;
 }): Promise<string | null> => {
   if (gridLayout.columns <= 0 || gridLayout.rows <= 0 || gridLayout.tileSize <= 0) {
     return null;
@@ -338,8 +340,15 @@ export const renderTileCanvasToSvg = async ({
       continue;
     }
 
+    const tileName = tile.imageIndex >= 0 ? tileSources[tile.imageIndex]?.name ?? '' : '';
+    const scale = strokeScaleByName?.get(tileName) ?? 1;
     const overrides =
-      tile.imageIndex >= 0 ? { strokeColor: lineColor, strokeWidth: lineWidth } : undefined;
+      tile.imageIndex >= 0
+        ? {
+            strokeColor: lineColor,
+            strokeWidth: lineWidth !== undefined ? lineWidth * scale : undefined,
+          }
+        : undefined;
     const center = gridLayout.tileSize / 2;
     const scaleX = tile.mirrorX ? -1 : 1;
     const scaleY = tile.mirrorY ? -1 : 1;
@@ -439,10 +448,12 @@ export const renderTileCanvasToDataUrl = async ({
   backgroundColor,
   backgroundLineColor,
   backgroundLineWidth,
+  strokeScaleByName,
   maxDimension = 256,
   format = 'image/png',
   quality,
 }: Omit<ExportParams, 'fileName'> & {
+  strokeScaleByName?: Map<string, number>;
   maxDimension?: number;
   format?: 'image/png' | 'image/jpeg';
   quality?: number;
@@ -556,9 +567,16 @@ export const renderTileCanvasToDataUrl = async ({
       continue;
     }
 
+    const tileName = tile.imageIndex >= 0 ? tileSources[tile.imageIndex]?.name ?? '' : '';
+    const scale = strokeScaleByName?.get(tileName) ?? 1;
     const img = await getImage(
       source,
-      tile.imageIndex >= 0 ? { strokeColor: lineColor, strokeWidth: lineWidth } : undefined
+      tile.imageIndex >= 0
+        ? {
+            strokeColor: lineColor,
+            strokeWidth: lineWidth !== undefined ? lineWidth * scale : undefined,
+          }
+        : undefined
     );
     if (!img) {
       continue;

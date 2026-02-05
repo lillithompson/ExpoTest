@@ -42,6 +42,29 @@ const resolveSourceUri = (source: unknown) => {
   return null;
 };
 
+const normalizeSvgRoot = (xml: string) => {
+  const viewBoxMatch = xml.match(/viewBox=["']([^"']+)["']/i);
+  let viewBox = viewBoxMatch?.[1];
+  if (!viewBox) {
+    const widthMatch = xml.match(/width=["']([^"']+)["']/i);
+    const heightMatch = xml.match(/height=["']([^"']+)["']/i);
+    if (widthMatch && heightMatch) {
+      viewBox = `0 0 ${widthMatch[1]} ${heightMatch[1]}`;
+    }
+  }
+  return xml.replace(/<svg\b([^>]*)>/i, (_match, attrs) => {
+    let nextAttrs = attrs;
+    nextAttrs = nextAttrs.replace(/\s(width|height)=["'][^"']*["']/gi, '');
+    if (viewBox && !/viewBox=/.test(nextAttrs)) {
+      nextAttrs += ` viewBox="${viewBox}"`;
+    }
+    if (!/preserveAspectRatio=/.test(nextAttrs)) {
+      nextAttrs += ' preserveAspectRatio="xMidYMid meet"';
+    }
+    return `<svg${nextAttrs}>`;
+  });
+};
+
 const applySvgOverrides = (xml: string, strokeColor?: string, strokeWidth?: number) => {
   let next = xml;
   const applyInlineOverrides = (input: string) => {
@@ -332,7 +355,8 @@ export function TileAsset({
       return;
     }
     const stripped = stripOuterBorder(svgXml);
-    const next = applySvgOverrides(stripped, strokeColor, strokeWidth);
+    const normalized = normalizeSvgRoot(stripped);
+    const next = applySvgOverrides(normalized, strokeColor, strokeWidth);
     if (overrideRef.current !== next) {
       overrideRef.current = next;
       setSvgXmlWithOverrides(next);

@@ -1572,6 +1572,7 @@ export default function TestScreen() {
                 errorSource: ERROR_TILE,
                 lineColor: activeLineColor,
                 lineWidth: activeLineWidth,
+                strokeScaleByName,
                 maxDimension: 192,
               })
             : undefined;
@@ -1958,6 +1959,7 @@ export default function TestScreen() {
       errorSource: ERROR_TILE,
       lineColor: activeLineColor,
       lineWidth: activeLineWidth,
+      strokeScaleByName,
       maxDimension: 0,
       format: 'image/png',
       quality: 1,
@@ -1971,6 +1973,7 @@ export default function TestScreen() {
       errorSource: ERROR_TILE,
       lineColor: activeLineColor,
       lineWidth: activeLineWidth,
+      strokeScaleByName,
       maxDimension: 192,
     });
     upsertActiveFile({
