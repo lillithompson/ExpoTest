@@ -77,7 +77,12 @@ export const useTileGrid = ({
 }: Params): Result => {
   const clearLogRef = useRef<{ clearId: number } | null>(null);
   const previousTileSourcesRef = useRef<TileSource[] | null>(null);
+  const previousTileSourcesKeyRef = useRef<string | null>(null);
   const tileSourcesLength = tileSources.length;
+  const tileSourcesKey = useMemo(
+    () => tileSources.map((source) => source.name).join('|'),
+    [tileSources]
+  );
   const gridLayout = useMemo(() => {
     if (fixedRows && fixedColumns) {
       return computeFixedGridLayout(
@@ -441,11 +446,13 @@ export const useTileGrid = ({
   }, [totalCells, tileSourcesLength]);
 
   useEffect(() => {
-    const previousSources = previousTileSourcesRef.current;
-    if (previousSources === tileSources) {
+    const previousKey = previousTileSourcesKeyRef.current;
+    if (previousKey === tileSourcesKey) {
       return;
     }
+    const previousSources = previousTileSourcesRef.current;
     previousTileSourcesRef.current = tileSources;
+    previousTileSourcesKeyRef.current = tileSourcesKey;
     if (suspendRemap) {
       return;
     }
@@ -544,7 +551,7 @@ export const useTileGrid = ({
         };
       })
     );
-  }, [tileSources]);
+  }, [tileSourcesKey, suspendRemap, tileSourcesLength, totalCells]);
 
   const getMirroredPlacements = (cellIndex: number, placement: Tile) => {
     const row = Math.floor(cellIndex / gridLayout.columns);

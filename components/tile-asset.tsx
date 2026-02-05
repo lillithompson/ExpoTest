@@ -165,6 +165,7 @@ export function TileAsset({
   const [svgXml, setSvgXml] = useState<string | null>(null);
   const [svgXmlWithOverrides, setSvgXmlWithOverrides] = useState<string | null>(null);
   const loadCalledRef = useRef(false);
+  const overrideRef = useRef<string | null>(null);
 
   useEffect(() => {
     sourceRef.current = source;
@@ -172,19 +173,20 @@ export function TileAsset({
 
   useEffect(() => {
     if (!isSvg) {
-      setSvgUri(null);
-      setSvgXml(null);
-      setSvgXmlWithOverrides(null);
+      setSvgUri((prev) => (prev === null ? prev : null));
+      setSvgXml((prev) => (prev === null ? prev : null));
+      setSvgXmlWithOverrides((prev) => (prev === null ? prev : null));
+      overrideRef.current = null;
       return;
     }
     let cancelled = false;
     const resolveSvg = async () => {
       if (uri) {
         if (!cancelled) {
-          setSvgUri(uri);
+          setSvgUri((prev) => (prev === uri ? prev : uri));
           const cached = svgXmlCache.get(uri);
           if (cached) {
-            setSvgXml(cached);
+            setSvgXml((prev) => (prev === cached ? prev : cached));
             return;
           }
           if (Platform.OS === 'web') {
@@ -193,7 +195,7 @@ export function TileAsset({
               const xml = await response.text();
               if (!cancelled) {
                 svgXmlCache.set(uri, xml);
-                setSvgXml(xml);
+                setSvgXml((prev) => (prev === xml ? prev : xml));
               }
             } catch {
               // ignore, fall back to uri rendering
@@ -203,7 +205,7 @@ export function TileAsset({
               const xml = await FileSystem.readAsStringAsync(uri);
               if (!cancelled) {
                 svgXmlCache.set(uri, xml);
-                setSvgXml(xml);
+                setSvgXml((prev) => (prev === xml ? prev : xml));
               }
             } catch {
               if (typeof source === 'number') {
@@ -216,13 +218,15 @@ export function TileAsset({
                   if (resolved) {
                     const cachedResolved = svgXmlCache.get(resolved);
                     if (cachedResolved) {
-                      setSvgXml(cachedResolved);
+                      setSvgXml((prev) =>
+                        prev === cachedResolved ? prev : cachedResolved
+                      );
                       return;
                     }
                     const xml = await FileSystem.readAsStringAsync(resolved);
                     if (!cancelled) {
                       svgXmlCache.set(resolved, xml);
-                      setSvgXml(xml);
+                      setSvgXml((prev) => (prev === xml ? prev : xml));
                     }
                   }
                 } catch {
@@ -242,20 +246,22 @@ export function TileAsset({
         }
         if (!cancelled) {
           const resolved = asset.localUri ?? asset.uri ?? null;
-          setSvgUri(resolved);
+          setSvgUri((prev) => (prev === resolved ? prev : resolved));
           if (resolved) {
             if (Platform.OS === 'web') {
               try {
                 const cachedResolved = svgXmlCache.get(resolved);
                 if (cachedResolved) {
-                  setSvgXml(cachedResolved);
+                  setSvgXml((prev) =>
+                    prev === cachedResolved ? prev : cachedResolved
+                  );
                   return;
                 }
                 const response = await fetch(resolved);
                 const xml = await response.text();
                 if (!cancelled) {
                   svgXmlCache.set(resolved, xml);
-                  setSvgXml(xml);
+                  setSvgXml((prev) => (prev === xml ? prev : xml));
                 }
               } catch {
                 // ignore, fall back to uri rendering
@@ -264,13 +270,15 @@ export function TileAsset({
               try {
                 const cachedResolved = svgXmlCache.get(resolved);
                 if (cachedResolved) {
-                  setSvgXml(cachedResolved);
+                  setSvgXml((prev) =>
+                    prev === cachedResolved ? prev : cachedResolved
+                  );
                   return;
                 }
                 const xml = await FileSystem.readAsStringAsync(resolved);
                 if (!cancelled) {
                   svgXmlCache.set(resolved, xml);
-                  setSvgXml(xml);
+                  setSvgXml((prev) => (prev === xml ? prev : xml));
                 }
               } catch {
                 // ignore, fall back to uri rendering
@@ -288,11 +296,16 @@ export function TileAsset({
 
   useEffect(() => {
     if (!svgXml) {
-      setSvgXmlWithOverrides(null);
+      setSvgXmlWithOverrides((prev) => (prev === null ? prev : null));
+      overrideRef.current = null;
       return;
     }
     const stripped = stripOuterBorder(svgXml);
-    setSvgXmlWithOverrides(applySvgOverrides(stripped, strokeColor, strokeWidth));
+    const next = applySvgOverrides(stripped, strokeColor, strokeWidth);
+    if (overrideRef.current !== next) {
+      overrideRef.current = next;
+      setSvgXmlWithOverrides(next);
+    }
   }, [svgXml, strokeColor, strokeWidth]);
 
   useEffect(() => {

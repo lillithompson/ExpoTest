@@ -237,8 +237,19 @@ export default function ModifyTileScreen() {
 
   const tileSet = tileSets.find((set) => set.id === setId) ?? null;
   const tileEntry = tileSet?.tiles.find((tile) => tile.id === tileId) ?? null;
-  const tileSources = tileSet ? TILE_MANIFEST[tileSet.category] ?? [] : [];
-  const activePatterns = tileSet ? patternsByCategory.get(tileSet.category) ?? [] : [];
+  const tileCategories =
+    tileSet && tileSet.categories && tileSet.categories.length > 0
+      ? tileSet.categories
+      : tileSet
+        ? [tileSet.category]
+        : [];
+  const tileSources = tileCategories.flatMap(
+    (category) => TILE_MANIFEST[category] ?? []
+  );
+  const primaryCategory = tileCategories[0] ?? tileSet?.category ?? null;
+  const activePatterns = primaryCategory
+    ? patternsByCategory.get(primaryCategory) ?? []
+    : [];
   const selectedPattern = activePatterns[0] ?? null;
 
   const [brush, setBrush] = useState<

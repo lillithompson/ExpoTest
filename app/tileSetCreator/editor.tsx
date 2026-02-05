@@ -20,7 +20,12 @@ import { TileAsset } from '@/components/tile-asset';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { useTileSets, type TileSetTile } from '@/hooks/use-tile-sets';
-import { getTransformedConnectionsForName } from '@/utils/tile-compat';
+import {
+  getTransformedConnectionsForName,
+  parseTileConnections,
+  transformConnections,
+} from '@/utils/tile-compat';
+import { normalizeTiles, type Tile } from '@/utils/tile-grid';
 import { exportTileCanvasAsSvg } from '@/utils/tile-export';
 
 const HEADER_HEIGHT = 50;
@@ -112,6 +117,15 @@ const hsvToRgb = (h: number, s: number, v: number) => {
 };
 const createId = (prefix: string) =>
   `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+const normalizeCategories = (value: TileCategory[] | null | undefined) => {
+  if (!value || value.length === 0) {
+    return [TILE_CATEGORIES[0]];
+  }
+  const valid = value.filter((entry) => (TILE_CATEGORIES as string[]).includes(entry));
+  return valid.length > 0 ? valid : [TILE_CATEGORIES[0]];
+};
+const getSourcesForCategories = (categories: TileCategory[]) =>
+  categories.flatMap((category) => TILE_MANIFEST[category] ?? []);
 const getBorderStatus = (tile: TileSetTile, sources: Array<{ name?: string }>) => {
   const rows = tile.grid.rows;
   const columns = tile.grid.columns;
@@ -316,17 +330,19 @@ export default function TileSetEditorScreen() {
   const [contextTileId, setContextTileId] = useState<string | null>(null);
   const [nameDraft, setNameDraft] = useState('');
   const [lineWidthDraft, setLineWidthDraft] = useState(3);
+  const [tileSetCategoryError, setTileSetCategoryError] = useState<string | null>(
+    null
+  );
 
   const contentWidth = Math.max(0, width);
+  const calculatedWidth = Math.floor(
+    (contentWidth -
+      FILE_GRID_SIDE_PADDING * 2 -
+      FILE_GRID_GAP * (FILE_GRID_COLUMNS_MOBILE - 1)) /
+      FILE_GRID_COLUMNS_MOBILE
+  );
   const cardWidth =
-    Platform.OS === 'web'
-      ? 100
-      : Math.floor(
-          (contentWidth -
-            FILE_GRID_SIDE_PADDING * 2 -
-            FILE_GRID_GAP * (FILE_GRID_COLUMNS_MOBILE - 1)) /
-            FILE_GRID_COLUMNS_MOBILE
-        );
+    Platform.OS === 'web' ? Math.min(100, calculatedWidth) : calculatedWidth;
 
   useEffect(() => {
     Animated.timing(selectBarAnim, {
@@ -388,7 +404,12 @@ export default function TileSetEditorScreen() {
     );
   }
 
-  const sources = TILE_MANIFEST[tileSet.category] ?? [];
+  const activeCategories = normalizeCategories(
+    tileSet.categories && tileSet.categories.length > 0
+      ? tileSet.categories
+      : [tileSet.category]
+  );
+  const sources = getSourcesForCategories(activeCategories);
   const commitName = () => {
     const trimmed = nameDraft.trim();
     updateTileSet(tileSet.id, (set) => ({
@@ -396,6 +417,100 @@ export default function TileSetEditorScreen() {
       name: trimmed.length > 0 ? trimmed : set.name,
       updatedAt: Date.now(),
     }));
+  };
+  const remapTileSetTiles = (
+    nextCategories: TileCategory[],
+    tilesToRemap: TileSetTile[]
+  ) => {
+    const prevSources = sources;
+    const nextSources = getSourcesForCategories(nextCategories);
+    const sameSources =
+      prevSources.length === nextSources.length &&
+      prevSources.every((source, index) => source === nextSources[index]);
+    if (sameSources) {
+      return tilesToRemap;
+    }
+    const nextLookup = new Map<
+      string,
+      Array<{ index: number; rotation: number; mirrorX: boolean; mirrorY: boolean }>
+    >();
+    nextSources.forEach((source, index) => {
+      const base = parseTileConnections(source.name);
+      if (!base) {
+        return;
+      }
+      const rotations = [0, 90, 180, 270];
+      const mirrors = [
+        { mirrorX: false, mirrorY: false },
+        { mirrorX: true, mirrorY: false },
+        { mirrorX: false, mirrorY: true },
+        { mirrorX: true, mirrorY: true },
+      ];
+      rotations.forEach((rotation) => {
+        mirrors.forEach(({ mirrorX, mirrorY }) => {
+          const key = transformConnections(base, rotation, mirrorX, mirrorY)
+            .map((value) => (value ? '1' : '0'))
+            .join('');
+          const existing = nextLookup.get(key);
+          const entry = { index, rotation, mirrorX, mirrorY };
+          if (existing) {
+            existing.push(entry);
+          } else {
+            nextLookup.set(key, [entry]);
+          }
+        });
+      });
+    });
+    return tilesToRemap.map((tile) => {
+      const total = tile.grid.rows * tile.grid.columns;
+      const normalized = normalizeTiles(tile.tiles, total, prevSources.length);
+      const remapped = normalized.map((placement) => {
+        if (!placement || placement.imageIndex < 0) {
+          return placement;
+        }
+        const previousSource = prevSources[placement.imageIndex];
+        if (!previousSource) {
+          return { imageIndex: -1, rotation: 0, mirrorX: false, mirrorY: false };
+        }
+        const existingIndex = nextSources.indexOf(previousSource);
+        if (existingIndex >= 0) {
+          return {
+            imageIndex: existingIndex,
+            rotation: placement.rotation,
+            mirrorX: placement.mirrorX,
+            mirrorY: placement.mirrorY,
+          };
+        }
+        const previousConnections = parseTileConnections(previousSource.name);
+        if (!previousConnections) {
+          return { imageIndex: -1, rotation: 0, mirrorX: false, mirrorY: false };
+        }
+        const renderedKey = transformConnections(
+          previousConnections,
+          placement.rotation,
+          placement.mirrorX,
+          placement.mirrorY
+        )
+          .map((value) => (value ? '1' : '0'))
+          .join('');
+        const candidates = nextLookup.get(renderedKey);
+        if (!candidates || candidates.length === 0) {
+          return { imageIndex: -1, rotation: 0, mirrorX: false, mirrorY: false };
+        }
+        const match = candidates[0];
+        return {
+          imageIndex: match.index,
+          rotation: match.rotation,
+          mirrorX: match.mirrorX,
+          mirrorY: match.mirrorY,
+        };
+      });
+      return {
+        ...tile,
+        tiles: remapped as Tile[],
+        updatedAt: Date.now(),
+      };
+    });
   };
   const closeContextMenu = () => {
     setShowContextMenu(false);
@@ -640,47 +755,6 @@ export default function TileSetEditorScreen() {
                       ))}
                     </ThemedView>
                   )}
-                  {tile.grid.columns > 0 && tile.grid.rows > 0 && (
-                    <View pointerEvents="none" style={styles.thumbConnectionOverlay}>
-                      {(() => {
-                        const { statuses } = getBorderStatus(tile, sources);
-                        const dotSize = Math.max(4, Math.round(cardWidth * 0.08));
-                        const dotOffset = dotSize / 2;
-                        const positions = [
-                          { left: cardWidth / 2 - dotOffset, top: -dotOffset }, // N
-                          { left: cardWidth - dotOffset, top: -dotOffset }, // NE
-                          { left: cardWidth - dotOffset, top: cardWidth / 2 - dotOffset }, // E
-                          { left: cardWidth - dotOffset, top: cardWidth - dotOffset }, // SE
-                          { left: cardWidth / 2 - dotOffset, top: cardWidth - dotOffset }, // S
-                          { left: -dotOffset, top: cardWidth - dotOffset }, // SW
-                          { left: -dotOffset, top: cardWidth / 2 - dotOffset }, // W
-                          { left: -dotOffset, top: -dotOffset }, // NW
-                        ];
-                        return (
-                          <>
-                            {statuses.map((isConnected, index) => (
-                              <View
-                                key={`thumb-conn-${tile.id}-${index}`}
-                                style={[
-                                  styles.thumbConnectionDot,
-                                  isConnected
-                                    ? styles.thumbConnectionDotOn
-                                    : styles.thumbConnectionDotOff,
-                                  {
-                                    width: dotSize,
-                                    height: dotSize,
-                                    borderRadius: dotSize / 2,
-                                    left: positions[index].left,
-                                    top: positions[index].top,
-                                  },
-                                ]}
-                              />
-                            ))}
-                          </>
-                        );
-                      })()}
-                    </View>
-                  )}
                 </ThemedView>
               </Pressable>
             );
@@ -777,28 +851,44 @@ export default function TileSetEditorScreen() {
               />
             </ThemedView>
             <ThemedView style={styles.sectionGroup}>
-              <ThemedText type="defaultSemiBold">Category</ThemedText>
-              <ThemedView style={styles.overlayList}>
-                {TILE_CATEGORIES.map((category) => (
-                  <Pressable
-                    key={category}
-                    onPress={() =>
-                      updateTileSet(tileSet.id, (set) => ({
-                        ...set,
-                        category,
-                        updatedAt: Date.now(),
-                      }))
+            <ThemedText type="defaultSemiBold">Tile Sets</ThemedText>
+            <ThemedView style={styles.overlayList}>
+              {TILE_CATEGORIES.map((category) => (
+                <Pressable
+                  key={category}
+                  onPress={() => {
+                    const isSelected = activeCategories.includes(category);
+                    if (isSelected && activeCategories.length === 1) {
+                      setTileSetCategoryError('Select at least one tile set.');
+                      return;
                     }
-                    style={[
-                      styles.overlayItem,
-                      category === tileSet.category && styles.overlayItemSelected,
-                    ]}
-                  >
-                    <ThemedText type="defaultSemiBold">{category}</ThemedText>
-                  </Pressable>
-                ))}
-              </ThemedView>
+                    const nextCategories = isSelected
+                      ? activeCategories.filter((entry) => entry !== category)
+                      : [...activeCategories, category];
+                    setTileSetCategoryError(null);
+                    updateTileSet(tileSet.id, (set) => ({
+                      ...set,
+                      category: nextCategories[0] ?? set.category,
+                      categories: nextCategories,
+                      tiles: remapTileSetTiles(nextCategories, set.tiles),
+                      updatedAt: Date.now(),
+                    }));
+                  }}
+                  style={[
+                    styles.overlayItem,
+                    activeCategories.includes(category) && styles.overlayItemSelected,
+                  ]}
+                >
+                  <ThemedText type="defaultSemiBold">{category}</ThemedText>
+                </Pressable>
+              ))}
             </ThemedView>
+            {tileSetCategoryError && (
+              <ThemedText type="defaultSemiBold" style={styles.errorText}>
+                {tileSetCategoryError}
+              </ThemedText>
+            )}
+          </ThemedView>
             <ThemedView style={styles.sectionGroup}>
               <ThemedView style={styles.sectionHeader}>
                 <ThemedText type="defaultSemiBold">Line Width</ThemedText>
@@ -962,19 +1052,6 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
   },
-  thumbConnectionOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    zIndex: 3,
-  },
-  thumbConnectionDot: {
-    position: 'absolute',
-  },
-  thumbConnectionDotOn: {
-    backgroundColor: 'rgba(34, 197, 94, 0.55)',
-  },
-  thumbConnectionDotOff: {
-    backgroundColor: 'rgba(239, 68, 68, 0.55)',
-  },
   contextOverlay: {
     ...StyleSheet.absoluteFillObject,
     zIndex: 30,
@@ -1098,5 +1175,9 @@ const styles = StyleSheet.create({
   },
   overlayItemSelected: {
     borderColor: '#22c55e',
+  },
+  errorText: {
+    color: '#ef4444',
+    marginTop: 6,
   },
 });

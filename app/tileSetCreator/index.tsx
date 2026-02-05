@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Animated,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -10,6 +11,7 @@ import {
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import ViewShot from 'react-native-view-shot';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import {
@@ -20,13 +22,26 @@ import {
 import { TileAsset } from '@/components/tile-asset';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { useTileSets } from '@/hooks/use-tile-sets';
+import { type TileSetTile, useTileSets } from '@/hooks/use-tile-sets';
+import { renderTileCanvasToDataUrl } from '@/utils/tile-export';
+import { type Tile } from '@/utils/tile-grid';
 
 const HEADER_HEIGHT = 50;
 const FILE_GRID_COLUMNS_MOBILE = 3;
 const FILE_GRID_SIDE_PADDING = 12;
 const FILE_GRID_GAP = 12;
 const DEFAULT_CATEGORY = TILE_CATEGORIES[0];
+
+type BakedPreview = { uri: string; signature: string };
+
+type TileSetPreviewProps = {
+  setId: string;
+  previewTiles: TileSetTile[];
+  sources: Array<(typeof TILE_MANIFEST)[keyof typeof TILE_MANIFEST][number]>;
+  lineColor: string;
+  lineWidth: number;
+  bakedPreviewUri: string | null;
+};
 
 export default function TileSetCreatorScreen() {
   const { width } = useWindowDimensions();
@@ -37,10 +52,13 @@ export default function TileSetCreatorScreen() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const selectBarAnim = useRef(new Animated.Value(0)).current;
   const [showCreateModal, setShowCreateModal] = useState(false);
-  const [showSettingsOverlay, setShowSettingsOverlay] = useState(false);
   const [newCategory, setNewCategory] = useState<TileCategory>(DEFAULT_CATEGORY);
   const [newResolution, setNewResolution] = useState(4);
   const [newName, setNewName] = useState('4x4 (New)');
+  const [bakedPreviews, setBakedPreviews] = useState<Record<string, BakedPreview>>(
+    {}
+  );
+  const bakedPreviewRef = useRef<Record<string, BakedPreview>>({});
 
   const contentWidth = Math.max(0, width);
   const fileCardWidth = Math.floor(
@@ -58,6 +76,140 @@ export default function TileSetCreatorScreen() {
     }).start();
   }, [isSelectMode, selectBarAnim]);
 
+  useEffect(() => {
+    bakedPreviewRef.current = bakedPreviews;
+  }, [bakedPreviews]);
+
+  useEffect(() => {
+    if (Platform.OS !== 'web') {
+      return;
+    }
+    let cancelled = false;
+    const buildSignature = (set: (typeof tileSets)[number]) => {
+      const previewTiles = set.tiles.slice(0, 4);
+      const tileTokens = previewTiles
+        .map((tile) => `${tile.id}:${tile.updatedAt}:${tile.thumbnailUri ?? ''}`)
+        .join('|');
+      return `${set.updatedAt}:${tileTokens}`;
+    };
+    const buildPreviews = async () => {
+      const next: Record<string, BakedPreview> = {};
+      const signatures: Record<string, string> = {};
+      for (const set of tileSets) {
+        const previewTiles = set.tiles.slice(0, 4);
+        const signature = buildSignature(set);
+        signatures[set.id] = signature;
+        const cached = bakedPreviewRef.current[set.id];
+        if (cached && cached.signature === signature) {
+          next[set.id] = cached;
+          continue;
+        }
+        if (previewTiles.length === 0) {
+          continue;
+        }
+        const categories =
+          set.categories && set.categories.length > 0 ? set.categories : [set.category];
+        const sources = categories.flatMap((category) => TILE_MANIFEST[category] ?? []);
+
+        const tileThumbs: Array<string | null> = [];
+        for (const tile of previewTiles) {
+          if (tile.thumbnailUri) {
+            tileThumbs.push(tile.thumbnailUri);
+            continue;
+          }
+          const uri = await renderTileCanvasToDataUrl({
+            tiles: tile.tiles,
+            gridLayout: {
+              rows: tile.grid.rows,
+              columns: tile.grid.columns,
+              tileSize: tile.preferredTileSize,
+            },
+            tileSources: sources,
+            gridGap: 0,
+            blankSource: null,
+            errorSource: null,
+            lineColor: set.lineColor,
+            lineWidth: set.lineWidth,
+            backgroundColor: null,
+            maxDimension: 256,
+          });
+          tileThumbs.push(uri);
+        }
+
+        const compositeSources: typeof sources = [];
+        const compositeTiles: Tile[] = [];
+        tileThumbs.forEach((uri) => {
+          if (uri) {
+            compositeSources.push({ name: 'preview', source: { uri } });
+            compositeTiles.push({
+              imageIndex: compositeSources.length - 1,
+              mirrorX: false,
+              mirrorY: false,
+              rotation: 0,
+            });
+          } else {
+            compositeTiles.push({
+              imageIndex: -1,
+              mirrorX: false,
+              mirrorY: false,
+              rotation: 0,
+            });
+          }
+        });
+
+        const compositeUri = await renderTileCanvasToDataUrl({
+          tiles: compositeTiles,
+          gridLayout: {
+            rows: 2,
+            columns: 2,
+            tileSize: 128,
+          },
+          tileSources: compositeSources,
+          gridGap: 3,
+          blankSource: null,
+          errorSource: null,
+          backgroundColor: '#000',
+          backgroundLineColor: '#9ca3af',
+          backgroundLineWidth: 1,
+          maxDimension: 512,
+        });
+
+        if (compositeUri) {
+          next[set.id] = { uri: compositeUri, signature };
+        }
+      }
+
+      if (cancelled) {
+        return;
+      }
+
+      setBakedPreviews((prev) => {
+        const merged: Record<string, BakedPreview> = { ...prev };
+        tileSets.forEach((set) => {
+          const update = next[set.id];
+          if (update) {
+            merged[set.id] = update;
+            return;
+          }
+          const signature = signatures[set.id];
+          if (signature && merged[set.id]?.signature !== signature) {
+            delete merged[set.id];
+          }
+        });
+        Object.keys(merged).forEach((id) => {
+          if (!tileSets.find((set) => set.id === id)) {
+            delete merged[id];
+          }
+        });
+        return merged;
+      });
+    };
+
+    void buildPreviews();
+    return () => {
+      cancelled = true;
+    };
+  }, [tileSets]);
 
   const toggleSelect = (id: string) => {
     setSelectedIds((prev) => {
@@ -135,14 +287,6 @@ export default function TileSetCreatorScreen() {
           >
             <MaterialCommunityIcons name="checkbox-marked-outline" size={22} color="#fff" />
           </Pressable>
-          <Pressable
-            onPress={() => setShowSettingsOverlay(true)}
-            style={styles.headerIcon}
-            accessibilityRole="button"
-            accessibilityLabel="Open settings"
-          >
-            <MaterialCommunityIcons name="cog" size={22} color="#fff" />
-          </Pressable>
         </ThemedView>
       </ThemedView>
       <Animated.View
@@ -190,11 +334,18 @@ export default function TileSetCreatorScreen() {
         {[...tileSets]
           .sort((a, b) => b.updatedAt - a.updatedAt)
           .map((set) => {
-            const tile = set.tiles[0];
-            const sources = TILE_MANIFEST[set.category] ?? [];
+            const previewTiles = set.tiles.slice(0, 4);
+            const categories =
+              set.categories && set.categories.length > 0
+                ? set.categories
+                : [set.category];
+            const sources = categories.flatMap(
+              (category) => TILE_MANIFEST[category] ?? []
+            );
+            const bakedPreview = bakedPreviews[set.id]?.uri ?? null;
             const thumbAspect =
-              tile && tile.grid.columns > 0 && tile.grid.rows > 0
-                ? tile.grid.columns / tile.grid.rows
+              previewTiles[0] && previewTiles[0].grid.columns > 0 && previewTiles[0].grid.rows > 0
+                ? previewTiles[0].grid.columns / previewTiles[0].grid.rows
                 : 1;
             return (
               <Pressable
@@ -220,60 +371,14 @@ export default function TileSetCreatorScreen() {
                     { width: fileCardWidth, aspectRatio: thumbAspect },
                   ]}
                 >
-                  {tile?.thumbnailUri ? (
-                    <TileAsset
-                      source={{ uri: tile.thumbnailUri }}
-                      name="thumbnail.png"
-                      style={styles.fileThumbImage}
-                      resizeMode="cover"
-                    />
-                  ) : tile ? (
-                    <ThemedView style={styles.fileThumbGrid}>
-                      {Array.from({ length: tile.grid.rows }, (_, rowIndex) => (
-                        <ThemedView
-                          key={`row-${set.id}-${rowIndex}`}
-                          style={styles.fileThumbRow}
-                        >
-                          {Array.from({ length: tile.grid.columns }, (_, colIndex) => {
-                            const index = rowIndex * tile.grid.columns + colIndex;
-                            const tileItem = tile.tiles[index];
-                            const source =
-                              tileItem && tileItem.imageIndex >= 0
-                                ? sources[tileItem.imageIndex]?.source
-                                : null;
-                            return (
-                              <ThemedView
-                                key={`cell-${set.id}-${index}`}
-                                style={styles.fileThumbCell}
-                              >
-                                {source && tileItem && (
-                                  <TileAsset
-                                    source={source}
-                                    name={sources[tileItem.imageIndex]?.name}
-                                    strokeColor={set.lineColor}
-                                    strokeWidth={set.lineWidth}
-                                    style={[
-                                      styles.fileThumbImage,
-                                      {
-                                        transform: [
-                                          { scaleX: tileItem.mirrorX ? -1 : 1 },
-                                          { scaleY: tileItem.mirrorY ? -1 : 1 },
-                                          { rotate: `${tileItem.rotation ?? 0}deg` },
-                                        ],
-                                      },
-                                    ]}
-                                    resizeMode="cover"
-                                  />
-                                )}
-                              </ThemedView>
-                            );
-                          })}
-                        </ThemedView>
-                      ))}
-                    </ThemedView>
-                  ) : (
-                    <View style={styles.fileThumbGrid} />
-                  )}
+                  <TileSetPreview
+                    setId={set.id}
+                    previewTiles={previewTiles}
+                    sources={sources}
+                    lineColor={set.lineColor}
+                    lineWidth={set.lineWidth}
+                    bakedPreviewUri={bakedPreview}
+                  />
                 </ThemedView>
                 <ThemedText numberOfLines={1} style={styles.fileCardName}>
                   {set.name}
@@ -377,30 +482,200 @@ export default function TileSetCreatorScreen() {
           </ThemedView>
         </ThemedView>
       )}
-      {showSettingsOverlay && (
-        <ThemedView style={styles.overlay} accessibilityRole="dialog">
-          <Pressable
-            style={styles.overlayBackdrop}
-            onPress={() => setShowSettingsOverlay(false)}
-            accessibilityRole="button"
-            accessibilityLabel="Close settings"
-          />
-          <ThemedView style={styles.overlayPanel}>
-            <ThemedText type="title">Settings</ThemedText>
-            <Pressable
-              onPress={() => setShowSettingsOverlay(false)}
-              style={styles.overlayItem}
-              accessibilityRole="button"
-              accessibilityLabel="Close settings"
-            >
-              <ThemedText type="defaultSemiBold">Close</ThemedText>
-            </Pressable>
-          </ThemedView>
-        </ThemedView>
-      )}
     </ThemedView>
   );
 }
+
+const TileSetPreview = ({
+  setId,
+  previewTiles,
+  sources,
+  lineColor,
+  lineWidth,
+  bakedPreviewUri,
+}: TileSetPreviewProps) => {
+  const [nativePreviewUri, setNativePreviewUri] = useState<string | null>(null);
+  const viewShotRef = useRef<ViewShot>(null);
+  const signature = useMemo(() => {
+    const tileTokens = previewTiles
+      .map((tile) => `${tile.id}:${tile.updatedAt}:${tile.thumbnailUri ?? ''}`)
+      .join('|');
+    return `${setId}:${lineColor}:${lineWidth}:${tileTokens}`;
+  }, [lineColor, lineWidth, previewTiles, setId]);
+
+  useEffect(() => {
+    if (Platform.OS === 'web') {
+      return;
+    }
+    if (previewTiles.length === 0) {
+      setNativePreviewUri(null);
+      return;
+    }
+    let cancelled = false;
+    setNativePreviewUri(null);
+    const capture = async () => {
+      if (!viewShotRef.current) {
+        return;
+      }
+      try {
+        const uri = await viewShotRef.current.capture?.({
+          format: 'png',
+          quality: 1,
+          result: 'tmpfile',
+        });
+        if (!cancelled && uri) {
+          setNativePreviewUri(uri);
+        }
+      } catch {
+        // Ignore capture failures and fall back to live preview.
+      }
+    };
+    const handle = setTimeout(() => {
+      void capture();
+    }, 50);
+    return () => {
+      cancelled = true;
+      clearTimeout(handle);
+    };
+  }, [signature]);
+
+  if (bakedPreviewUri) {
+    return (
+      <TileAsset
+        source={{ uri: bakedPreviewUri }}
+        name="tile-set-preview.png"
+        style={styles.fileThumbImage}
+        resizeMode="cover"
+      />
+    );
+  }
+
+  if (Platform.OS !== 'web' && nativePreviewUri) {
+    return (
+      <TileAsset
+        source={{ uri: nativePreviewUri }}
+        name="tile-set-preview.png"
+        style={styles.fileThumbImage}
+        resizeMode="cover"
+      />
+    );
+  }
+
+  const previewGrid = (
+    <ThemedView
+      style={Platform.OS === 'web' ? styles.fileThumbGrid : styles.fileThumbGridCapture}
+    >
+      {[0, 1].map((rowIndex) => (
+        <ThemedView
+          key={`row-${setId}-${rowIndex}`}
+          style={Platform.OS === 'web' ? styles.fileThumbRow : styles.fileThumbRowCapture}
+        >
+          {[0, 1].map((colIndex) => {
+            const previewIndex = rowIndex * 2 + colIndex;
+            const tile = previewTiles[previewIndex];
+            if (!tile) {
+              return (
+                <ThemedView
+                  key={`cell-${setId}-${previewIndex}`}
+                  style={Platform.OS === 'web' ? styles.fileThumbCell : styles.fileThumbCellCapture}
+                />
+              );
+            }
+            if (tile.thumbnailUri) {
+              return (
+                <ThemedView
+                  key={`cell-${setId}-${previewIndex}`}
+                  style={Platform.OS === 'web' ? styles.fileThumbCell : styles.fileThumbCellCapture}
+                >
+                  <TileAsset
+                    source={{ uri: tile.thumbnailUri }}
+                    name="thumbnail.png"
+                    style={styles.fileThumbImage}
+                    resizeMode="cover"
+                  />
+                </ThemedView>
+              );
+            }
+            return (
+              <ThemedView
+                key={`cell-${setId}-${previewIndex}`}
+                style={Platform.OS === 'web' ? styles.fileThumbCell : styles.fileThumbCellCapture}
+              >
+                <ThemedView
+                  style={
+                    Platform.OS === 'web' ? styles.fileThumbGrid : styles.fileThumbGridCapture
+                  }
+                >
+                  {Array.from({ length: tile.grid.rows }, (_, tileRow) => (
+                    <ThemedView
+                      key={`row-${setId}-${previewIndex}-${tileRow}`}
+                      style={
+                        Platform.OS === 'web' ? styles.fileThumbRow : styles.fileThumbRowCapture
+                      }
+                    >
+                      {Array.from({ length: tile.grid.columns }, (_, tileCol) => {
+                        const index = tileRow * tile.grid.columns + tileCol;
+                        const tileItem = tile.tiles[index];
+                        const source =
+                          tileItem && tileItem.imageIndex >= 0
+                            ? sources[tileItem.imageIndex]?.source
+                            : null;
+                        return (
+                          <ThemedView
+                            key={`cell-${setId}-${previewIndex}-${index}`}
+                            style={
+                              Platform.OS === 'web'
+                                ? styles.fileThumbCell
+                                : styles.fileThumbCellCapture
+                            }
+                          >
+                            {source && tileItem && (
+                              <TileAsset
+                                source={source}
+                                name={sources[tileItem.imageIndex]?.name}
+                                strokeColor={lineColor}
+                                strokeWidth={lineWidth}
+                                style={[
+                                  styles.fileThumbImage,
+                                  {
+                                    transform: [
+                                      { scaleX: tileItem.mirrorX ? -1 : 1 },
+                                      { scaleY: tileItem.mirrorY ? -1 : 1 },
+                                      { rotate: `${tileItem.rotation ?? 0}deg` },
+                                    ],
+                                  },
+                                ]}
+                                resizeMode="cover"
+                              />
+                            )}
+                          </ThemedView>
+                        );
+                      })}
+                    </ThemedView>
+                  ))}
+                </ThemedView>
+              </ThemedView>
+            );
+          })}
+        </ThemedView>
+      ))}
+    </ThemedView>
+  );
+
+  if (Platform.OS !== 'web') {
+    return (
+      <ViewShot
+        ref={viewShotRef}
+        options={{ format: 'png', quality: 1, result: 'tmpfile' }}
+        style={[styles.fileThumbImage, styles.fileThumbCapture]}
+      >
+        {previewGrid}
+      </ViewShot>
+    );
+  }
+
+  return previewGrid;
+};
 
 const styles = StyleSheet.create({
   screen: {
@@ -494,18 +769,42 @@ const styles = StyleSheet.create({
   },
   fileThumbGrid: {
     flex: 1,
+    gap: 2,
   },
   fileThumbRow: {
     flexDirection: 'row',
     flex: 1,
+    gap: 2,
   },
   fileThumbCell: {
     flex: 1,
     backgroundColor: '#000',
+    borderWidth: 1,
+    borderColor: '#9ca3af',
+    margin: 1,
+  },
+  fileThumbGridCapture: {
+    flex: 1,
+    gap: 1,
+  },
+  fileThumbRowCapture: {
+    flexDirection: 'row',
+    flex: 1,
+    gap: 1,
+  },
+  fileThumbCellCapture: {
+    flex: 1,
+    backgroundColor: '#000',
+    borderWidth: 1,
+    borderColor: '#9ca3af',
+    margin: 0,
   },
   fileThumbImage: {
     width: '100%',
     height: '100%',
+  },
+  fileThumbCapture: {
+    backgroundColor: '#000',
   },
   overlay: {
     ...StyleSheet.absoluteFillObject,

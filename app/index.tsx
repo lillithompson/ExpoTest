@@ -3517,7 +3517,8 @@ const styles = StyleSheet.create({
   },
   navButtonText: {
     color: '#2a2a2a',
-    fontSize: 14,
+    fontSize: 18,
+    lineHeight: 20,
   },
   tooltip: {
     position: 'absolute',

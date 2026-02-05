@@ -19,6 +19,7 @@ export type TileSet = {
   id: string;
   name: string;
   category: TileCategory;
+  categories: TileCategory[];
   resolution: number;
   lineWidth: number;
   lineColor: string;
@@ -32,6 +33,16 @@ const createId = (prefix: string) =>
   `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
 const clampResolution = (value: number) => Math.min(8, Math.max(2, value));
+const normalizeCategories = (value: unknown, fallback: TileCategory) => {
+  if (!Array.isArray(value)) {
+    return [fallback];
+  }
+  const valid = value.filter(
+    (entry): entry is TileCategory =>
+      typeof entry === 'string' && (TILE_CATEGORIES as string[]).includes(entry)
+  );
+  return valid.length > 0 ? valid : [fallback];
+};
 
 
 
@@ -48,10 +59,12 @@ export const useTileSets = () => {
           (TILE_CATEGORIES as string[]).includes(set.category)
             ? (set.category as TileCategory)
             : TILE_CATEGORIES[0];
+        const categories = normalizeCategories(set.categories, category);
         return {
           id: set.id ?? createId('tileset'),
           name: set.name ?? 'Tile Set',
-          category,
+          category: categories[0] ?? category,
+          categories,
           resolution: clampResolution(set.resolution ?? 4),
           lineWidth: set.lineWidth ?? 3,
           lineColor: set.lineColor ?? '#ffffff',
@@ -108,6 +121,7 @@ export const useTileSets = () => {
         id: createId('tileset'),
         name: payload.name ?? 'New Tile Set',
         category: payload.category,
+        categories: [payload.category],
         resolution: clampResolution(payload.resolution),
         lineWidth: payload.lineWidth ?? 10,
         lineColor: payload.lineColor ?? '#ffffff',
