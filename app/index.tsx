@@ -829,6 +829,8 @@ export default function TestScreen() {
     handlePress,
     floodFill,
     floodComplete,
+    reconcileTiles,
+    controlledRandomize,
     resetTiles,
     loadTiles,
     clearCloneSource,
@@ -2848,6 +2850,24 @@ export default function TestScreen() {
                   pendingFloodCompleteRef.current = null;
                 }
                 floodComplete();
+              }}
+            />
+            <ToolbarButton
+              label="Reconcile"
+              icon="puzzle"
+              onPress={() => {
+                if (pendingFloodCompleteRef.current) {
+                  clearTimeout(pendingFloodCompleteRef.current);
+                  pendingFloodCompleteRef.current = null;
+                }
+                reconcileTiles();
+              }}
+              onLongPress={() => {
+                if (pendingFloodCompleteRef.current) {
+                  clearTimeout(pendingFloodCompleteRef.current);
+                  pendingFloodCompleteRef.current = null;
+                }
+                controlledRandomize();
               }}
             />
             <ToolbarButton

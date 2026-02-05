@@ -45,6 +45,8 @@ type Result = {
   randomFill: () => void;
   floodFill: () => void;
   floodComplete: () => void;
+  reconcileTiles: () => void;
+  controlledRandomize: () => void;
   resetTiles: () => void;
   loadTiles: (nextTiles: Tile[]) => void;
   clearCloneSource: () => void;
@@ -1137,6 +1139,127 @@ export const useTileGrid = ({
     });
   };
 
+  const reconcileTiles = () => {
+    if (totalCells <= 0 || tileSourcesLength <= 0) {
+      return;
+    }
+    const snapshot = normalizeTiles(tiles, totalCells, tileSourcesLength);
+    const nextTiles = [...snapshot];
+    const allowedSet = randomSourceSet ?? null;
+    const maxPasses = Math.max(1, Math.min(6, totalCells));
+    for (let pass = 0; pass < maxPasses; pass += 1) {
+      let changed = false;
+      for (let index = 0; index < totalCells; index += 1) {
+        const tile = nextTiles[index];
+        if (!tile || tile.imageIndex < 0) {
+          continue;
+        }
+        if (isPlacementValid(index, tile, nextTiles)) {
+          continue;
+        }
+        const candidates = buildCompatibleCandidates(index, nextTiles, allowedSet);
+        if (candidates.length === 0) {
+          continue;
+        }
+        nextTiles[index] = candidates[0];
+        changed = true;
+      }
+      if (!changed) {
+        break;
+      }
+    }
+    withBulkUpdate(() => {
+      applyTiles(nextTiles);
+    });
+  };
+
+  const controlledRandomize = () => {
+    if (totalCells <= 0 || tileSourcesLength <= 0) {
+      return;
+    }
+    const allowedSet = randomSourceSet ?? null;
+    const lookup = new Map<
+      string,
+      Array<{ index: number; rotation: number; mirrorX: boolean; mirrorY: boolean }>
+    >();
+    tileSourceMeta.forEach((meta, index) => {
+      if (allowedSet && !allowedSet.has(index)) {
+        return;
+      }
+      if (!meta.connections) {
+        return;
+      }
+      const rotations = [0, 90, 180, 270];
+      const mirrors = [
+        { mirrorX: false, mirrorY: false },
+        { mirrorX: true, mirrorY: false },
+        { mirrorX: false, mirrorY: true },
+        { mirrorX: true, mirrorY: true },
+      ];
+      rotations.forEach((rotation) => {
+        mirrors.forEach(({ mirrorX, mirrorY }) => {
+          const transformed = transformConnections(
+            meta.connections!,
+            rotation,
+            mirrorX,
+            mirrorY
+          );
+          const key = toConnectionKey(transformed);
+          if (!key) {
+            return;
+          }
+          const entry = { index, rotation, mirrorX, mirrorY };
+          const existing = lookup.get(key);
+          if (existing) {
+            existing.push(entry);
+          } else {
+            lookup.set(key, [entry]);
+          }
+        });
+      });
+    });
+
+    const nextTiles = [...normalizeTiles(tiles, totalCells, tileSourcesLength)];
+    for (const index of getDrivenCellIndices()) {
+      const current = nextTiles[index];
+      if (!current || current.imageIndex < 0) {
+        continue;
+      }
+      const meta = tileSourceMeta[current.imageIndex];
+      if (!meta?.connections) {
+        continue;
+      }
+      const transformed = transformConnections(
+        meta.connections,
+        current.rotation,
+        current.mirrorX,
+        current.mirrorY
+      );
+      const key = toConnectionKey(transformed);
+      if (!key) {
+        continue;
+      }
+      const candidates = lookup.get(key);
+      if (!candidates || candidates.length === 0) {
+        continue;
+      }
+      const pick = candidates[Math.floor(Math.random() * candidates.length)];
+      applyPlacementsToArrayOverride(
+        nextTiles,
+        getMirroredPlacements(index, {
+          imageIndex: pick.index,
+          rotation: pick.rotation,
+          mirrorX: pick.mirrorX,
+          mirrorY: pick.mirrorY,
+        })
+      );
+    }
+
+    withBulkUpdate(() => {
+      applyTiles(nextTiles);
+    });
+  };
+
   const resetTiles = () => {
     markClear();
     withBulkUpdate(() => {
@@ -1167,6 +1290,8 @@ export const useTileGrid = ({
     randomFill,
     floodFill,
     floodComplete,
+    reconcileTiles,
+    controlledRandomize,
     resetTiles,
     loadTiles,
     clearCloneSource,
