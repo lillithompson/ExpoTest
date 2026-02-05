@@ -595,6 +595,7 @@ export default function TestScreen() {
     start: number;
     end: number;
   } | null>(null);
+  const [patternAnchorIndex, setPatternAnchorIndex] = useState<number | null>(null);
   const [showPatternSaveModal, setShowPatternSaveModal] = useState(false);
   const [showPatternChooser, setShowPatternChooser] = useState(false);
   const [isPatternSelectMode, setIsPatternSelectMode] = useState(false);
@@ -813,10 +814,14 @@ export default function TestScreen() {
       setPatternSelection(null);
       setShowPatternSaveModal(false);
       setShowPatternChooser(false);
+      setPatternAnchorIndex(null);
     } else if (activePatterns.length === 0) {
       setIsPatternCreationMode(true);
     }
   }, [brush.mode, activePatterns.length]);
+  useEffect(() => {
+    setPatternAnchorIndex(null);
+  }, [selectedPattern?.id]);
 
   const fileTileSize = activeFile?.preferredTileSize ?? settings.preferredTileSize;
   const activeLineWidth = activeFile?.lineWidth ?? 10;
@@ -1750,6 +1755,13 @@ export default function TestScreen() {
     if (cellIndex === null) {
       return;
     }
+    if (
+      brush.mode === 'pattern' &&
+      !isPatternCreationMode &&
+      patternAnchorIndex === null
+    ) {
+      setPatternAnchorIndex(cellIndex);
+    }
     paintCellIndex(cellIndex);
   };
 
@@ -1773,6 +1785,45 @@ export default function TestScreen() {
       height,
     };
   }, [patternSelection, gridLayout.columns, gridLayout.tileSize, gridLayout.rows]);
+  const patternAlignmentRect = useMemo(() => {
+    if (
+      brush.mode !== 'pattern' ||
+      isPatternCreationMode ||
+      !selectedPattern ||
+      patternAnchorIndex === null ||
+      gridLayout.columns === 0
+    ) {
+      return null;
+    }
+    const rotationCW =
+      ((patternRotations[selectedPattern.id] ?? 0) + 360) % 360;
+    const widthCells =
+      rotationCW % 180 === 0 ? selectedPattern.width : selectedPattern.height;
+    const heightCells =
+      rotationCW % 180 === 0 ? selectedPattern.height : selectedPattern.width;
+    if (widthCells <= 0 || heightCells <= 0) {
+      return null;
+    }
+    const anchorRow = Math.floor(patternAnchorIndex / gridLayout.columns);
+    const anchorCol = patternAnchorIndex % gridLayout.columns;
+    const tileStride = gridLayout.tileSize + GRID_GAP;
+    const width = widthCells * tileStride - (GRID_GAP > 0 ? GRID_GAP : 0);
+    const height = heightCells * tileStride - (GRID_GAP > 0 ? GRID_GAP : 0);
+    return {
+      left: anchorCol * tileStride,
+      top: anchorRow * tileStride,
+      width,
+      height,
+    };
+  }, [
+    brush.mode,
+    isPatternCreationMode,
+    selectedPattern,
+    patternAnchorIndex,
+    patternRotations,
+    gridLayout.columns,
+    gridLayout.tileSize,
+  ]);
 
   const handleSavePattern = () => {
     if (!patternSelection || gridLayout.columns === 0) {
@@ -2957,6 +3008,12 @@ export default function TestScreen() {
               style={[styles.patternSelection, patternSelectionRect]}
             />
           )}
+          {patternAlignmentRect && (
+            <View
+              pointerEvents="none"
+              style={[styles.patternAlignment, patternAlignmentRect]}
+            />
+          )}
           {Platform.OS === 'web' ? (
             <ThemedView
               ref={setGridNode}
@@ -3335,6 +3392,13 @@ export default function TestScreen() {
           getMirror={(index) => paletteMirrors[index] ?? false}
           getMirrorVertical={(index) => paletteMirrorsY[index] ?? false}
           onPatternLongPress={() => {
+            if (brush.mode !== 'pattern') {
+              setBrush({ mode: 'pattern' });
+            }
+            setIsPatternCreationMode(false);
+            setShowPatternChooser(true);
+          }}
+          onPatternDoubleTap={() => {
             if (brush.mode !== 'pattern') {
               setBrush({ mode: 'pattern' });
             }
@@ -4544,6 +4608,7 @@ const styles = StyleSheet.create({
   gridWrapper: {
     position: 'relative',
     backgroundColor: 'transparent',
+    overflow: 'hidden',
   },
   gridBackground: {
     ...StyleSheet.absoluteFillObject,
@@ -4552,6 +4617,12 @@ const styles = StyleSheet.create({
     position: 'absolute',
     borderWidth: 2,
     borderColor: '#22c55e',
+    zIndex: 5,
+  },
+  patternAlignment: {
+    position: 'absolute',
+    borderWidth: 3,
+    borderColor: 'rgba(59, 130, 246, 0.5)',
     zIndex: 5,
   },
   gridLineVertical: {
