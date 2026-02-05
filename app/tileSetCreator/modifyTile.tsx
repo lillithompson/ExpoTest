@@ -237,7 +237,6 @@ export default function ModifyTileScreen() {
 
   const tileSet = tileSets.find((set) => set.id === setId) ?? null;
   const tileEntry = tileSet?.tiles.find((tile) => tile.id === tileId) ?? null;
-  const expectedConnectivity = tileEntry?.expectedConnectivity ?? '00000000';
   const tileSources = tileSet ? TILE_MANIFEST[tileSet.category] ?? [] : [];
   const activePatterns = tileSet ? patternsByCategory.get(tileSet.category) ?? [] : [];
   const selectedPattern = activePatterns[0] ?? null;
@@ -251,7 +250,6 @@ export default function ModifyTileScreen() {
   >({ mode: 'random' });
   const [paletteRotations, setPaletteRotations] = useState<Record<number, number>>({});
   const [paletteMirrors, setPaletteMirrors] = useState<Record<number, boolean>>({});
-  const [showTileSettings, setShowTileSettings] = useState(false);
 
   const safeWidth = Math.max(0, width);
   const safeHeight = Math.max(0, height - insets.top);
@@ -289,9 +287,6 @@ export default function ModifyTileScreen() {
     preferredTileSize: tileEntry?.preferredTileSize ?? 45,
     allowEdgeConnections: true,
     randomRequiresLegal: true,
-    randomDisallowEdgeConnections: true,
-    expectedConnectivity,
-    enforceExpectedConnectivity: expectedConnectivity !== '00000000',
     fixedRows: tileSet?.resolution ?? 0,
     fixedColumns: tileSet?.resolution ?? 0,
     brush,
@@ -553,8 +548,6 @@ export default function ModifyTileScreen() {
   const currentConnectivity = borderConnectionStatus
     ? borderConnectionStatus.map((value) => (value ? '1' : '0')).join('')
     : '00000000';
-  const isBadState = expectedConnectivity !== currentConnectivity;
-  const expectedBits = expectedConnectivity.split('').map((value) => value === '1');
 
   if (!tileSet || !tileEntry) {
     return (
@@ -571,10 +564,9 @@ export default function ModifyTileScreen() {
       <ThemedView
         style={[
           styles.titleContainer,
-          isBadState && styles.titleContainerBad,
         ]}
       >
-        <ThemedView style={[styles.headerRow, isBadState && styles.headerRowBad]}>
+        <ThemedView style={styles.headerRow}>
           <Pressable
             onPress={() => {
               if (router.canGoBack()) {
@@ -591,7 +583,7 @@ export default function ModifyTileScreen() {
             accessibilityLabel="Back to tile set editor"
           >
             <ThemedText type="defaultSemiBold" style={styles.navButtonText}>
-              &lt; {expectedConnectivity}
+              &lt; {currentConnectivity}
             </ThemedText>
           </Pressable>
           <ThemedView style={styles.controls}>
@@ -623,11 +615,6 @@ export default function ModifyTileScreen() {
                   mirrorVertical: !prev.mirrorVertical,
                 }))
               }
-            />
-            <ToolbarButton
-              label="Tile Settings"
-              icon="tune-vertical-variant"
-              onPress={() => setShowTileSettings(true)}
             />
           </ThemedView>
         </ThemedView>
@@ -673,17 +660,9 @@ export default function ModifyTileScreen() {
               )}
             </View>
           )}
-        {expectedConnectivity && gridWidth > 0 && gridHeight > 0 && (
+        {borderConnectionStatus && gridWidth > 0 && gridHeight > 0 && (
           <View pointerEvents="none" style={styles.borderExpectedLines}>
-            {expectedConnectivity.split('').map((value, index) => {
-              const currentBits = borderConnectionStatus
-                ? borderConnectionStatus.map((v) => (v ? '1' : '0')).join('')
-                : '00000000';
-              const expectedOn = value === '1';
-              const currentOn = currentBits[index] === '1';
-              if (!expectedOn && !currentOn) {
-                return null;
-              }
+            {borderConnectionStatus.map((isConnected, index) => {
               const dotSize = Math.max(6, Math.round(gridLayout.tileSize * 0.2));
               const dotOffset = dotSize / 2;
               const positions = [
@@ -696,42 +675,23 @@ export default function ModifyTileScreen() {
                 { left: -dotOffset, top: gridHeight / 2 - dotOffset }, // W
                 { left: -dotOffset, top: -dotOffset }, // NW
               ];
-              if (expectedOn) {
-                return (
-                  <View
-                    key={`border-expected-${index}`}
-                    style={[
-                      styles.expectedConnectionDot,
-                      currentOn
-                        ? styles.expectedConnectionDotOn
-                        : styles.expectedConnectionDotOff,
-                      {
-                        width: dotSize,
-                        height: dotSize,
-                        borderRadius: dotSize / 2,
-                        left: positions[index].left,
-                        top: positions[index].top,
-                      },
-                    ]}
-                  />
-                );
-              }
               return (
                 <View
-                  key={`border-unexpected-${index}`}
+                  key={`border-current-${index}`}
                   style={[
-                    styles.unexpectedConnection,
+                    styles.currentConnectionDot,
+                    isConnected
+                      ? styles.currentConnectionDotOn
+                      : styles.currentConnectionDotOff,
                     {
                       width: dotSize,
                       height: dotSize,
+                      borderRadius: dotSize / 2,
                       left: positions[index].left,
                       top: positions[index].top,
                     },
                   ]}
-                >
-                  <View style={styles.unexpectedConnectionLine} />
-                  <View style={[styles.unexpectedConnectionLine, styles.unexpectedConnectionLineAlt]} />
-                </View>
+                />
               );
             })}
           </View>
@@ -830,113 +790,76 @@ export default function ModifyTileScreen() {
           </ViewShot>
         </View>
       </View>
-      <TileBrushPanel
-        tileSources={tileSources}
-        selected={brush}
-        showPattern={false}
-        rows={brushRows}
-        selectedPattern={
-          selectedPattern
-            ? {
-                tiles: selectedPattern.tiles,
-                width: selectedPattern.width,
-                height: selectedPattern.height,
-                rotation: 0,
-                mirrorX: false,
+      <View style={styles.brushPanelWrap}>
+        <TileBrushPanel
+          tileSources={tileSources}
+          selected={brush}
+          showPattern={false}
+          rows={brushRows}
+          selectedPattern={
+            selectedPattern
+              ? {
+                  tiles: selectedPattern.tiles,
+                  width: selectedPattern.width,
+                  height: selectedPattern.height,
+                  rotation: 0,
+                  mirrorX: false,
+                }
+              : null
+          }
+          onSelect={(next) => {
+            if (next.mode === 'clone') {
+              clearCloneSource();
+            }
+            if (next.mode === 'fixed') {
+              const rotation = paletteRotations[next.index] ?? next.rotation ?? 0;
+              const mirrorX = paletteMirrors[next.index] ?? next.mirrorX ?? false;
+              setBrush({ mode: 'fixed', index: next.index, rotation, mirrorX });
+            } else {
+              setBrush(next);
+            }
+          }}
+          onRotate={(index) =>
+            setPaletteRotations((prev) => {
+              const nextRotation = ((prev[index] ?? 0) + 90) % 360;
+              if (brush.mode === 'fixed' && brush.index === index) {
+                setBrush({
+                  mode: 'fixed',
+                  index,
+                  rotation: nextRotation,
+                  mirrorX: brush.mirrorX,
+                });
               }
-            : null
-        }
-        onSelect={(next) => {
-          if (next.mode === 'clone') {
-            clearCloneSource();
+              return {
+                ...prev,
+                [index]: nextRotation,
+              };
+            })
           }
-          if (next.mode === 'fixed') {
-            const rotation = paletteRotations[next.index] ?? next.rotation ?? 0;
-            const mirrorX = paletteMirrors[next.index] ?? next.mirrorX ?? false;
-            setBrush({ mode: 'fixed', index: next.index, rotation, mirrorX });
-          } else {
-            setBrush(next);
+          onMirror={(index) =>
+            setPaletteMirrors((prev) => {
+              const nextMirror = !(prev[index] ?? false);
+              if (brush.mode === 'fixed' && brush.index === index) {
+                setBrush({
+                  mode: 'fixed',
+                  index,
+                  rotation: brush.rotation,
+                  mirrorX: nextMirror,
+                });
+              }
+              return {
+                ...prev,
+                [index]: nextMirror,
+              };
+            })
           }
-        }}
-        onRotate={(index) =>
-          setPaletteRotations((prev) => {
-            const nextRotation = ((prev[index] ?? 0) + 90) % 360;
-            if (brush.mode === 'fixed' && brush.index === index) {
-              setBrush({
-                mode: 'fixed',
-                index,
-                rotation: nextRotation,
-                mirrorX: brush.mirrorX,
-              });
-            }
-            return {
-              ...prev,
-              [index]: nextRotation,
-            };
-          })
-        }
-        onMirror={(index) =>
-          setPaletteMirrors((prev) => {
-            const nextMirror = !(prev[index] ?? false);
-            if (brush.mode === 'fixed' && brush.index === index) {
-              setBrush({
-                mode: 'fixed',
-                index,
-                rotation: brush.rotation,
-                mirrorX: nextMirror,
-              });
-            }
-            return {
-              ...prev,
-              [index]: nextMirror,
-            };
-          })
-        }
-        getRotation={(index) => paletteRotations[index] ?? 0}
-        getMirror={(index) => paletteMirrors[index] ?? false}
-        height={brushPanelHeight}
-        itemSize={brushItemSize}
-        rowGap={BRUSH_PANEL_ROW_GAP}
-      />
-      {showTileSettings && (
-        <ThemedView style={styles.overlay} accessibilityRole="dialog">
-          <Pressable
-            style={styles.overlayBackdrop}
-            onPress={() => setShowTileSettings(false)}
-            accessibilityRole="button"
-            accessibilityLabel="Close tile settings"
-          />
-          <ThemedView style={styles.overlayPanel}>
-            <ThemedText type="title">Tile Settings</ThemedText>
-            <ThemedText type="defaultSemiBold">Expected Connectivity</ThemedText>
-            <ThemedView style={styles.checkboxRow}>
-              {expectedBits.map((isOn, index) => (
-                <Pressable
-                  key={`expected-${index}`}
-                  onPress={() => {
-                    if (!tileSet || !tileEntry) {
-                      return;
-                    }
-                    const nextBits = expectedBits.map((value, i) =>
-                      i === index ? !value : value
-                    );
-                    const next = nextBits.map((value) => (value ? '1' : '0')).join('');
-                    updateTileInSet(tileSet.id, tileEntry.id, (tile) => ({
-                      ...tile,
-                      expectedConnectivity: next,
-                      updatedAt: Date.now(),
-                    }));
-                  }}
-                  style={[styles.checkbox, isOn && styles.checkboxOn]}
-                  accessibilityRole="checkbox"
-                  accessibilityLabel={`Toggle expected connection ${index + 1}`}
-                  accessibilityState={{ checked: isOn }}
-                />
-              ))}
-            </ThemedView>
-          </ThemedView>
-        </ThemedView>
-      )}
+          getRotation={(index) => paletteRotations[index] ?? 0}
+          getMirror={(index) => paletteMirrors[index] ?? false}
+          height={brushPanelHeight}
+          itemSize={brushItemSize}
+          rowGap={BRUSH_PANEL_ROW_GAP}
+        />
+      </View>
     </ThemedView>
   );
 }
@@ -955,9 +878,6 @@ const styles = StyleSheet.create({
     width: '100%',
     backgroundColor: '#e5e5e5',
   },
-  titleContainerBad: {
-    backgroundColor: '#f2c9c9',
-  },
   headerRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -965,9 +885,6 @@ const styles = StyleSheet.create({
     width: '100%',
     paddingHorizontal: 6,
     backgroundColor: '#e5e5e5',
-  },
-  headerRowBad: {
-    backgroundColor: '#f2c9c9',
   },
   controls: {
     flexDirection: 'row',
@@ -993,7 +910,8 @@ const styles = StyleSheet.create({
   },
   navButtonText: {
     color: '#2a2a2a',
-    fontSize: 14,
+    fontSize: 18,
+    lineHeight: 20,
   },
   gridWrapper: {
     position: 'relative',
@@ -1035,8 +953,12 @@ const styles = StyleSheet.create({
   },
   borderExpectedLines: {
     ...StyleSheet.absoluteFillObject,
-    zIndex: 4,
+    zIndex: 1,
     backgroundColor: 'transparent',
+  },
+  brushPanelWrap: {
+    zIndex: 10,
+    backgroundColor: '#3f3f3f',
   },
   row: {
     flexDirection: 'row',
@@ -1077,66 +999,14 @@ const styles = StyleSheet.create({
   connectionDotNeutral: {
     backgroundColor: 'rgba(148, 163, 184, 0.6)',
   },
-  expectedConnectionDot: {
+  currentConnectionDot: {
     position: 'absolute',
   },
-  expectedConnectionDotOn: {
+  currentConnectionDotOn: {
     backgroundColor: 'rgba(34, 197, 94, 0.75)',
   },
-  expectedConnectionDotOff: {
+  currentConnectionDotOff: {
     backgroundColor: 'rgba(239, 68, 68, 0.75)',
-  },
-  unexpectedConnection: {
-    position: 'absolute',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  unexpectedConnectionLine: {
-    position: 'absolute',
-    width: '100%',
-    height: 2,
-    backgroundColor: 'rgba(239, 68, 68, 0.85)',
-    transform: [{ rotate: '45deg' }],
-  },
-  unexpectedConnectionLineAlt: {
-    transform: [{ rotate: '-45deg' }],
-  },
-  overlay: {
-    ...StyleSheet.absoluteFillObject,
-    zIndex: 30,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: 'transparent',
-  },
-  overlayBackdrop: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.6)',
-  },
-  overlayPanel: {
-    width: '85%',
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#1f1f1f',
-    padding: 16,
-    backgroundColor: '#fff',
-    gap: 12,
-  },
-  checkboxRow: {
-    flexDirection: 'row',
-    flexWrap: 'nowrap',
-    gap: 6,
-    justifyContent: 'space-between',
-  },
-  checkbox: {
-    width: 18,
-    height: 18,
-    borderRadius: 3,
-    borderWidth: 1,
-    borderColor: '#1f1f1f',
-    backgroundColor: '#fff',
-  },
-  checkboxOn: {
-    backgroundColor: '#22c55e',
   },
   tileImage: {
     width: '100%',

@@ -19,12 +19,8 @@ import { TILE_CATEGORIES, TILE_MANIFEST } from '@/assets/images/tiles/manifest';
 import { TileAsset } from '@/components/tile-asset';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { generateTileForExpected, useTileSets, type TileSetTile } from '@/hooks/use-tile-sets';
-import {
-  getTransformedConnectionsForName,
-  mirrorConnections,
-  rotateConnections,
-} from '@/utils/tile-compat';
+import { useTileSets, type TileSetTile } from '@/hooks/use-tile-sets';
+import { getTransformedConnectionsForName } from '@/utils/tile-compat';
 import { exportTileCanvasAsSvg } from '@/utils/tile-export';
 
 const HEADER_HEIGHT = 50;
@@ -116,35 +112,6 @@ const hsvToRgb = (h: number, s: number, v: number) => {
 };
 const createId = (prefix: string) =>
   `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-const parseBits = (value: string) => value.split('').map((digit) => digit === '1');
-const toBits = (connections: boolean[] | null) =>
-  connections ? connections.map((value) => (value ? '1' : '0')).join('') : '00000000';
-const canonicalConnectivity = (bits: string) => {
-  const base = parseBits(bits);
-  const rotations = [0, 1, 2, 3];
-  const mirrors = [
-    { mirrorX: false, mirrorY: false },
-    { mirrorX: true, mirrorY: false },
-    { mirrorX: false, mirrorY: true },
-    { mirrorX: true, mirrorY: true },
-  ];
-  const variants: string[] = [];
-  rotations.forEach((rot) => {
-    const rotated = rotateConnections(base as any, rot);
-    mirrors.forEach((mirror) => {
-      variants.push(toBits(mirrorConnections(rotated as any, mirror.mirrorX, mirror.mirrorY)));
-    });
-  });
-  return variants.sort()[0];
-};
-const getCanonicalPatterns = () => {
-  const patterns = new Set<string>();
-  for (let i = 0; i < 256; i += 1) {
-    const bits = i.toString(2).padStart(8, '0');
-    patterns.add(canonicalConnectivity(bits));
-  }
-  return Array.from(patterns.values()).sort();
-};
 const getBorderStatus = (tile: TileSetTile, sources: Array<{ name?: string }>) => {
   const rows = tile.grid.rows;
   const columns = tile.grid.columns;
@@ -347,7 +314,6 @@ export default function TileSetEditorScreen() {
   const [showSettingsOverlay, setShowSettingsOverlay] = useState(false);
   const [showContextMenu, setShowContextMenu] = useState(false);
   const [contextTileId, setContextTileId] = useState<string | null>(null);
-  const missingBannerAnim = useRef(new Animated.Value(0)).current;
   const [nameDraft, setNameDraft] = useState('');
   const [lineWidthDraft, setLineWidthDraft] = useState(3);
 
@@ -383,27 +349,6 @@ export default function TileSetEditorScreen() {
     setNameDraft(tileSet.name);
     setLineWidthDraft(tileSet.lineWidth);
   }, [tileSet?.id, tileSet?.name, tileSet?.lineWidth]);
-
-  const canonicalPatterns = useMemo(() => getCanonicalPatterns(), []);
-  const missingPatterns = useMemo(() => {
-    if (!tileSet) {
-      return [];
-    }
-    const present = new Set(
-      tileSet.tiles.map((tile) =>
-        canonicalConnectivity(tile.expectedConnectivity ?? '00000000')
-      )
-    );
-    return canonicalPatterns.filter((pattern) => !present.has(pattern));
-  }, [tileSet, canonicalPatterns]);
-
-  useEffect(() => {
-    Animated.timing(missingBannerAnim, {
-      toValue: missingPatterns.length > 0 ? 1 : 0,
-      duration: 220,
-      useNativeDriver: false,
-    }).start();
-  }, [missingPatterns.length, missingBannerAnim]);
 
   const contextTile = tileSet?.tiles.find((tile) => tile.id === contextTileId) ?? null;
 
@@ -492,29 +437,6 @@ export default function TileSetEditorScreen() {
       fileName: `${tileSet.name}_${bits}.svg`,
     });
   };
-  const createMissingTiles = () => {
-    if (missingPatterns.length === 0) {
-      return;
-    }
-    updateTileSet(tileSet.id, (set) => {
-      const created = missingPatterns.map((pattern, index) => ({
-        id: createId('tile'),
-        name: `Tile ${set.tiles.length + index + 1}`,
-        tiles: generateTileForExpected(pattern, set.resolution, set.category),
-        grid: { rows: set.resolution, columns: set.resolution },
-        preferredTileSize: 45,
-        thumbnailUri: null,
-        previewUri: null,
-        expectedConnectivity: pattern,
-        updatedAt: Date.now(),
-      }));
-      return {
-        ...set,
-        tiles: [...created, ...set.tiles],
-        updatedAt: Date.now(),
-      };
-    });
-  };
 
   return (
     <ThemedView
@@ -588,38 +510,6 @@ export default function TileSetEditorScreen() {
       </ThemedView>
       <Animated.View
         style={[
-          styles.missingBanner,
-          {
-            height: missingBannerAnim.interpolate({
-              inputRange: [0, 1],
-              outputRange: [0, 40],
-            }),
-            opacity: missingBannerAnim,
-          },
-        ]}
-      >
-        <ThemedText
-          type="defaultSemiBold"
-          style={styles.missingBannerText}
-          numberOfLines={1}
-        >
-          {missingPatterns.length > 0
-            ? `missing: ${missingPatterns.join(', ')}`
-            : ''}
-        </ThemedText>
-        <Pressable
-          onPress={createMissingTiles}
-          style={styles.missingBannerButton}
-          accessibilityRole="button"
-          accessibilityLabel="Create missing tiles"
-        >
-          <ThemedText type="defaultSemiBold" style={styles.missingBannerButtonText}>
-            Create now
-          </ThemedText>
-        </Pressable>
-      </Animated.View>
-      <Animated.View
-        style={[
           styles.fileSelectBar,
           {
             height: selectBarAnim.interpolate({
@@ -661,16 +551,7 @@ export default function TileSetEditorScreen() {
         showsVerticalScrollIndicator
       >
         {[...tileSet.tiles]
-          .sort((a, b) => {
-            const countOnes = (value: string) =>
-              value.split('').reduce((sum, bit) => sum + (bit === '1' ? 1 : 0), 0);
-            const countA = countOnes(a.expectedConnectivity ?? '00000000');
-            const countB = countOnes(b.expectedConnectivity ?? '00000000');
-            if (countB !== countA) {
-              return countB - countA;
-            }
-            return b.updatedAt - a.updatedAt;
-          })
+          .sort((a, b) => b.updatedAt - a.updatedAt)
           .map((tile) => {
             const thumbAspect =
               tile.grid.columns > 0 && tile.grid.rows > 0
@@ -762,10 +643,7 @@ export default function TileSetEditorScreen() {
                   {tile.grid.columns > 0 && tile.grid.rows > 0 && (
                     <View pointerEvents="none" style={styles.thumbConnectionOverlay}>
                       {(() => {
-                        const { statuses, bits } = getBorderStatus(tile, sources);
-                        const currentConnectivity = bits;
-                        const expectedConnectivity = tile.expectedConnectivity ?? '00000000';
-                        const isBadState = expectedConnectivity !== currentConnectivity;
+                        const { statuses } = getBorderStatus(tile, sources);
                         const dotSize = Math.max(4, Math.round(cardWidth * 0.08));
                         const dotOffset = dotSize / 2;
                         const positions = [
@@ -780,28 +658,24 @@ export default function TileSetEditorScreen() {
                         ];
                         return (
                           <>
-                            {isBadState && <View style={styles.thumbBadOverlay} />}
-                            {statuses.map((isConnected, index) => {
-                              if (!isConnected) {
-                                return null;
-                              }
-                              return (
-                                <View
-                                  key={`thumb-conn-${tile.id}-${index}`}
-                                  style={[
-                                    styles.thumbConnectionDot,
-                                    styles.thumbConnectionDotOn,
-                                    {
-                                      width: dotSize,
-                                      height: dotSize,
-                                      borderRadius: dotSize / 2,
-                                      left: positions[index].left,
-                                      top: positions[index].top,
-                                    },
-                                  ]}
-                                />
-                              );
-                            })}
+                            {statuses.map((isConnected, index) => (
+                              <View
+                                key={`thumb-conn-${tile.id}-${index}`}
+                                style={[
+                                  styles.thumbConnectionDot,
+                                  isConnected
+                                    ? styles.thumbConnectionDotOn
+                                    : styles.thumbConnectionDotOff,
+                                  {
+                                    width: dotSize,
+                                    height: dotSize,
+                                    borderRadius: dotSize / 2,
+                                    left: positions[index].left,
+                                    top: positions[index].top,
+                                  },
+                                ]}
+                              />
+                            ))}
                           </>
                         );
                       })()}
@@ -989,31 +863,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     backgroundColor: '#e5e5e5',
   },
-  missingBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 12,
-    gap: 8,
-    backgroundColor: '#7f1d1d',
-    overflow: 'hidden',
-  },
-  missingBannerText: {
-    flex: 1,
-    color: '#fee2e2',
-    fontSize: 12,
-  },
-  missingBannerButton: {
-    paddingVertical: 4,
-    paddingHorizontal: 8,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#fecaca',
-  },
-  missingBannerButtonText: {
-    color: '#fee2e2',
-    fontSize: 12,
-  },
   headerLeft: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1116,10 +965,6 @@ const styles = StyleSheet.create({
   thumbConnectionOverlay: {
     ...StyleSheet.absoluteFillObject,
     zIndex: 3,
-  },
-  thumbBadOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(239, 68, 68, 0.35)',
   },
   thumbConnectionDot: {
     position: 'absolute',

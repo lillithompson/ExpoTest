@@ -21,9 +21,6 @@ type Params = {
   allowEdgeConnections: boolean;
   suspendRemap?: boolean;
   randomRequiresLegal?: boolean;
-  randomDisallowEdgeConnections?: boolean;
-  expectedConnectivity?: string;
-  enforceExpectedConnectivity?: boolean;
   fixedRows?: number;
   fixedColumns?: number;
   brush:
@@ -70,9 +67,6 @@ export const useTileGrid = ({
   allowEdgeConnections,
   suspendRemap = false,
   randomRequiresLegal = false,
-  randomDisallowEdgeConnections = false,
-  expectedConnectivity,
-  enforceExpectedConnectivity = false,
   fixedRows,
   fixedColumns,
   brush,
@@ -260,121 +254,6 @@ export const useTileGrid = ({
     }
   };
 
-  const hasOutOfBoundsConnection = (cellIndex: number, placement: Tile) => {
-    if (!randomDisallowEdgeConnections) {
-      return false;
-    }
-    const meta = tileSourceMeta[placement.imageIndex];
-    if (!meta || !meta.connections) {
-      return false;
-    }
-    const expectedBits = expectedConnectivity ?? '00000000';
-    const isExpectedAllowed = (row: number, col: number, dirIndex: number) => {
-      if (expectedBits.length < 8) {
-        return false;
-      }
-      const topRow = 0;
-      const bottomRow = gridLayout.rows - 1;
-      const leftCol = 0;
-      const rightCol = gridLayout.columns - 1;
-      const midCol = Math.floor(gridLayout.columns / 2);
-      const midRow = Math.floor(gridLayout.rows / 2);
-      const hasEvenCols = gridLayout.columns % 2 === 0;
-      const hasEvenRows = gridLayout.rows % 2 === 0;
-      const leftMidCol = hasEvenCols ? gridLayout.columns / 2 - 1 : midCol;
-      const rightMidCol = hasEvenCols ? gridLayout.columns / 2 : midCol;
-      const topMidRow = hasEvenRows ? gridLayout.rows / 2 - 1 : midRow;
-      const bottomMidRow = hasEvenRows ? gridLayout.rows / 2 : midRow;
-
-      // Corners
-      if (row === topRow && col === leftCol && dirIndex === 7) {
-        return expectedBits[7] === '1'; // NW
-      }
-      if (row === topRow && col === rightCol && dirIndex === 1) {
-        return expectedBits[1] === '1'; // NE
-      }
-      if (row === bottomRow && col === rightCol && dirIndex === 3) {
-        return expectedBits[3] === '1'; // SE
-      }
-      if (row === bottomRow && col === leftCol && dirIndex === 5) {
-        return expectedBits[5] === '1'; // SW
-      }
-
-      // Edges (N/E/S/W)
-      if (expectedBits[0] === '1') {
-        if (
-          (hasEvenCols &&
-            row === topRow &&
-            ((col === leftMidCol && dirIndex === 1) ||
-              (col === rightMidCol && dirIndex === 7))) ||
-          (!hasEvenCols && row === topRow && col === midCol && dirIndex === 0)
-        ) {
-          return true;
-        }
-      }
-      if (expectedBits[4] === '1') {
-        if (
-          (hasEvenCols &&
-            row === bottomRow &&
-            ((col === leftMidCol && dirIndex === 3) ||
-              (col === rightMidCol && dirIndex === 5))) ||
-          (!hasEvenCols && row === bottomRow && col === midCol && dirIndex === 4)
-        ) {
-          return true;
-        }
-      }
-      if (expectedBits[2] === '1') {
-        if (
-          (hasEvenRows &&
-            col === rightCol &&
-            ((row === topMidRow && dirIndex === 3) ||
-              (row === bottomMidRow && dirIndex === 1))) ||
-          (!hasEvenRows && col === rightCol && row === midRow && dirIndex === 2)
-        ) {
-          return true;
-        }
-      }
-      if (expectedBits[6] === '1') {
-        if (
-          (hasEvenRows &&
-            col === leftCol &&
-            ((row === topMidRow && dirIndex === 5) ||
-              (row === bottomMidRow && dirIndex === 7))) ||
-          (!hasEvenRows && col === leftCol && row === midRow && dirIndex === 6)
-        ) {
-          return true;
-        }
-      }
-      return false;
-    };
-    const row = Math.floor(cellIndex / gridLayout.columns);
-    const col = cellIndex % gridLayout.columns;
-    const directions = [
-      { dr: -1, dc: 0 }, // N
-      { dr: -1, dc: 1 }, // NE
-      { dr: 0, dc: 1 }, // E
-      { dr: 1, dc: 1 }, // SE
-      { dr: 1, dc: 0 }, // S
-      { dr: 1, dc: -1 }, // SW
-      { dr: 0, dc: -1 }, // W
-      { dr: -1, dc: -1 }, // NW
-    ];
-    const transformed = transformConnections(
-      meta.connections,
-      placement.rotation,
-      placement.mirrorX,
-      placement.mirrorY
-    );
-    return directions.some((dir, index) => {
-      const r = row + dir.dr;
-      const c = col + dir.dc;
-      if (r < 0 || c < 0 || r >= gridLayout.rows || c >= gridLayout.columns) {
-        return transformed[index] && !isExpectedAllowed(row, col, index);
-      }
-      return false;
-    });
-  };
-
   const buildCompatibleCandidates = (cellIndex: number, tilesState: Tile[]) => {
     if (tileSourcesLength <= 0) {
       return [] as Tile[];
@@ -483,20 +362,14 @@ export const useTileGrid = ({
     return candidates[Math.floor(Math.random() * candidates.length)];
   };
 
-  const selectCompatibleTileConstrained = (cellIndex: number, tilesState: Tile[]) => {
-    const candidates = buildCompatibleCandidates(cellIndex, tilesState);
-    if (candidates.length === 0) {
-      return null;
+  const getRandomPlacement = (cellIndex: number, tilesState: Tile[]) => {
+    const selection = selectCompatibleTile(cellIndex, tilesState);
+    if (selection && isPlacementValid(cellIndex, selection, tilesState)) {
+      return selection;
     }
-    const valid = candidates.filter(
-      (candidate) =>
-        isPlacementValid(cellIndex, candidate, tilesState) &&
-        !hasOutOfBoundsConnection(cellIndex, candidate)
-    );
-    if (valid.length === 0) {
-      return null;
-    }
-    return valid[Math.floor(Math.random() * valid.length)];
+    return randomRequiresLegal
+      ? { imageIndex: -1, rotation: 0, mirrorX: false, mirrorY: false }
+      : { imageIndex: -2, rotation: 0, mirrorX: false, mirrorY: false };
   };
 
   const isPlacementValid = (
@@ -779,112 +652,6 @@ export const useTileGrid = ({
     );
   };
 
-  const computeBorderConnectivity = (tilesArr: Tile[]) => {
-    if (gridLayout.rows <= 0 || gridLayout.columns <= 0) {
-      return '00000000';
-    }
-    const totalCells = gridLayout.rows * gridLayout.columns;
-    const rendered = tilesArr.map((tile) => {
-      if (!tile || tile.imageIndex < 0) {
-        return null;
-      }
-      const meta = tileSourceMeta[tile.imageIndex];
-      if (!meta?.connections) {
-        return null;
-      }
-      return transformConnections(
-        meta.connections,
-        tile.rotation,
-        tile.mirrorX,
-        tile.mirrorY
-      );
-    });
-    const indexAt = (row: number, col: number) => row * gridLayout.columns + col;
-    const pick = (row: number, col: number, dirIndex: number) => {
-      const index = indexAt(row, col);
-      if (index < 0 || index >= totalCells) {
-        return false;
-      }
-      const current = rendered[index];
-      return Boolean(current?.[dirIndex]);
-    };
-    const topRow = 0;
-    const bottomRow = gridLayout.rows - 1;
-    const leftCol = 0;
-    const rightCol = gridLayout.columns - 1;
-    const midCol = Math.floor(gridLayout.columns / 2);
-    const midRow = Math.floor(gridLayout.rows / 2);
-    const hasEvenCols = gridLayout.columns % 2 === 0;
-    const hasEvenRows = gridLayout.rows % 2 === 0;
-    const leftMidCol = hasEvenCols ? gridLayout.columns / 2 - 1 : midCol;
-    const rightMidCol = hasEvenCols ? gridLayout.columns / 2 : midCol;
-    const topMidRow = hasEvenRows ? gridLayout.rows / 2 - 1 : midRow;
-    const bottomMidRow = hasEvenRows ? gridLayout.rows / 2 : midRow;
-    const north = hasEvenCols
-      ? pick(topRow, leftMidCol, 1) || pick(topRow, rightMidCol, 7)
-      : pick(topRow, midCol, 0);
-    const south = hasEvenCols
-      ? pick(bottomRow, leftMidCol, 3) || pick(bottomRow, rightMidCol, 5)
-      : pick(bottomRow, midCol, 4);
-    const east = hasEvenRows
-      ? pick(topMidRow, rightCol, 3) || pick(bottomMidRow, rightCol, 1)
-      : pick(midRow, rightCol, 2);
-    const west = hasEvenRows
-      ? pick(topMidRow, leftCol, 5) || pick(bottomMidRow, leftCol, 7)
-      : pick(midRow, leftCol, 6);
-    return [
-      north,
-      pick(topRow, rightCol, 1),
-      east,
-      pick(bottomRow, rightCol, 3),
-      south,
-      pick(bottomRow, leftCol, 5),
-      west,
-      pick(topRow, leftCol, 7),
-    ]
-      .map((value) => (value ? '1' : '0'))
-      .join('');
-  };
-
-  const matchesExpectedConnectivity = (nextTiles: Tile[]) => {
-    if (!enforceExpectedConnectivity || !expectedConnectivity) {
-      return true;
-    }
-    const nextBits = computeBorderConnectivity(nextTiles);
-    const currentBits = computeBorderConnectivity(
-      normalizeTiles(tiles, totalCells, tileSourcesLength)
-    );
-    if (currentBits === expectedConnectivity) {
-      return nextBits === expectedConnectivity;
-    }
-    for (let i = 0; i < expectedConnectivity.length; i += 1) {
-      if (nextBits[i] === '1' && expectedConnectivity[i] !== '1') {
-        return false;
-      }
-    }
-    return true;
-  };
-
-  const matchesExpectedConnectivityExact = (nextTiles: Tile[]) => {
-    if (!enforceExpectedConnectivity || !expectedConnectivity) {
-      return true;
-    }
-    return computeBorderConnectivity(nextTiles) === expectedConnectivity;
-  };
-
-  const connectivityScore = (bits: string) => {
-    if (!expectedConnectivity) {
-      return 0;
-    }
-    let score = 0;
-    for (let i = 0; i < expectedConnectivity.length; i += 1) {
-      if (expectedConnectivity[i] === '1' && bits[i] === '1') {
-        score += 1;
-      }
-    }
-    return score;
-  };
-
   const getPatternTileForPosition = (row: number, col: number) => {
     if (!pattern || pattern.width <= 0 || pattern.height <= 0) {
       return null;
@@ -1050,13 +817,10 @@ export const useTileGrid = ({
       return;
     }
 
-    const selection = randomDisallowEdgeConnections
-      ? selectCompatibleTileConstrained(cellIndex, renderTiles)
-      : selectCompatibleTile(cellIndex, renderTiles);
+    const selection = selectCompatibleTile(cellIndex, renderTiles);
     if (
       !selection ||
-      !isPlacementValid(cellIndex, selection, renderTiles) ||
-      hasOutOfBoundsConnection(cellIndex, selection)
+      !isPlacementValid(cellIndex, selection, renderTiles)
     ) {
       if (randomRequiresLegal) {
         return;
@@ -1086,13 +850,6 @@ export const useTileGrid = ({
       mirrorX: selection.mirrorX,
       mirrorY: selection.mirrorY,
     });
-    if (enforceExpectedConnectivity) {
-      const nextTiles = [...normalizeTiles(tiles, totalCells, tileSourcesLength)];
-      applyPlacementsToArrayOverride(nextTiles, placements);
-      if (!matchesExpectedConnectivity(nextTiles)) {
-        return;
-      }
-    }
     applyPlacement(cellIndex, {
       imageIndex: selection.imageIndex,
       rotation: selection.rotation,
@@ -1106,82 +863,13 @@ export const useTileGrid = ({
     if (totalCells <= 0 || tileSourcesLength <= 0) {
       return;
     }
-    const attemptFill = () => {
-      const startIndex = Math.floor(Math.random() * totalCells);
-      const nextTiles = [...normalized];
-      for (let offset = 0; offset < totalCells; offset += 1) {
-        const index = (startIndex + offset) % totalCells;
-        if (enforceExpectedConnectivity && expectedConnectivity) {
-          const candidates = buildCompatibleCandidates(index, nextTiles).filter(
-            (candidate) =>
-              isPlacementValid(index, candidate, nextTiles) &&
-              !hasOutOfBoundsConnection(index, candidate)
-          );
-          let bestScore = -1;
-          let bestCandidates: Tile[] = [];
-          for (const candidate of candidates) {
-            const placements = getMirroredPlacements(index, candidate);
-            const preview = [...nextTiles];
-            applyPlacementsToArrayOverride(preview, placements);
-            if (!matchesExpectedConnectivity(preview)) {
-              continue;
-            }
-            const score = connectivityScore(computeBorderConnectivity(preview));
-            if (score > bestScore) {
-              bestScore = score;
-              bestCandidates = [candidate];
-            } else if (score === bestScore) {
-              bestCandidates.push(candidate);
-            }
-          }
-          if (bestCandidates.length > 0) {
-            const pick =
-              bestCandidates[Math.floor(Math.random() * bestCandidates.length)];
-            applyPlacementsToArrayOverride(nextTiles, getMirroredPlacements(index, pick));
-          } else {
-            nextTiles[index] = randomRequiresLegal
-              ? { imageIndex: -1, rotation: 0, mirrorX: false, mirrorY: false }
-              : { imageIndex: -2, rotation: 0, mirrorX: false, mirrorY: false };
-          }
-          continue;
-        }
-        const selection = randomDisallowEdgeConnections
-          ? selectCompatibleTileConstrained(index, nextTiles)
-          : selectCompatibleTile(index, nextTiles);
-        const validSelection =
-          selection &&
-          isPlacementValid(index, selection, nextTiles) &&
-          !hasOutOfBoundsConnection(index, selection)
-            ? selection
-            : null;
-        if (validSelection) {
-          const placements = getMirroredPlacements(index, validSelection);
-          const preview = [...nextTiles];
-          applyPlacementsToArrayOverride(preview, placements);
-          if (matchesExpectedConnectivity(preview)) {
-            applyPlacementsToArrayOverride(nextTiles, placements);
-          }
-        } else {
-          nextTiles[index] = randomRequiresLegal
-            ? { imageIndex: -1, rotation: 0, mirrorX: false, mirrorY: false }
-            : { imageIndex: -2, rotation: 0, mirrorX: false, mirrorY: false };
-        }
-      }
-      return nextTiles;
-    };
-    if (enforceExpectedConnectivity && expectedConnectivity) {
-      let attempt = 0;
-      let best = attemptFill();
-      while (attempt < 60 && !matchesExpectedConnectivityExact(best)) {
-        best = attemptFill();
-        attempt += 1;
-      }
-      withBulkUpdate(() => {
-        applyTiles(best);
-      });
-      return;
+    const startIndex = Math.floor(Math.random() * totalCells);
+    const nextTiles = [...normalized];
+    for (let offset = 0; offset < totalCells; offset += 1) {
+      const index = (startIndex + offset) % totalCells;
+      const placement = getRandomPlacement(index, nextTiles);
+      applyPlacementsToArrayOverride(nextTiles, getMirroredPlacements(index, placement));
     }
-    const nextTiles = attemptFill();
     withBulkUpdate(() => {
       applyTiles(nextTiles);
     });
@@ -1240,98 +928,11 @@ export const useTileGrid = ({
       if (mirrorHorizontal || mirrorVertical) {
         const nextTiles = buildInitialTiles(totalCells);
         for (const index of getDrivenCellIndices()) {
-          if (enforceExpectedConnectivity && expectedConnectivity) {
-            const candidates = buildCompatibleCandidates(index, nextTiles).filter(
-              (candidate) =>
-                isPlacementValid(index, candidate, nextTiles) &&
-                !hasOutOfBoundsConnection(index, candidate)
-            );
-            let bestScore = -1;
-            let bestCandidates: Tile[] = [];
-            for (const candidate of candidates) {
-              const placements = getMirroredPlacements(index, candidate);
-              const preview = [...nextTiles];
-              applyPlacementsToArrayOverride(preview, placements);
-              if (!matchesExpectedConnectivity(preview)) {
-                continue;
-              }
-              const score = connectivityScore(computeBorderConnectivity(preview));
-              if (score > bestScore) {
-                bestScore = score;
-                bestCandidates = [candidate];
-              } else if (score === bestScore) {
-                bestCandidates.push(candidate);
-              }
-            }
-            if (bestCandidates.length > 0) {
-              const pick =
-                bestCandidates[Math.floor(Math.random() * bestCandidates.length)];
-              applyPlacementsToArrayOverride(
-                nextTiles,
-                getMirroredPlacements(index, pick)
-              );
-            } else {
-              applyPlacementsToArrayOverride(
-                nextTiles,
-                getMirroredPlacements(index, {
-                  imageIndex: -1,
-                  rotation: 0,
-                  mirrorX: false,
-                  mirrorY: false,
-                })
-              );
-            }
-          } else {
-            const selection = randomDisallowEdgeConnections
-              ? selectCompatibleTileConstrained(index, nextTiles)
-              : selectCompatibleTile(index, nextTiles);
-            const placement =
-              selection &&
-              isPlacementValid(index, selection, nextTiles) &&
-              !hasOutOfBoundsConnection(index, selection)
-                ? selection
-                : randomRequiresLegal
-                  ? { imageIndex: -1, rotation: 0, mirrorX: false, mirrorY: false }
-                  : { imageIndex: -2, rotation: 0, mirrorX: false, mirrorY: false };
-            const placements = getMirroredPlacements(index, placement);
-            const preview = [...nextTiles];
-            applyPlacementsToArrayOverride(preview, placements);
-            if (matchesExpectedConnectivity(preview)) {
-              applyPlacementsToArrayOverride(nextTiles, placements);
-            }
-          }
-        }
-        if (enforceExpectedConnectivity && expectedConnectivity) {
-          let attempt = 0;
-          let best = nextTiles;
-          while (attempt < 60 && !matchesExpectedConnectivityExact(best)) {
-            const retry = buildInitialTiles(totalCells);
-            for (const index of getDrivenCellIndices()) {
-              const selection = randomDisallowEdgeConnections
-                ? selectCompatibleTileConstrained(index, retry)
-                : selectCompatibleTile(index, retry);
-              const placement =
-                selection &&
-                isPlacementValid(index, selection, retry) &&
-                !hasOutOfBoundsConnection(index, selection)
-                  ? selection
-                  : randomRequiresLegal
-                    ? { imageIndex: -1, rotation: 0, mirrorX: false, mirrorY: false }
-                    : { imageIndex: -2, rotation: 0, mirrorX: false, mirrorY: false };
-              const placements = getMirroredPlacements(index, placement);
-              const preview = [...retry];
-              applyPlacementsToArrayOverride(preview, placements);
-              if (matchesExpectedConnectivity(preview)) {
-                applyPlacementsToArrayOverride(retry, placements);
-              }
-            }
-            best = retry;
-            attempt += 1;
-          }
-          withBulkUpdate(() => {
-            applyTiles(best);
-          });
-          return;
+          const placement = getRandomPlacement(index, nextTiles);
+          applyPlacementsToArrayOverride(
+            nextTiles,
+            getMirroredPlacements(index, placement)
+          );
         }
         withBulkUpdate(() => {
           applyTiles(nextTiles);
@@ -1464,96 +1065,8 @@ export const useTileGrid = ({
         if (nextTiles[index].imageIndex >= 0) {
           continue;
         }
-        if (enforceExpectedConnectivity && expectedConnectivity) {
-          const candidates = buildCompatibleCandidates(index, nextTiles).filter(
-            (candidate) =>
-              isPlacementValid(index, candidate, nextTiles) &&
-              !hasOutOfBoundsConnection(index, candidate)
-          );
-          let bestScore = -1;
-          let bestCandidates: Tile[] = [];
-          for (const candidate of candidates) {
-            const placements = getMirroredPlacements(index, candidate);
-            const preview = [...nextTiles];
-            applyPlacementsToArrayOverride(preview, placements);
-            if (!matchesExpectedConnectivity(preview)) {
-              continue;
-            }
-            const score = connectivityScore(computeBorderConnectivity(preview));
-            if (score > bestScore) {
-              bestScore = score;
-              bestCandidates = [candidate];
-            } else if (score === bestScore) {
-              bestCandidates.push(candidate);
-            }
-          }
-          if (bestCandidates.length > 0) {
-            const pick =
-              bestCandidates[Math.floor(Math.random() * bestCandidates.length)];
-            applyPlacementsToArray(nextTiles, getMirroredPlacements(index, pick), index);
-          }
-        } else {
-          const selection = randomDisallowEdgeConnections
-            ? selectCompatibleTileConstrained(index, nextTiles)
-            : selectCompatibleTile(index, nextTiles);
-          const placement =
-            selection && !hasOutOfBoundsConnection(index, selection)
-              ? selection
-              : randomRequiresLegal
-                ? { imageIndex: -1, rotation: 0, mirrorX: false, mirrorY: false }
-                : { imageIndex: -2, rotation: 0, mirrorX: false, mirrorY: false };
-          const placements = getMirroredPlacements(index, placement);
-          const preview = [...nextTiles];
-          applyPlacementsToArrayOverride(preview, placements);
-          if (matchesExpectedConnectivity(preview)) {
-            applyPlacementsToArray(nextTiles, placements, index);
-          }
-        }
-      }
-      if (enforceExpectedConnectivity && expectedConnectivity) {
-        let attempt = 0;
-        let best = nextTiles;
-        while (attempt < 60 && !matchesExpectedConnectivityExact(best)) {
-          const retry = [...normalizeTiles(tiles, totalCells, tileSourcesLength)];
-          const retryDriven = new Set(getDrivenCellIndices());
-          if (mirrorHorizontal || mirrorVertical) {
-            for (let index = 0; index < totalCells; index += 1) {
-              if (retry[index].imageIndex >= 0) {
-                continue;
-              }
-              const targets = getMirrorTargets(index);
-              if (targets.some((target) => retry[target]?.imageIndex >= 0)) {
-                retryDriven.add(index);
-              }
-            }
-          }
-          for (const index of retryDriven) {
-            if (retry[index].imageIndex >= 0) {
-              continue;
-            }
-            const selection = randomDisallowEdgeConnections
-              ? selectCompatibleTileConstrained(index, retry)
-              : selectCompatibleTile(index, retry);
-            const placement =
-              selection && !hasOutOfBoundsConnection(index, selection)
-                ? selection
-                : randomRequiresLegal
-                  ? { imageIndex: -1, rotation: 0, mirrorX: false, mirrorY: false }
-                  : { imageIndex: -2, rotation: 0, mirrorX: false, mirrorY: false };
-            const placements = getMirroredPlacements(index, placement);
-            const preview = [...retry];
-            applyPlacementsToArrayOverride(preview, placements);
-            if (matchesExpectedConnectivity(preview)) {
-              applyPlacementsToArray(retry, placements, index);
-            }
-          }
-          best = retry;
-          attempt += 1;
-        }
-        withBulkUpdate(() => {
-          applyTiles(best);
-        });
-        return;
+        const placement = getRandomPlacement(index, nextTiles);
+        applyPlacementsToArray(nextTiles, getMirroredPlacements(index, placement), index);
       }
       withBulkUpdate(() => {
         applyTiles(nextTiles);
