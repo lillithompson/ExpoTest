@@ -1,5 +1,3 @@
 <svg width="256" height="256" viewBox="0 0 256 256" fill="none" xmlns="http://www.w3.org/2000/svg">
-<path d="M128 0L128 118" stroke="#FF0000" stroke-width="10"/>
-<path d="M128 128C103.006 103.007 103.006 62.4841 128 37.4905" stroke="#FF0000" stroke-width="10"/>
-<path d="M128 128C152.994 103.006 152.994 62.4838 128 37.4903" stroke="#FF0000" stroke-width="10"/>
+<path d="M127.764 75.0194C152.758 100.013 152.758 140.536 127.764 165.529C102.771 140.536 102.771 100.013 127.764 75.0194ZM127.764 75.0194L127.764 1.96577e-06" stroke="white" stroke-width="10"/>
 </svg>
