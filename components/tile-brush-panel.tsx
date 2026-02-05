@@ -18,6 +18,7 @@ type Props = {
   selected: Brush;
   strokeColor?: string;
   strokeWidth?: number;
+  strokeScaleByName?: Map<string, number>;
   selectedPattern?: {
     tiles: { imageIndex: number; rotation: number; mirrorX: boolean; mirrorY: boolean }[];
     width: number;
@@ -110,6 +111,7 @@ export function TileBrushPanel({
   selected,
   strokeColor,
   strokeWidth,
+  strokeScaleByName,
   selectedPattern,
   onSelect,
   onRotate,
@@ -276,6 +278,10 @@ export function TileBrushPanel({
               !isRandom && !isErase && !isClone && !isPattern
                 ? favorites[entry.tile.name]
                 : null;
+            const tileScale =
+              !isRandom && !isErase && !isClone && !isPattern
+                ? strokeScaleByName?.get(entry.tile.name) ?? 1
+                : 1;
             const previewRotationCW = ((selectedPattern?.rotation ?? 0) + 360) % 360;
             const previewRotationCCW = (360 - previewRotationCW) % 360;
             const previewMirrorX = selectedPattern?.mirrorX ?? false;
@@ -447,7 +453,12 @@ export function TileBrushPanel({
                                       source={source}
                                       name={tileName}
                                       strokeColor={strokeColor}
-                                      strokeWidth={strokeWidth}
+                                      strokeWidth={
+                                        strokeWidth !== undefined
+                                          ? strokeWidth *
+                                            (strokeScaleByName?.get(tileName) ?? 1)
+                                          : undefined
+                                      }
                                       style={{
                                         width: '100%',
                                         height: '100%',
@@ -474,7 +485,9 @@ export function TileBrushPanel({
                       source={entry.tile.source}
                       name={entry.tile.name}
                       strokeColor={favoriteColor ?? strokeColor}
-                      strokeWidth={strokeWidth}
+                      strokeWidth={
+                        strokeWidth !== undefined ? strokeWidth * tileScale : undefined
+                      }
                       style={[
                         styles.image,
                         {

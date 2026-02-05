@@ -352,6 +352,7 @@ type TileCellProps = {
   showDebug: boolean;
   strokeColor: string;
   strokeWidth: number;
+  strokeScaleByName?: Map<string, number>;
   isCloneSource: boolean;
   isCloneSample: boolean;
   isCloneTargetOrigin: boolean;
@@ -437,6 +438,7 @@ const TileCell = memo(
     showDebug,
     strokeColor,
     strokeWidth,
+    strokeScaleByName,
     isCloneSource,
     isCloneSample,
     isCloneTargetOrigin,
@@ -479,7 +481,11 @@ const TileCell = memo(
             source={source}
             name={tileName}
             strokeColor={tile.imageIndex >= 0 ? strokeColor : '#ffffff'}
-            strokeWidth={tile.imageIndex >= 0 ? strokeWidth : 4}
+            strokeWidth={
+              tile.imageIndex >= 0
+                ? strokeWidth * (strokeScaleByName?.get(tileName) ?? 1)
+                : 4
+            }
             style={[
               styles.tileImage,
               {
@@ -512,6 +518,7 @@ const TileCell = memo(
     prev.showDebug === next.showDebug &&
     prev.strokeColor === next.strokeColor &&
     prev.strokeWidth === next.strokeWidth &&
+    prev.strokeScaleByName === next.strokeScaleByName &&
     prev.showOverlays === next.showOverlays &&
     prev.tileSources === next.tileSources &&
     prev.isCloneSource === next.isCloneSource &&
@@ -696,6 +703,17 @@ export default function TestScreen() {
     });
     return paletteSources.map((source) => indexByName.get(source.name) ?? -1);
   }, [fileSourceNames, paletteSources]);
+  const strokeScaleByName = useMemo(() => {
+    const map = new Map<string, number>();
+    userTileSets.forEach((set) => {
+      const sources = bakedSourcesBySetId[set.id] ?? [];
+      const scale = Math.max(1, set.resolution);
+      sources.forEach((source) => {
+        map.set(source.name, scale);
+      });
+    });
+    return map;
+  }, [userTileSets, bakedSourcesBySetId]);
   const selectedPaletteBrush = useMemo(() => {
     if (brush.mode !== 'fixed') {
       return brush;
@@ -2994,6 +3012,7 @@ export default function TestScreen() {
                         showDebug={settings.showDebug}
                         strokeColor={activeLineColor}
                         strokeWidth={activeLineWidth}
+                        strokeScaleByName={strokeScaleByName}
                         showOverlays={showOverlays}
                         isCloneSource={
                           brush.mode === 'clone' && cloneSourceIndex === cellIndex
@@ -3042,6 +3061,7 @@ export default function TestScreen() {
                         showDebug={settings.showDebug}
                         strokeColor={activeLineColor}
                         strokeWidth={activeLineWidth}
+                        strokeScaleByName={strokeScaleByName}
                         showOverlays={showOverlays}
                         isCloneSource={
                           brush.mode === 'clone' && cloneSourceIndex === cellIndex
@@ -3187,6 +3207,7 @@ export default function TestScreen() {
             selected={selectedPaletteBrush}
             strokeColor={activeLineColor}
             strokeWidth={activeLineWidth}
+            strokeScaleByName={strokeScaleByName}
           selectedPattern={
             selectedPattern
               ? {
@@ -3777,6 +3798,60 @@ export default function TestScreen() {
                     })}
                   </ThemedView>
                 )}
+              </ThemedView>
+              <ThemedView style={styles.sectionGroup}>
+                <HsvColorPicker
+                  label="Line Color"
+                  color={activeLineColor}
+                  onChange={(value) => {
+                    if (!activeFileId) {
+                      return;
+                    }
+                    upsertActiveFile({
+                      tiles,
+                      gridLayout,
+                      category: primaryCategory,
+                      categories: activeCategories,
+                      tileSetIds: selectedTileSetIds,
+                      sourceNames: fileSourceNames,
+                      preferredTileSize: fileTileSize,
+                      lineWidth: lineWidthDraft,
+                      lineColor: value,
+                    });
+                  }}
+                />
+                <ThemedView style={styles.sectionHeader}>
+                  <ThemedText type="defaultSemiBold">Line Width</ThemedText>
+                  <ThemedText type="defaultSemiBold">
+                    {lineWidthDraft.toFixed(1)}
+                  </ThemedText>
+                </ThemedView>
+                <Slider
+                  minimumValue={1}
+                  maximumValue={30}
+                  step={1}
+                  value={lineWidthDraft}
+                  onValueChange={(value) => {
+                    setLineWidthDraft(value);
+                    if (!activeFileId) {
+                      return;
+                    }
+                    upsertActiveFile({
+                      tiles,
+                      gridLayout,
+                      category: primaryCategory,
+                      categories: activeCategories,
+                      tileSetIds: selectedTileSetIds,
+                      sourceNames: fileSourceNames,
+                      preferredTileSize: fileTileSize,
+                      lineWidth: value,
+                      lineColor: activeLineColor,
+                    });
+                  }}
+                  minimumTrackTintColor="#22c55e"
+                  maximumTrackTintColor="#e5e7eb"
+                  thumbTintColor="#22c55e"
+                />
               </ThemedView>
             </ThemedView>
           </ThemedView>

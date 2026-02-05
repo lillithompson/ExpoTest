@@ -214,8 +214,10 @@ export const renderTileCanvasToSvg = async ({
   lineWidth,
   backgroundColor,
   sourceXmlCache,
+  outputSize,
 }: Omit<ExportParams, 'blankSource' | 'backgroundLineColor' | 'backgroundLineWidth' | 'fileName'> & {
   sourceXmlCache?: Map<string, string>;
+  outputSize?: number;
 }): Promise<string | null> => {
   if (gridLayout.columns <= 0 || gridLayout.rows <= 0 || gridLayout.tileSize <= 0) {
     return null;
@@ -229,13 +231,22 @@ export const renderTileCanvasToSvg = async ({
     gridGap * Math.max(0, gridLayout.rows - 1);
 
   const svgParts: string[] = [];
+  const normalizedSize =
+    outputSize && outputSize > 0 ? outputSize : null;
+  const viewWidth = normalizedSize ?? totalWidth;
+  const viewHeight = normalizedSize ?? totalHeight;
+  const scale =
+    normalizedSize && totalWidth > 0 ? normalizedSize / totalWidth : 1;
   svgParts.push(
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${totalWidth}" height="${totalHeight}" viewBox="0 0 ${totalWidth} ${totalHeight}">`
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${viewWidth}" height="${viewHeight}" viewBox="0 0 ${viewWidth} ${viewHeight}">`
   );
   if (backgroundColor) {
     svgParts.push(
-      `<rect width="${totalWidth}" height="${totalHeight}" fill="${backgroundColor}" />`
+      `<rect width="${viewWidth}" height="${viewHeight}" fill="${backgroundColor}" />`
     );
+  }
+  if (scale !== 1) {
+    svgParts.push(`<g transform="scale(${scale})">`);
   }
 
   const rawSvgCache = sourceXmlCache ?? new Map<string, string>();
@@ -370,6 +381,9 @@ export const renderTileCanvasToSvg = async ({
     );
   }
 
+  if (scale !== 1) {
+    svgParts.push('</g>');
+  }
   svgParts.push('</svg>');
   return svgParts.join('');
 };
