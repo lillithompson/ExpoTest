@@ -56,7 +56,7 @@ export default function TileSetCreatorScreen() {
   const selectBarAnim = useRef(new Animated.Value(0)).current;
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [newCategories, setNewCategories] = useState<TileCategory[]>([DEFAULT_CATEGORY]);
-  const [newResolution, setNewResolution] = useState(4);
+  const [newResolution, setNewResolution] = useState(2);
   const [newName, setNewName] = useState('4x4 (New)');
   const [downloadSetId, setDownloadSetId] = useState<string | null>(null);
   const [downloadError, setDownloadError] = useState<string | null>(null);
@@ -239,7 +239,7 @@ export default function TileSetCreatorScreen() {
   };
 
   const openCreateModal = () => {
-    const defaultResolution = 4;
+    const defaultResolution = 2;
     setNewName(`${defaultResolution}x${defaultResolution} (New)`);
     setNewCategories([DEFAULT_CATEGORY]);
     setNewResolution(defaultResolution);
@@ -499,7 +499,7 @@ export default function TileSetCreatorScreen() {
             </ThemedView>
             <ThemedText type="defaultSemiBold">Resolution</ThemedText>
             <ThemedView style={styles.inlineOptions}>
-              {Array.from({ length: 7 }, (_, index) => index + 2).map((value) => (
+              {[2, 3, 4].map((value) => (
                 <Pressable
                   key={value}
                   onPress={() => {

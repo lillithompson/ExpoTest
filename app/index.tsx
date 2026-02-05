@@ -3886,60 +3886,62 @@ export default function TestScreen() {
                   </ThemedView>
                 )}
               </ThemedView>
-              <ThemedView style={styles.sectionGroup}>
-                <HsvColorPicker
-                  label="Line Color"
-                  color={activeLineColor}
-                  onChange={(value) => {
-                    if (!activeFileId) {
-                      return;
-                    }
-                    upsertActiveFile({
-                      tiles,
-                      gridLayout,
-                      category: primaryCategory,
-                      categories: activeCategories,
-                      tileSetIds: selectedTileSetIds,
-                      sourceNames: fileSourceNames,
-                      preferredTileSize: fileTileSize,
-                      lineWidth: lineWidthDraft,
-                      lineColor: value,
-                    });
-                  }}
-                />
-                <ThemedView style={styles.sectionHeader}>
-                  <ThemedText type="defaultSemiBold">Line Width</ThemedText>
-                  <ThemedText type="defaultSemiBold">
-                    {lineWidthDraft.toFixed(1)}
-                  </ThemedText>
+              {false && (
+                <ThemedView style={styles.sectionGroup}>
+                  <HsvColorPicker
+                    label="Line Color"
+                    color={activeLineColor}
+                    onChange={(value) => {
+                      if (!activeFileId) {
+                        return;
+                      }
+                      upsertActiveFile({
+                        tiles,
+                        gridLayout,
+                        category: primaryCategory,
+                        categories: activeCategories,
+                        tileSetIds: selectedTileSetIds,
+                        sourceNames: fileSourceNames,
+                        preferredTileSize: fileTileSize,
+                        lineWidth: lineWidthDraft,
+                        lineColor: value,
+                      });
+                    }}
+                  />
+                  <ThemedView style={styles.sectionHeader}>
+                    <ThemedText type="defaultSemiBold">Line Width</ThemedText>
+                    <ThemedText type="defaultSemiBold">
+                      {lineWidthDraft.toFixed(1)}
+                    </ThemedText>
+                  </ThemedView>
+                  <Slider
+                    minimumValue={1}
+                    maximumValue={30}
+                    step={1}
+                    value={lineWidthDraft}
+                    onValueChange={(value) => {
+                      setLineWidthDraft(value);
+                      if (!activeFileId) {
+                        return;
+                      }
+                      upsertActiveFile({
+                        tiles,
+                        gridLayout,
+                        category: primaryCategory,
+                        categories: activeCategories,
+                        tileSetIds: selectedTileSetIds,
+                        sourceNames: fileSourceNames,
+                        preferredTileSize: fileTileSize,
+                        lineWidth: value,
+                        lineColor: activeLineColor,
+                      });
+                    }}
+                    minimumTrackTintColor="#22c55e"
+                    maximumTrackTintColor="#e5e7eb"
+                    thumbTintColor="#22c55e"
+                  />
                 </ThemedView>
-                <Slider
-                  minimumValue={1}
-                  maximumValue={30}
-                  step={1}
-                  value={lineWidthDraft}
-                  onValueChange={(value) => {
-                    setLineWidthDraft(value);
-                    if (!activeFileId) {
-                      return;
-                    }
-                    upsertActiveFile({
-                      tiles,
-                      gridLayout,
-                      category: primaryCategory,
-                      categories: activeCategories,
-                      tileSetIds: selectedTileSetIds,
-                      sourceNames: fileSourceNames,
-                      preferredTileSize: fileTileSize,
-                      lineWidth: value,
-                      lineColor: activeLineColor,
-                    });
-                  }}
-                  minimumTrackTintColor="#22c55e"
-                  maximumTrackTintColor="#e5e7eb"
-                  thumbTintColor="#22c55e"
-                />
-              </ThemedView>
+              )}
             </ThemedView>
           </ThemedView>
         )}
