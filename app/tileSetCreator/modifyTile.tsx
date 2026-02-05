@@ -638,6 +638,8 @@ export default function ModifyTileScreen() {
     );
   }
 
+  const showOverlays = true;
+
   return (
     <ThemedView style={[styles.screen, { paddingTop: insets.top }]}>
       {insets.top > 0 && (
@@ -786,97 +788,131 @@ export default function ModifyTileScreen() {
           onLayout={updateGridOffset}
           style={{ width: gridWidth, height: gridHeight }}
         >
-          <ViewShot
-            ref={thumbnailShotRef}
-            style={{ width: gridWidth, height: gridHeight, backgroundColor: tileCanvasBackground }}
-          >
-            <ThemedView
-              style={[styles.grid, { width: gridWidth, height: gridHeight }]}
-              onStartShouldSetResponder={() => true}
-              onMoveShouldSetResponder={() => true}
-              onResponderGrant={(event: any) => {
-                const point = getRelativePoint(event);
-                if (point) {
-                  const cellIndex = getCellIndexForPoint(point.x, point.y);
-                  if (cellIndex === null) {
-                    return;
-                  }
-                  if (longPressTimeoutRef.current) {
-                    clearTimeout(longPressTimeoutRef.current);
-                  }
-                  longPressTriggeredRef.current = false;
-                  longPressTimeoutRef.current = setTimeout(() => {
-                    longPressTriggeredRef.current = true;
-                    if (brush.mode === 'clone') {
-                      setCloneSource(cellIndex);
-                      lastPaintedRef.current = null;
-                    }
-                  }, 420);
-                  if (brush.mode !== 'clone') {
-                    paintCellIndex(cellIndex);
-                  } else if (cloneSourceIndex === null) {
+          <ThemedView
+            style={[styles.grid, { width: gridWidth, height: gridHeight }]}
+            onStartShouldSetResponder={() => true}
+            onMoveShouldSetResponder={() => true}
+            onResponderGrant={(event: any) => {
+              const point = getRelativePoint(event);
+              if (point) {
+                const cellIndex = getCellIndexForPoint(point.x, point.y);
+                if (cellIndex === null) {
+                  return;
+                }
+                if (longPressTimeoutRef.current) {
+                  clearTimeout(longPressTimeoutRef.current);
+                }
+                longPressTriggeredRef.current = false;
+                longPressTimeoutRef.current = setTimeout(() => {
+                  longPressTriggeredRef.current = true;
+                  if (brush.mode === 'clone') {
                     setCloneSource(cellIndex);
                     lastPaintedRef.current = null;
                   }
-                }
-              }}
-              onResponderMove={(event: any) => {
-                const point = getRelativePoint(event);
-                if (point) {
-                  if (longPressTimeoutRef.current) {
-                    clearTimeout(longPressTimeoutRef.current);
-                    longPressTimeoutRef.current = null;
-                  }
-                  handlePaintAt(point.x, point.y);
-                }
-              }}
-              onResponderRelease={() => {
-                if (longPressTimeoutRef.current) {
-                  clearTimeout(longPressTimeoutRef.current);
-                  longPressTimeoutRef.current = null;
-                }
-                if (brush.mode === 'clone' && !longPressTriggeredRef.current) {
+                }, 420);
+                if (brush.mode !== 'clone') {
+                  paintCellIndex(cellIndex);
+                } else if (cloneSourceIndex === null) {
+                  setCloneSource(cellIndex);
                   lastPaintedRef.current = null;
                 }
-                lastPaintedRef.current = null;
-              }}
-              onResponderTerminate={() => {
+              }
+            }}
+            onResponderMove={(event: any) => {
+              const point = getRelativePoint(event);
+              if (point) {
                 if (longPressTimeoutRef.current) {
                   clearTimeout(longPressTimeoutRef.current);
                   longPressTimeoutRef.current = null;
                 }
-                longPressTriggeredRef.current = false;
+                handlePaintAt(point.x, point.y);
+              }
+            }}
+            onResponderRelease={() => {
+              if (longPressTimeoutRef.current) {
+                clearTimeout(longPressTimeoutRef.current);
+                longPressTimeoutRef.current = null;
+              }
+              if (brush.mode === 'clone' && !longPressTriggeredRef.current) {
                 lastPaintedRef.current = null;
-              }}
-            >
-              {rowIndices.map((rowIndex) => (
-                <ThemedView key={`row-${rowIndex}`} style={styles.row}>
-                  {columnIndices.map((columnIndex) => {
-                    const cellIndex = rowIndex * gridLayout.columns + columnIndex;
-                    const item = tiles[cellIndex];
-                    return (
-                      <TileCell
-                        key={`cell-${cellIndex}`}
-                        cellIndex={cellIndex}
-                        tileSize={gridLayout.tileSize}
-                        tile={item}
-                        tileSources={tileSources}
-                        showDebug={settings.showDebug}
-                        strokeColor={tileSet.lineColor}
-                        strokeWidth={tileSet.lineWidth}
-                        showOverlays
-                        isCloneSource={brush.mode === 'clone' && cloneSourceIndex === cellIndex}
-                        isCloneSample={brush.mode === 'clone' && cloneSampleIndex === cellIndex}
-                        isCloneTargetOrigin={brush.mode === 'clone' && cloneAnchorIndex === cellIndex}
-                        isCloneCursor={brush.mode === 'clone' && cloneCursorIndex === cellIndex}
-                      />
-                    );
-                  })}
-                </ThemedView>
-              ))}
-            </ThemedView>
-          </ViewShot>
+              }
+              lastPaintedRef.current = null;
+            }}
+            onResponderTerminate={() => {
+              if (longPressTimeoutRef.current) {
+                clearTimeout(longPressTimeoutRef.current);
+                longPressTimeoutRef.current = null;
+              }
+              longPressTriggeredRef.current = false;
+              lastPaintedRef.current = null;
+            }}
+          >
+            {rowIndices.map((rowIndex) => (
+              <ThemedView key={`row-${rowIndex}`} style={styles.row}>
+                {columnIndices.map((columnIndex) => {
+                  const cellIndex = rowIndex * gridLayout.columns + columnIndex;
+                  const item = tiles[cellIndex];
+                  return (
+                    <TileCell
+                      key={`cell-${cellIndex}`}
+                      cellIndex={cellIndex}
+                      tileSize={gridLayout.tileSize}
+                      tile={item}
+                      tileSources={tileSources}
+                      showDebug={settings.showDebug}
+                      strokeColor={tileSet.lineColor}
+                      strokeWidth={tileSet.lineWidth}
+                      showOverlays
+                      isCloneSource={brush.mode === 'clone' && cloneSourceIndex === cellIndex}
+                      isCloneSample={brush.mode === 'clone' && cloneSampleIndex === cellIndex}
+                      isCloneTargetOrigin={brush.mode === 'clone' && cloneAnchorIndex === cellIndex}
+                      isCloneCursor={brush.mode === 'clone' && cloneCursorIndex === cellIndex}
+                    />
+                  );
+                })}
+              </ThemedView>
+            ))}
+          </ThemedView>
         </View>
+        <ViewShot
+          ref={thumbnailShotRef}
+          style={[styles.captureSurface, { width: gridWidth, height: gridHeight }]}
+          options={{ format: 'png', quality: 1, result: 'tmpfile' }}
+          pointerEvents="none"
+        >
+          <ThemedView
+            style={[
+              styles.grid,
+              { width: gridWidth, height: gridHeight, backgroundColor: tileCanvasBackground },
+            ]}
+          >
+            {rowIndices.map((rowIndex) => (
+              <ThemedView key={`capture-row-${rowIndex}`} style={styles.row}>
+                {columnIndices.map((columnIndex) => {
+                  const cellIndex = rowIndex * gridLayout.columns + columnIndex;
+                  const item = tiles[cellIndex];
+                  return (
+                    <TileCell
+                      key={`capture-cell-${cellIndex}`}
+                      cellIndex={cellIndex}
+                      tileSize={gridLayout.tileSize}
+                      tile={item}
+                      tileSources={tileSources}
+                      showDebug={false}
+                      strokeColor={tileSet.lineColor}
+                      strokeWidth={tileSet.lineWidth}
+                      showOverlays={false}
+                      isCloneSource={false}
+                      isCloneSample={false}
+                      isCloneTargetOrigin={false}
+                      isCloneCursor={false}
+                    />
+                  );
+                })}
+              </ThemedView>
+            ))}
+          </ThemedView>
+        </ViewShot>
         {gridWidth > 0 && gridHeight > 0 && (
           <GridLinesOverlay
             rows={gridLayout.rows}
@@ -1052,6 +1088,12 @@ const styles = StyleSheet.create({
   gridLinesOverlay: {
     ...StyleSheet.absoluteFillObject,
     zIndex: 1,
+  },
+  captureSurface: {
+    position: 'absolute',
+    left: -10000,
+    top: -10000,
+    opacity: 1,
   },
   gridLineVertical: {
     position: 'absolute',
