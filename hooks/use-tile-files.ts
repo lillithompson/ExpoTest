@@ -221,19 +221,33 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
   );
 
   const createFile = useCallback(
-    (category: TileCategory, preferredTileSize = 45) => {
+    (
+      category: TileCategory,
+      preferredTileSize = 45,
+      options?: {
+        categories?: TileCategory[];
+        tileSetIds?: string[];
+        sourceNames?: string[];
+        lineWidth?: number;
+        lineColor?: string;
+      }
+    ) => {
+      const nextCategories =
+        options?.categories && options.categories.length > 0
+          ? options.categories
+          : [category];
       const nextFile: TileFile = {
         id: createId(),
         name: `Canvas ${Date.now()}`,
         tiles: [],
         grid: { rows: 0, columns: 0 },
-        category,
-        categories: [category],
-        tileSetIds: [],
-        sourceNames: [],
+        category: nextCategories[0] ?? category,
+        categories: nextCategories,
+        tileSetIds: options?.tileSetIds ?? [],
+        sourceNames: options?.sourceNames ?? [],
         preferredTileSize,
-        lineWidth: 10,
-        lineColor: '#ffffff',
+        lineWidth: options?.lineWidth ?? 10,
+        lineColor: options?.lineColor ?? '#ffffff',
         thumbnailUri: null,
         previewUri: null,
         updatedAt: Date.now(),

@@ -32,6 +32,8 @@ type Props = {
   onMirrorVertical: (index: number) => void;
   onPatternLongPress?: () => void;
   onPatternDoubleTap?: () => void;
+  onRandomLongPress?: () => void;
+  onRandomDoubleTap?: () => void;
   getRotation: (index: number) => number;
   getMirror: (index: number) => boolean;
   getMirrorVertical: (index: number) => boolean;
@@ -120,6 +122,8 @@ export function TileBrushPanel({
   onMirrorVertical,
   onPatternLongPress,
   onPatternDoubleTap,
+  onRandomLongPress,
+  onRandomDoubleTap,
   getRotation,
   getMirror,
   getMirrorVertical,
@@ -327,11 +331,24 @@ export function TileBrushPanel({
                   )
                 }
                 onPress={() => {
-                  if (isRandom || isErase || isClone) {
+                  if (isErase || isClone) {
                     return;
                   }
                   const now = Date.now();
                   const lastTap = lastTapRef.current;
+                  if (isRandom) {
+                    if (
+                      lastTap &&
+                      lastTap.index === entry.index &&
+                      now - lastTap.time < 260
+                    ) {
+                      onRandomDoubleTap?.();
+                      lastTapRef.current = null;
+                    } else {
+                      lastTapRef.current = { time: now, index: entry.index };
+                    }
+                    return;
+                  }
                   if (isPattern) {
                     if (
                       lastTap &&
@@ -363,6 +380,10 @@ export function TileBrushPanel({
                   }
                 }}
                 onLongPress={() => {
+                  if (isRandom) {
+                    onRandomLongPress?.();
+                    return;
+                  }
                   if (isPattern) {
                     onPatternLongPress?.();
                     return;

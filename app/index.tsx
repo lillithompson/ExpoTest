@@ -548,11 +548,11 @@ export default function TestScreen() {
   const [selectedTileSetIds, setSelectedTileSetIds] = useState<string[]>([]);
   const [appliedTileSetIds, setAppliedTileSetIds] = useState<string[]>([]);
   const [fileSourceNames, setFileSourceNames] = useState<string[]>([]);
-  const [showFileSettingsOverlay, setShowFileSettingsOverlay] = useState(false);
   const [tileSetSelectionError, setTileSetSelectionError] = useState<string | null>(
     null
   );
   const [showSettingsOverlay, setShowSettingsOverlay] = useState(false);
+  const [showTileSetChooser, setShowTileSetChooser] = useState(false);
   const [showNewFileModal, setShowNewFileModal] = useState(false);
   const [fileMenuTargetId, setFileMenuTargetId] = useState<string | null>(null);
   const [downloadTargetId, setDownloadTargetId] = useState<string | null>(null);
@@ -1096,10 +1096,10 @@ export default function TestScreen() {
   }, [isSelectMode, selectBarAnim]);
 
   useEffect(() => {
-    if (!showFileSettingsOverlay && tileSetSelectionError) {
+    if (!showTileSetChooser && tileSetSelectionError) {
       setTileSetSelectionError(null);
     }
-  }, [showFileSettingsOverlay, tileSetSelectionError]);
+  }, [showTileSetChooser, tileSetSelectionError]);
 
   useEffect(() => {
     Animated.timing(patternSelectAnim, {
@@ -2724,7 +2724,25 @@ export default function TestScreen() {
                   <Pressable
                     key={`new-file-size-${size}`}
                     onPress={() => {
-                      createFile(DEFAULT_CATEGORY, size);
+                      const nextCategories =
+                        selectedCategories.length > 0
+                          ? selectedCategories
+                          : [DEFAULT_CATEGORY];
+                      const nextTileSetIds = selectedTileSetIds;
+                      const nextPaletteSources = getSourcesForSelection(
+                        nextCategories,
+                        nextTileSetIds
+                      );
+                      const nextSourceNames = nextPaletteSources.map(
+                        (source) => source.name
+                      );
+                      createFile(nextCategories[0] ?? DEFAULT_CATEGORY, size, {
+                        categories: nextCategories,
+                        tileSetIds: nextTileSetIds,
+                        sourceNames: nextSourceNames,
+                        lineWidth: activeLineWidth,
+                        lineColor: activeLineColor,
+                      });
                       setLoadRequestId((prev) => prev + 1);
                       setLoadPreviewUri(null);
                       setShowGrid(false);
@@ -2873,11 +2891,6 @@ export default function TestScreen() {
               }}
             />
             <ThemedView style={styles.controls}>
-            <ToolbarButton
-              label="File Settings"
-              icon="tune-vertical-variant"
-              onPress={() => setShowFileSettingsOverlay(true)}
-            />
             <ToolbarButton
               label="Reset"
               icon="refresh"
@@ -3411,6 +3424,12 @@ export default function TestScreen() {
             setIsPatternCreationMode(false);
             setShowPatternChooser(true);
           }}
+          onRandomLongPress={() => {
+            setShowTileSetChooser(true);
+          }}
+          onRandomDoubleTap={() => {
+            setShowTileSetChooser(true);
+          }}
           height={brushPanelHeight}
           itemSize={brushItemSize}
           rowGap={BRUSH_PANEL_ROW_GAP}
@@ -3759,198 +3778,6 @@ export default function TestScreen() {
             </ThemedView>
           </ThemedView>
         )}
-        {showFileSettingsOverlay && (
-          <ThemedView style={styles.overlay} accessibilityRole="dialog">
-            <Pressable
-              style={styles.overlayBackdrop}
-              onPress={() => {
-                if (selectedCategories.length === 0 && selectedTileSetIds.length === 0) {
-                  setTileSetSelectionError('Select at least one tile set.');
-                  return;
-                }
-                setShowFileSettingsOverlay(false);
-              }}
-              accessibilityRole="button"
-              accessibilityLabel="Close file settings"
-            />
-            <ThemedView style={styles.overlayPanel}>
-              <ThemedText type="title">File Settings</ThemedText>
-              <ThemedView style={styles.sectionGroup}>
-                <ThemedText type="defaultSemiBold">Tile Sets</ThemedText>
-              <ThemedView style={styles.overlayList}>
-                {TILE_CATEGORIES.map((category) => (
-                  <Pressable
-                    key={category}
-                    onPress={() => {
-                      const isSelected = selectedCategories.includes(category);
-                      if (
-                        isSelected &&
-                        selectedCategories.length === 1 &&
-                        selectedTileSetIds.length === 0
-                      ) {
-                        setTileSetSelectionError('Select at least one tile set.');
-                        return;
-                      }
-                      const nextCategories = isSelected
-                        ? selectedCategories.filter((entry) => entry !== category)
-                        : [...selectedCategories, category];
-                      const nextPaletteSources = getSourcesForSelection(
-                        nextCategories,
-                        selectedTileSetIds
-                      );
-                      const nextSourceNames = ensureFileSourceNames(nextPaletteSources);
-                      setTileSetSelectionError(null);
-                      setSelectedCategories(nextCategories);
-                      if (activeFileId) {
-                        upsertActiveFile({
-                          tiles,
-                          gridLayout,
-                          category: nextCategories[0] ?? DEFAULT_CATEGORY,
-                          categories: nextCategories,
-                          tileSetIds: selectedTileSetIds,
-                          sourceNames: nextSourceNames,
-                          preferredTileSize: fileTileSize,
-                          lineWidth: activeLineWidth,
-                          lineColor: activeLineColor,
-                        });
-                      }
-                    }}
-                    style={[
-                      styles.overlayItem,
-                      selectedCategories.includes(category) && styles.overlayItemSelected,
-                    ]}
-                  >
-                    <ThemedText type="defaultSemiBold">{category}</ThemedText>
-                  </Pressable>
-                ))}
-              </ThemedView>
-              {tileSetSelectionError && (
-                <ThemedText type="defaultSemiBold" style={styles.errorText}>
-                  {tileSetSelectionError}
-                </ThemedText>
-              )}
-              </ThemedView>
-              <ThemedView style={styles.sectionGroup}>
-                <ThemedText type="defaultSemiBold">My Tile Sets</ThemedText>
-                {userTileSets.length === 0 ? (
-                  <ThemedText type="defaultSemiBold" style={styles.emptyText}>
-                    No tile sets yet
-                  </ThemedText>
-                ) : (
-                  <ThemedView style={styles.overlayList}>
-                    {userTileSets.map((set) => {
-                      const isSelected = selectedTileSetIds.includes(set.id);
-                      return (
-                        <Pressable
-                          key={set.id}
-                          onPress={() => {
-                            if (
-                              isSelected &&
-                              selectedTileSetIds.length === 1 &&
-                              selectedCategories.length === 0
-                            ) {
-                              setTileSetSelectionError('Select at least one tile set.');
-                              return;
-                            }
-                            const nextTileSetIds = isSelected
-                              ? selectedTileSetIds.filter((entry) => entry !== set.id)
-                              : [...selectedTileSetIds, set.id];
-                            setTileSetSelectionError(null);
-                            setSelectedTileSetIds(nextTileSetIds);
-                            const nextReady = areTileSetsReady(nextTileSetIds);
-                            if (nextReady) {
-                              setAppliedTileSetIds(nextTileSetIds);
-                            }
-                            const nextPaletteSources = getSourcesForSelection(
-                              selectedCategories,
-                              nextTileSetIds
-                            );
-                            const nextSourceNames = ensureFileSourceNames(nextPaletteSources);
-                            if (activeFileId) {
-                              upsertActiveFile({
-                                tiles,
-                                gridLayout,
-                                category: selectedCategories[0] ?? DEFAULT_CATEGORY,
-                                categories: selectedCategories,
-                                tileSetIds: nextTileSetIds,
-                                sourceNames: nextSourceNames,
-                                preferredTileSize: fileTileSize,
-                                lineWidth: activeLineWidth,
-                                lineColor: activeLineColor,
-                              });
-                            }
-                          }}
-                          style={[
-                            styles.overlayItem,
-                            isSelected && styles.overlayItemSelected,
-                          ]}
-                        >
-                          <ThemedText type="defaultSemiBold">{set.name}</ThemedText>
-                        </Pressable>
-                      );
-                    })}
-                  </ThemedView>
-                )}
-              </ThemedView>
-              {false && (
-                <ThemedView style={styles.sectionGroup}>
-                  <HsvColorPicker
-                    label="Line Color"
-                    color={activeLineColor}
-                    onChange={(value) => {
-                      if (!activeFileId) {
-                        return;
-                      }
-                      upsertActiveFile({
-                        tiles,
-                        gridLayout,
-                        category: primaryCategory,
-                        categories: activeCategories,
-                        tileSetIds: selectedTileSetIds,
-                        sourceNames: fileSourceNames,
-                        preferredTileSize: fileTileSize,
-                        lineWidth: lineWidthDraft,
-                        lineColor: value,
-                      });
-                    }}
-                  />
-                  <ThemedView style={styles.sectionHeader}>
-                    <ThemedText type="defaultSemiBold">Line Width</ThemedText>
-                    <ThemedText type="defaultSemiBold">
-                      {lineWidthDraft.toFixed(1)}
-                    </ThemedText>
-                  </ThemedView>
-                  <Slider
-                    minimumValue={1}
-                    maximumValue={30}
-                    step={1}
-                    value={lineWidthDraft}
-                    onValueChange={(value) => {
-                      setLineWidthDraft(value);
-                      if (!activeFileId) {
-                        return;
-                      }
-                      upsertActiveFile({
-                        tiles,
-                        gridLayout,
-                        category: primaryCategory,
-                        categories: activeCategories,
-                        tileSetIds: selectedTileSetIds,
-                        sourceNames: fileSourceNames,
-                        preferredTileSize: fileTileSize,
-                        lineWidth: value,
-                        lineColor: activeLineColor,
-                      });
-                    }}
-                    minimumTrackTintColor="#22c55e"
-                    maximumTrackTintColor="#e5e7eb"
-                    thumbTintColor="#22c55e"
-                  />
-                </ThemedView>
-              )}
-            </ThemedView>
-          </ThemedView>
-        )}
         {showSettingsOverlay && (
           <ThemedView
             style={[styles.settingsScreen, { paddingTop: insets.top }]}
@@ -3983,7 +3810,7 @@ export default function TestScreen() {
                 />
               </ThemedView>
               <Pressable
-                onPress={handleDownload}
+                onPress={handleDownloadPng}
                 style={styles.settingsAction}
                 accessibilityRole="button"
                 accessibilityLabel="Download tile canvas"
@@ -4044,6 +3871,146 @@ export default function TestScreen() {
                 />
               </ThemedView>
             </ScrollView>
+          </ThemedView>
+        )}
+        {showTileSetChooser && (
+          <ThemedView style={styles.overlay} accessibilityRole="dialog">
+            <Pressable
+              style={styles.overlayBackdrop}
+              onPress={() => {
+                if (selectedCategories.length === 0 && selectedTileSetIds.length === 0) {
+                  setTileSetSelectionError('Select at least one tile set.');
+                  return;
+                }
+                setShowTileSetChooser(false);
+              }}
+              accessibilityRole="button"
+              accessibilityLabel="Close tile set chooser"
+            />
+            <ThemedView style={styles.overlayPanel}>
+              <ThemedText type="title">Tile Sets</ThemedText>
+              <ThemedView style={styles.sectionGroup}>
+                <ThemedText type="defaultSemiBold">Tile Sets</ThemedText>
+                <ThemedView style={styles.overlayList}>
+                  {TILE_CATEGORIES.map((category) => (
+                    <Pressable
+                      key={category}
+                      onPress={() => {
+                        const isSelected = selectedCategories.includes(category);
+                        if (
+                          isSelected &&
+                          selectedCategories.length === 1 &&
+                          selectedTileSetIds.length === 0
+                        ) {
+                          setTileSetSelectionError('Select at least one tile set.');
+                          return;
+                        }
+                        const nextCategories = isSelected
+                          ? selectedCategories.filter((entry) => entry !== category)
+                          : [...selectedCategories, category];
+                        const nextPaletteSources = getSourcesForSelection(
+                          nextCategories,
+                          selectedTileSetIds
+                        );
+                        const nextSourceNames = ensureFileSourceNames(nextPaletteSources);
+                        setTileSetSelectionError(null);
+                        setSelectedCategories(nextCategories);
+                        if (activeFileId) {
+                          upsertActiveFile({
+                            tiles,
+                            gridLayout,
+                            category: nextCategories[0] ?? DEFAULT_CATEGORY,
+                            categories: nextCategories,
+                            tileSetIds: selectedTileSetIds,
+                            sourceNames: nextSourceNames,
+                            preferredTileSize: fileTileSize,
+                            lineWidth: activeLineWidth,
+                            lineColor: activeLineColor,
+                          });
+                        }
+                      }}
+                      style={[
+                        styles.overlayItem,
+                        selectedCategories.includes(category) &&
+                          styles.overlayItemSelected,
+                      ]}
+                    >
+                      <ThemedText type="defaultSemiBold">{category}</ThemedText>
+                    </Pressable>
+                  ))}
+                </ThemedView>
+                {tileSetSelectionError && (
+                  <ThemedText type="defaultSemiBold" style={styles.errorText}>
+                    {tileSetSelectionError}
+                  </ThemedText>
+                )}
+              </ThemedView>
+              <ThemedView style={styles.sectionGroup}>
+                <ThemedText type="defaultSemiBold">My Tile Sets</ThemedText>
+                {userTileSets.length === 0 ? (
+                  <ThemedText type="defaultSemiBold" style={styles.emptyText}>
+                    No tile sets yet
+                  </ThemedText>
+                ) : (
+                  <ThemedView style={styles.overlayList}>
+                    {userTileSets.map((set) => {
+                      const isSelected = selectedTileSetIds.includes(set.id);
+                      return (
+                        <Pressable
+                          key={set.id}
+                          onPress={() => {
+                            if (
+                              isSelected &&
+                              selectedTileSetIds.length === 1 &&
+                              selectedCategories.length === 0
+                            ) {
+                              setTileSetSelectionError('Select at least one tile set.');
+                              return;
+                            }
+                            const nextTileSetIds = isSelected
+                              ? selectedTileSetIds.filter(
+                                  (entry) => entry !== set.id
+                                )
+                              : [...selectedTileSetIds, set.id];
+                            setTileSetSelectionError(null);
+                            setSelectedTileSetIds(nextTileSetIds);
+                            const nextReady = areTileSetsReady(nextTileSetIds);
+                            if (nextReady) {
+                              setAppliedTileSetIds(nextTileSetIds);
+                            }
+                            const nextPaletteSources = getSourcesForSelection(
+                              selectedCategories,
+                              nextTileSetIds
+                            );
+                            const nextSourceNames =
+                              ensureFileSourceNames(nextPaletteSources);
+                            if (activeFileId) {
+                              upsertActiveFile({
+                                tiles,
+                                gridLayout,
+                                category: selectedCategories[0] ?? DEFAULT_CATEGORY,
+                                categories: selectedCategories,
+                                tileSetIds: nextTileSetIds,
+                                sourceNames: nextSourceNames,
+                                preferredTileSize: fileTileSize,
+                                lineWidth: activeLineWidth,
+                                lineColor: activeLineColor,
+                              });
+                            }
+                          }}
+                          style={[
+                            styles.overlayItem,
+                            isSelected && styles.overlayItemSelected,
+                          ]}
+                        >
+                          <ThemedText type="defaultSemiBold">{set.name}</ThemedText>
+                        </Pressable>
+                      );
+                    })}
+                  </ThemedView>
+                )}
+              </ThemedView>
+            </ThemedView>
           </ThemedView>
         )}
       </ThemedView>
@@ -4123,7 +4090,7 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
     borderRadius: 4,
     fontSize: 11,
-    zIndex: 50,
+    zIndex: 200,
     pointerEvents: 'none',
     whiteSpace: 'nowrap' as never,
   },
@@ -4258,6 +4225,9 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: 12,
     backgroundColor: '#2a2a2a',
+    zIndex: 20,
+    elevation: 20,
+    overflow: 'visible',
   },
   fileSelectBar: {
     flexDirection: 'row',
