@@ -47,12 +47,12 @@ export default function TileSetCreatorScreen() {
   const { width } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { tileSets, createTileSet, deleteTileSet } = useTileSets();
+  const { tileSets, createTileSet, deleteTileSet, updateTileSet } = useTileSets();
   const [isSelectMode, setIsSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const selectBarAnim = useRef(new Animated.Value(0)).current;
   const [showCreateModal, setShowCreateModal] = useState(false);
-  const [newCategory, setNewCategory] = useState<TileCategory>(DEFAULT_CATEGORY);
+  const [newCategories, setNewCategories] = useState<TileCategory[]>([DEFAULT_CATEGORY]);
   const [newResolution, setNewResolution] = useState(4);
   const [newName, setNewName] = useState('4x4 (New)');
   const [bakedPreviews, setBakedPreviews] = useState<Record<string, BakedPreview>>(
@@ -61,11 +61,15 @@ export default function TileSetCreatorScreen() {
   const bakedPreviewRef = useRef<Record<string, BakedPreview>>({});
 
   const contentWidth = Math.max(0, width);
-  const fileCardWidth = Math.floor(
-    (contentWidth -
-      FILE_GRID_SIDE_PADDING * 2 -
-      FILE_GRID_GAP * (FILE_GRID_COLUMNS_MOBILE - 1)) /
-      FILE_GRID_COLUMNS_MOBILE
+  const maxThumbSize = Platform.OS === 'web' ? 150 : Number.POSITIVE_INFINITY;
+  const fileCardWidth = Math.min(
+    Math.floor(
+      (contentWidth -
+        FILE_GRID_SIDE_PADDING * 2 -
+        FILE_GRID_GAP * (FILE_GRID_COLUMNS_MOBILE - 1)) /
+        FILE_GRID_COLUMNS_MOBILE
+    ),
+    maxThumbSize
   );
 
   useEffect(() => {
@@ -170,7 +174,7 @@ export default function TileSetCreatorScreen() {
           errorSource: null,
           backgroundColor: '#000',
           backgroundLineColor: '#9ca3af',
-          backgroundLineWidth: 1,
+          backgroundLineWidth: 5,
           maxDimension: 512,
         });
 
@@ -231,7 +235,7 @@ export default function TileSetCreatorScreen() {
   const openCreateModal = () => {
     const defaultResolution = 4;
     setNewName(`${defaultResolution}x${defaultResolution} (New)`);
-    setNewCategory(DEFAULT_CATEGORY);
+    setNewCategories([DEFAULT_CATEGORY]);
     setNewResolution(defaultResolution);
     setShowCreateModal(true);
   };
@@ -412,10 +416,23 @@ export default function TileSetCreatorScreen() {
               {TILE_CATEGORIES.map((category) => (
                 <Pressable
                   key={category}
-                  onPress={() => setNewCategory(category)}
+                  onPress={() =>
+                    setNewCategories((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(category)) {
+                        next.delete(category);
+                      } else {
+                        next.add(category);
+                      }
+                      if (next.size === 0) {
+                        next.add(DEFAULT_CATEGORY);
+                      }
+                      return Array.from(next);
+                    })
+                  }
                   style={[
                     styles.overlayItem,
-                    category === newCategory && styles.overlayItemSelected,
+                    newCategories.includes(category) && styles.overlayItemSelected,
                   ]}
                 >
                   <ThemedText type="defaultSemiBold">{category}</ThemedText>
@@ -462,9 +479,16 @@ export default function TileSetCreatorScreen() {
                     name:
                       newName.trim() ||
                       `${newResolution}x${newResolution} (New)`,
-                    category: newCategory,
+                    category: newCategories[0] ?? DEFAULT_CATEGORY,
                     resolution: newResolution,
                   });
+                  if (newCategories.length > 1) {
+                    updateTileSet(id, (set) => ({
+                      ...set,
+                      categories: newCategories,
+                      updatedAt: Date.now(),
+                    }));
+                  }
                   router.push({
                     pathname: '/tileSetCreator/editor',
                     params: { setId: id },

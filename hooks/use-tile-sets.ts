@@ -117,16 +117,29 @@ export const useTileSets = () => {
       lineWidth?: number;
       lineColor?: string;
     }) => {
+      const createdAt = Date.now();
+      const tileId = createId('tile');
+      const resolution = clampResolution(payload.resolution);
+      const initialTile: TileSetTile = {
+        id: tileId,
+        name: 'Tile 1',
+        tiles: [],
+        grid: { rows: resolution, columns: resolution },
+        preferredTileSize: 45,
+        thumbnailUri: null,
+        previewUri: null,
+        updatedAt: createdAt,
+      };
       const nextSet: TileSet = {
         id: createId('tileset'),
         name: payload.name ?? 'New Tile Set',
         category: payload.category,
         categories: [payload.category],
-        resolution: clampResolution(payload.resolution),
+        resolution,
         lineWidth: payload.lineWidth ?? 10,
         lineColor: payload.lineColor ?? '#ffffff',
-        tiles: [],
-        updatedAt: Date.now(),
+        tiles: [initialTile],
+        updatedAt: createdAt,
       };
       setTileSets((prev) => {
         const next = [nextSet, ...prev];
