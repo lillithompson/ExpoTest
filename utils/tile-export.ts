@@ -213,7 +213,10 @@ export const renderTileCanvasToSvg = async ({
   lineColor,
   lineWidth,
   backgroundColor,
-}: Omit<ExportParams, 'blankSource' | 'backgroundLineColor' | 'backgroundLineWidth' | 'fileName'>): Promise<string | null> => {
+  sourceXmlCache,
+}: Omit<ExportParams, 'blankSource' | 'backgroundLineColor' | 'backgroundLineWidth' | 'fileName'> & {
+  sourceXmlCache?: Map<string, string>;
+}): Promise<string | null> => {
   if (gridLayout.columns <= 0 || gridLayout.rows <= 0 || gridLayout.tileSize <= 0) {
     return null;
   }
@@ -235,8 +238,19 @@ export const renderTileCanvasToSvg = async ({
     );
   }
 
+  const rawSvgCache = sourceXmlCache ?? new Map<string, string>();
   const svgCache = new Map<string, { content: string; viewBox: string | null }>();
   const dataUriCache = new Map<string, string>();
+  const getRawSvg = async (uri: string) => {
+    const cached = rawSvgCache.get(uri);
+    if (cached) {
+      return cached;
+    }
+    const response = await fetch(uri);
+    const xml = await response.text();
+    rawSvgCache.set(uri, xml);
+    return xml;
+  };
   const toDataUri = async (
     source: unknown,
     overrides?: { strokeColor?: string; strokeWidth?: number }
@@ -256,8 +270,7 @@ export const renderTileCanvasToSvg = async ({
       dataUriCache.set(cacheKey, uri);
       return uri;
     }
-    const response = await fetch(uri);
-    const xml = await response.text();
+    const xml = await getRawSvg(uri);
     let nextXml = stripOuterBorder(xml);
     if (overrides) {
       nextXml = applySvgOverrides(nextXml, overrides.strokeColor, overrides.strokeWidth);
@@ -283,8 +296,7 @@ export const renderTileCanvasToSvg = async ({
     if (cached) {
       return cached;
     }
-    const response = await fetch(uri);
-    const xml = await response.text();
+    const xml = await getRawSvg(uri);
     let nextXml = stripOuterBorder(xml);
     if (overrides) {
       nextXml = applySvgOverrides(nextXml, overrides.strokeColor, overrides.strokeWidth);

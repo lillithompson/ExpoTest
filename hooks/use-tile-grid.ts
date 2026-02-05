@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { type TileSource } from '@/assets/images/tiles/manifest';
 import { parseTileConnections, transformConnections } from '@/utils/tile-compat';
@@ -21,6 +21,7 @@ type Params = {
   allowEdgeConnections: boolean;
   suspendRemap?: boolean;
   randomRequiresLegal?: boolean;
+  randomSourceIndices?: number[];
   fixedRows?: number;
   fixedColumns?: number;
   brush:
@@ -67,6 +68,7 @@ export const useTileGrid = ({
   allowEdgeConnections,
   suspendRemap = false,
   randomRequiresLegal = false,
+  randomSourceIndices,
   fixedRows,
   fixedColumns,
   brush,
@@ -83,6 +85,12 @@ export const useTileGrid = ({
     () => tileSources.map((source) => source.name).join('|'),
     [tileSources]
   );
+  const randomSourceSet = useMemo(() => {
+    if (!randomSourceIndices || randomSourceIndices.length === 0) {
+      return null;
+    }
+    return new Set(randomSourceIndices);
+  }, [randomSourceIndices]);
   const gridLayout = useMemo(() => {
     if (fixedRows && fixedColumns) {
       return computeFixedGridLayout(
@@ -199,14 +207,14 @@ export const useTileGrid = ({
     setTiles((prev) => (prev.length === totalCells ? prev : buildInitialTiles(totalCells)));
   }, [totalCells]);
 
-  const clearCloneSource = () => {
+  const clearCloneSource = useCallback(() => {
     cloneAnchorRef.current = null;
     cloneSourceRef.current = null;
     setCloneSourceIndex(null);
     setCloneSampleIndex(null);
     setCloneAnchorIndex(null);
     setCloneCursorIndex(null);
-  };
+  }, []);
 
   useEffect(() => {
     if (brush.mode !== 'clone') {
@@ -259,7 +267,11 @@ export const useTileGrid = ({
     }
   };
 
-  const buildCompatibleCandidates = (cellIndex: number, tilesState: Tile[]) => {
+  const buildCompatibleCandidates = (
+    cellIndex: number,
+    tilesState: Tile[],
+    allowedIndices: Set<number> | null
+  ) => {
     if (tileSourcesLength <= 0) {
       return [] as Tile[];
     }
@@ -312,6 +324,9 @@ export const useTileGrid = ({
     const candidates: Array<Tile> = [];
 
     tileSourceMeta.forEach((meta, index) => {
+      if (allowedIndices && !allowedIndices.has(index)) {
+        return;
+      }
       if (!meta.connections) {
         candidates.push({
           imageIndex: index,
@@ -359,8 +374,12 @@ export const useTileGrid = ({
     return candidates;
   };
 
-  const selectCompatibleTile = (cellIndex: number, tilesState: Tile[]) => {
-    const candidates = buildCompatibleCandidates(cellIndex, tilesState);
+  const selectCompatibleTile = (
+    cellIndex: number,
+    tilesState: Tile[],
+    allowedIndices: Set<number> | null
+  ) => {
+    const candidates = buildCompatibleCandidates(cellIndex, tilesState, allowedIndices);
     if (candidates.length === 0) {
       return null;
     }
@@ -368,7 +387,7 @@ export const useTileGrid = ({
   };
 
   const getRandomPlacement = (cellIndex: number, tilesState: Tile[]) => {
-    const selection = selectCompatibleTile(cellIndex, tilesState);
+    const selection = selectCompatibleTile(cellIndex, tilesState, randomSourceSet);
     if (selection && isPlacementValid(cellIndex, selection, tilesState)) {
       return selection;
     }
@@ -824,7 +843,7 @@ export const useTileGrid = ({
       return;
     }
 
-    const selection = selectCompatibleTile(cellIndex, renderTiles);
+    const selection = selectCompatibleTile(cellIndex, renderTiles, randomSourceSet);
     if (
       !selection ||
       !isPlacementValid(cellIndex, selection, renderTiles)
@@ -1132,14 +1151,14 @@ export const useTileGrid = ({
     applyTiles(nextTiles);
   };
 
-  const setCloneSource = (cellIndex: number) => {
+  const setCloneSource = useCallback((cellIndex: number) => {
     cloneSourceRef.current = cellIndex;
     cloneAnchorRef.current = null;
     setCloneSourceIndex(cellIndex);
     setCloneSampleIndex(cellIndex);
     setCloneAnchorIndex(null);
     setCloneCursorIndex(null);
-  };
+  }, []);
 
   return {
     gridLayout,

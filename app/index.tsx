@@ -33,6 +33,7 @@ import { ThemedView } from '@/components/themed-view';
 import { useTileGrid } from '@/hooks/use-tile-grid';
 import { usePersistedSettings } from '@/hooks/use-persisted-settings';
 import { useTileFiles, type TileFile } from '@/hooks/use-tile-files';
+import { useTileSets } from '@/hooks/use-tile-sets';
 import { useTilePatterns } from '@/hooks/use-tile-patterns';
 import {
   exportTileCanvasAsSvg,
@@ -168,16 +169,6 @@ const getSourcesForCategories = (categories: TileCategory[]) =>
   categories.flatMap((category) => TILE_MANIFEST[category] ?? []);
 const categoriesMatch = (a: TileCategory[], b: TileCategory[]) =>
   a.length === b.length && a.every((value, index) => value === b[index]);
-const getSourcesForFile = (file: TileFile) =>
-  getSourcesForCategories(
-    normalizeCategories(
-      file.categories && file.categories.length > 0
-        ? file.categories
-        : file.category
-          ? [file.category]
-          : []
-    )
-  );
 
 type HsvColorPickerProps = {
   label: string;
@@ -541,6 +532,9 @@ export default function TestScreen() {
   const [selectedCategories, setSelectedCategories] = useState<TileCategory[]>(
     () => [DEFAULT_CATEGORY]
   );
+  const [selectedTileSetIds, setSelectedTileSetIds] = useState<string[]>([]);
+  const [appliedTileSetIds, setAppliedTileSetIds] = useState<string[]>([]);
+  const [fileSourceNames, setFileSourceNames] = useState<string[]>([]);
   const [showFileSettingsOverlay, setShowFileSettingsOverlay] = useState(false);
   const [tileSetSelectionError, setTileSetSelectionError] = useState<string | null>(
     null
@@ -640,15 +634,122 @@ export default function TestScreen() {
     upsertActiveFile,
     ready,
   } = useTileFiles(DEFAULT_CATEGORY);
+  const { tileSets: userTileSets, bakedSourcesBySetId } = useTileSets();
 
   const activeCategories = useMemo(
     () => normalizeCategories(selectedCategories),
     [selectedCategories]
   );
   const primaryCategory = activeCategories[0] ?? DEFAULT_CATEGORY;
-  const tileSources = useMemo(
-    () => getSourcesForCategories(activeCategories),
-    [activeCategories]
+  const areTileSetsReady = useCallback(
+    (ids: string[]) =>
+      ids.every((id) => (bakedSourcesBySetId[id]?.length ?? 0) > 0),
+    [bakedSourcesBySetId]
+  );
+  const getSourcesForSelection = useCallback(
+    (categories: TileCategory[], tileSetIds: string[]) => {
+      const userSources = tileSetIds.flatMap(
+        (id) => bakedSourcesBySetId[id] ?? []
+      );
+      return [...userSources, ...getSourcesForCategories(categories)];
+    },
+    [bakedSourcesBySetId]
+  );
+  const paletteSources = useMemo(
+    () => getSourcesForSelection(activeCategories, appliedTileSetIds),
+    [activeCategories, appliedTileSetIds, getSourcesForSelection]
+  );
+  const allSourceLookup = useMemo(() => {
+    const map = new Map<string, TileSource>();
+    TILE_CATEGORIES.forEach((category) => {
+      (TILE_MANIFEST[category] ?? []).forEach((source) => {
+        map.set(source.name, source);
+      });
+    });
+    Object.values(bakedSourcesBySetId).forEach((sources) => {
+      sources.forEach((source) => {
+        map.set(source.name, source);
+      });
+    });
+    return map;
+  }, [bakedSourcesBySetId]);
+  const tileSources = useMemo(() => {
+    if (fileSourceNames.length === 0) {
+      return paletteSources;
+    }
+    return fileSourceNames.map((name) => {
+      const resolved = allSourceLookup.get(name);
+      return (
+        resolved ?? {
+          name,
+          source: ERROR_TILE,
+        }
+      );
+    });
+  }, [fileSourceNames, paletteSources, allSourceLookup]);
+  const paletteIndexToFileIndex = useMemo(() => {
+    const indexByName = new Map<string, number>();
+    fileSourceNames.forEach((name, index) => {
+      if (!indexByName.has(name)) {
+        indexByName.set(name, index);
+      }
+    });
+    return paletteSources.map((source) => indexByName.get(source.name) ?? -1);
+  }, [fileSourceNames, paletteSources]);
+  const randomSourceIndices = useMemo(
+    () => paletteIndexToFileIndex.filter((index) => index >= 0),
+    [paletteIndexToFileIndex]
+  );
+  const ensureFileSourceNames = useCallback(
+    (sources: TileSource[]) => {
+      const next = fileSourceNames.length > 0 ? [...fileSourceNames] : [];
+      let changed = false;
+      sources.forEach((source) => {
+        if (!next.includes(source.name)) {
+          next.push(source.name);
+          changed = true;
+        }
+      });
+      if (changed) {
+        setFileSourceNames(next);
+        console.log(
+          '[fileSources:extend]',
+          JSON.stringify({ added: next.length - fileSourceNames.length })
+        );
+      }
+      return changed ? next : fileSourceNames;
+    },
+    [fileSourceNames]
+  );
+  const tileSourcesKey = useMemo(
+    () => tileSources.map((source) => source.name).join('|'),
+    [tileSources]
+  );
+  const prevTileSourcesKeyRef = useRef(tileSourcesKey);
+  const getSourcesForFile = useCallback(
+    (file: TileFile) => {
+      if (Array.isArray(file.sourceNames) && file.sourceNames.length > 0) {
+        return file.sourceNames.map((name) => {
+          const resolved = allSourceLookup.get(name);
+          return (
+            resolved ?? {
+              name,
+              source: ERROR_TILE,
+            }
+          );
+        });
+      }
+      const categories = normalizeCategories(
+        file.categories && file.categories.length > 0
+          ? file.categories
+          : file.category
+            ? [file.category]
+            : []
+      );
+      const tileSetIds = Array.isArray(file.tileSetIds) ? file.tileSetIds : [];
+      return getSourcesForSelection(categories, tileSetIds);
+    },
+    [allSourceLookup, getSourcesForSelection]
   );
   const activePatterns = useMemo(
     () => patternsByCategory.get(primaryCategory) ?? [],
@@ -713,7 +814,8 @@ export default function TestScreen() {
     gridGap: GRID_GAP,
     preferredTileSize: fileTileSize,
     allowEdgeConnections: settings.allowEdgeConnections,
-    suspendRemap: isHydratingFile,
+    suspendRemap: true,
+    randomSourceIndices,
     fixedRows: activeFile?.grid.rows ?? 0,
     fixedColumns: activeFile?.grid.columns ?? 0,
     brush,
@@ -730,6 +832,18 @@ export default function TestScreen() {
       : null,
     patternAnchorKey: selectedPattern?.id ?? null,
   });
+  useEffect(() => {
+    if (prevTileSourcesKeyRef.current === tileSourcesKey) {
+      return;
+    }
+    prevTileSourcesKeyRef.current = tileSourcesKey;
+    setBrush({ mode: 'random' });
+    clearCloneSource();
+    setIsPatternCreationMode(false);
+    setPatternSelection(null);
+    setShowPatternSaveModal(false);
+    setShowPatternChooser(false);
+  }, [tileSourcesKey, clearCloneSource]);
   const displayTiles = tiles;
   const showOverlays = !isCapturingPreview && !suspendTiles && showGrid;
   const gridWidth =
@@ -808,15 +922,20 @@ export default function TestScreen() {
       : null;
   }, [downloadTargetFile]);
   const filesRef = useRef(files);
+  const activeFileRef = useRef<TileFile | null>(activeFile ?? null);
+  const debugHydrationRef = useRef(0);
 
   useEffect(() => {
     filesRef.current = files;
   }, [files]);
+  useEffect(() => {
+    activeFileRef.current = activeFile ?? null;
+  }, [activeFile]);
 
   const remapTilesForCategories = useCallback(
-    (nextCategories: TileCategory[], currentTiles: Tile[]) => {
+    (nextCategories: TileCategory[], nextTileSetIds: string[], currentTiles: Tile[]) => {
       const prevSources = tileSources;
-      const nextSources = getSourcesForCategories(nextCategories);
+      const nextSources = getSourcesForSelection(nextCategories, nextTileSetIds);
       const sameSources =
         prevSources.length === nextSources.length &&
         prevSources.every((source, index) => source === nextSources[index]);
@@ -912,7 +1031,7 @@ export default function TestScreen() {
         };
       });
     },
-    [gridLayout.columns, gridLayout.rows, tileSources]
+    [gridLayout.columns, gridLayout.rows, tileSources, getSourcesForSelection]
   );
 
   useEffect(() => {
@@ -970,14 +1089,192 @@ export default function TestScreen() {
   }, [activeFile?.categories, activeFile?.category, selectedCategories]);
 
   useEffect(() => {
+    const nextIds = Array.isArray(activeFile?.tileSetIds)
+      ? activeFile?.tileSetIds ?? []
+      : [];
+    const same =
+      nextIds.length === selectedTileSetIds.length &&
+      nextIds.every((value, index) => value === selectedTileSetIds[index]);
+    if (!same) {
+      setSelectedTileSetIds(nextIds);
+    }
+    if (areTileSetsReady(nextIds)) {
+      setAppliedTileSetIds((prev) => {
+        if (
+          prev.length === nextIds.length &&
+          prev.every((value, index) => value === nextIds[index])
+        ) {
+          return prev;
+        }
+        return nextIds;
+      });
+    }
+  }, [activeFile?.tileSetIds, selectedTileSetIds, areTileSetsReady]);
+
+  useEffect(() => {
+    if (!areTileSetsReady(selectedTileSetIds)) {
+      return;
+    }
+    setAppliedTileSetIds((prev) => {
+      if (
+        prev.length === selectedTileSetIds.length &&
+        prev.every((value, index) => value === selectedTileSetIds[index])
+      ) {
+        return prev;
+      }
+      return selectedTileSetIds;
+    });
+  }, [selectedTileSetIds, areTileSetsReady]);
+
+  useEffect(() => {
+    if (!activeFile || !activeFileId) {
+      setFileSourceNames([]);
+      return;
+    }
+    console.log(
+      '[fileSources:init]',
+      JSON.stringify({
+        activeFileId,
+        tiles: activeFile.tiles.length,
+        hasSourceNames: Array.isArray(activeFile.sourceNames) && activeFile.sourceNames.length > 0,
+        tileSetIds: Array.isArray(activeFile.tileSetIds)
+          ? activeFile.tileSetIds.length
+          : 0,
+        ready: areTileSetsReady(
+          Array.isArray(activeFile.tileSetIds) ? activeFile.tileSetIds : []
+        ),
+      })
+    );
+    const stored =
+      Array.isArray(activeFile.sourceNames) && activeFile.sourceNames.length > 0
+        ? activeFile.sourceNames
+        : [];
+    if (stored.length > 0) {
+      setFileSourceNames(stored);
+      return;
+    }
+    if (
+      activeFile.tiles.length > 0 &&
+      Array.isArray(activeFile.tileSetIds) &&
+      activeFile.tileSetIds.length > 0 &&
+      !areTileSetsReady(activeFile.tileSetIds)
+    ) {
+      // Defer initialization until user tile sets are baked to avoid losing mappings.
+      console.log(
+        '[fileSources:defer]',
+        JSON.stringify({ activeFileId, tileSetIds: activeFile.tileSetIds })
+      );
+      return;
+    }
+    const initialSources = getSourcesForFile(activeFile).map((source) => source.name);
+    if (initialSources.length === 0) {
+      console.log('[fileSources:empty]', JSON.stringify({ activeFileId }));
+      setFileSourceNames([]);
+      return;
+    }
+    setFileSourceNames(initialSources);
+    console.log(
+      '[fileSources:seed]',
+      JSON.stringify({ activeFileId, count: initialSources.length })
+    );
+    upsertActiveFile({
+      tiles: activeFile.tiles,
+      gridLayout: activeFile.grid,
+      category: activeFile.category,
+      categories: activeFile.categories,
+      tileSetIds: activeFile.tileSetIds,
+      sourceNames: initialSources,
+      preferredTileSize: activeFile.preferredTileSize,
+      lineWidth: activeFile.lineWidth,
+      lineColor: activeFile.lineColor,
+      thumbnailUri: activeFile.thumbnailUri,
+      previewUri: activeFile.previewUri,
+    });
+  }, [activeFileId, activeFile, getSourcesForFile, upsertActiveFile]);
+
+  useEffect(() => {
+    if (!activeFileId) {
+      return;
+    }
+    if (isHydratingFile || pendingRestoreRef.current) {
+      return;
+    }
+    const nextNames = ensureFileSourceNames(paletteSources);
+    if (nextNames.length === fileSourceNames.length) {
+      return;
+    }
+    const fileSnapshot =
+      activeFileRef.current ??
+      filesRef.current.find((entry) => entry.id === activeFileId) ??
+      null;
+    const tilesSnapshot = fileSnapshot?.tiles ?? tiles;
+    const gridSnapshot = fileSnapshot?.grid ?? gridLayout;
+    upsertActiveFile({
+      tiles: tilesSnapshot,
+      gridLayout: gridSnapshot,
+      category: fileSnapshot?.category ?? primaryCategory,
+      categories: fileSnapshot?.categories ?? activeCategories,
+      tileSetIds: fileSnapshot?.tileSetIds ?? selectedTileSetIds,
+      sourceNames: nextNames,
+      preferredTileSize: fileSnapshot?.preferredTileSize ?? fileTileSize,
+      lineWidth: fileSnapshot?.lineWidth ?? activeLineWidth,
+      lineColor: fileSnapshot?.lineColor ?? activeLineColor,
+    });
+  }, [
+    paletteSources,
+    activeFileId,
+    isHydratingFile,
+    fileSourceNames.length,
+    ensureFileSourceNames,
+    tiles,
+    gridLayout,
+    primaryCategory,
+    activeCategories,
+    selectedTileSetIds,
+    fileTileSize,
+    activeLineWidth,
+    activeLineColor,
+    upsertActiveFile,
+  ]);
+
+  useEffect(() => {
     if (!ready || !activeFileId || viewMode !== 'modify') {
       return;
     }
+    debugHydrationRef.current += 1;
+    console.log(
+      '[hydrate:start]',
+      JSON.stringify({
+        tick: debugHydrationRef.current,
+        activeFileId,
+        viewMode,
+        loadRequestId,
+      })
+    );
     const file =
-      filesRef.current.find((entry) => entry.id === activeFileId) ?? null;
+      activeFileRef.current ??
+      filesRef.current.find((entry) => entry.id === activeFileId) ??
+      null;
     if (!file) {
+      console.log(
+        '[hydrate:missing-file]',
+        JSON.stringify({ tick: debugHydrationRef.current })
+      );
+      setHydrating(false);
+      setSuspendTiles(false);
+      setShowGrid(true);
       return;
     }
+    console.log(
+      '[hydrate:file]',
+      JSON.stringify({
+        tick: debugHydrationRef.current,
+        tiles: file.tiles.length,
+        rows: file.grid.rows,
+        cols: file.grid.columns,
+        preview: Boolean(file.previewUri ?? file.thumbnailUri),
+      })
+    );
     const resolvedCategories = normalizeCategories(
       file.categories && file.categories.length > 0
         ? file.categories
@@ -1037,18 +1334,41 @@ export default function TestScreen() {
       token: nextToken,
       preview: Boolean(previewUri),
     };
-  }, [activeFileId, loadRequestId, ready, viewMode, selectedCategories, clearCloneSource]);
+    console.log(
+      '[hydrate:pending]',
+      JSON.stringify({
+        tick: debugHydrationRef.current,
+        token: nextToken,
+        preview: Boolean(previewUri),
+      })
+    );
+  }, [activeFileId, loadRequestId, ready, viewMode, clearCloneSource]);
 
   useEffect(() => {
     if (viewMode !== 'modify') {
       return;
     }
-    if (isHydratingFile || isPrefetchingTiles || loadedToken !== loadToken) {
+    if (isHydratingFile || loadedToken !== loadToken) {
       setShowGrid(false);
       return;
     }
     setShowGrid(true);
-  }, [isHydratingFile, isPrefetchingTiles, loadedToken, loadToken, activeFileId, viewMode]);
+  }, [isHydratingFile, loadedToken, loadToken, activeFileId, viewMode]);
+
+  useEffect(() => {
+    console.log(
+      '[hydrate:grid-state]',
+      JSON.stringify({
+        activeFileId,
+        viewMode,
+        isHydratingFile,
+        isPrefetchingTiles,
+        loadedToken,
+        loadToken,
+        showGrid,
+      })
+    );
+  }, [activeFileId, viewMode, isHydratingFile, isPrefetchingTiles, loadedToken, loadToken, showGrid]);
 
 
 
@@ -1063,7 +1383,6 @@ export default function TestScreen() {
     }
     if (
       isHydratingFile ||
-      isPrefetchingTiles ||
       !showGrid ||
       loadedToken !== loadToken
     ) {
@@ -1088,7 +1407,6 @@ export default function TestScreen() {
   }, [
     viewMode,
     isHydratingFile,
-    isPrefetchingTiles,
     showGrid,
     loadPreviewUri,
     loadedToken,
@@ -1101,9 +1419,6 @@ export default function TestScreen() {
     }
     let cancelled = false;
     setIsPrefetchingTiles(true);
-    setShowGrid(false);
-    setShowPreview(Boolean(loadPreviewUri));
-    setSuspendTiles(true);
     const sources = [ERROR_TILE, ...tileSources.map((tile) => tile.source)];
     void (async () => {
       try {
@@ -1117,16 +1432,32 @@ export default function TestScreen() {
     return () => {
       cancelled = true;
     };
-  }, [viewMode, activeFileId, tileSources, loadPreviewUri]);
+  }, [
+    viewMode,
+    activeFileId,
+    tileSources,
+    loadPreviewUri,
+    isHydratingFile,
+    loadedToken,
+    loadToken,
+  ]);
 
   useEffect(() => {
     const pending = pendingRestoreRef.current;
     if (!pending || activeFileId !== pending.fileId) {
       return;
     }
-    if (!categoriesMatch(pending.categories, activeCategories)) {
-      return;
-    }
+    console.log(
+      '[hydrate:apply-check]',
+      JSON.stringify({
+        tick: debugHydrationRef.current,
+        pendingToken: pending.token,
+        grid: `${gridLayout.rows}x${gridLayout.columns}`,
+        pendingGrid: `${pending.rows}x${pending.columns}`,
+        tileSize: gridLayout.tileSize,
+        pendingTiles: pending.tiles.length,
+      })
+    );
     const gridMatches =
       pending.rows === gridLayout.rows && pending.columns === gridLayout.columns;
     const allowFallback = pending.rows === 0 || pending.columns === 0;
@@ -1150,6 +1481,14 @@ export default function TestScreen() {
       } else {
         finalize();
       }
+      console.log(
+        '[hydrate:applied]',
+        JSON.stringify({
+          tick: debugHydrationRef.current,
+          token: pending.token,
+          preview: pending.preview,
+        })
+      );
       return;
     }
     if (gridLayout.tileSize > 0 && pending.rows === 0 && pending.columns === 0) {
@@ -1158,10 +1497,16 @@ export default function TestScreen() {
       setHydrating(false);
       setSuspendTiles(false);
       setLoadedToken(pending.token ?? 0);
+      console.log(
+        '[hydrate:reset]',
+        JSON.stringify({
+          tick: debugHydrationRef.current,
+          token: pending.token,
+        })
+      );
     }
   }, [
     activeFileId,
-    activeCategories,
     gridLayout.tileSize,
     gridLayout.columns,
     gridLayout.rows,
@@ -2825,9 +3170,9 @@ export default function TestScreen() {
             ]}
           />
         )}
-        <TileBrushPanel
-          tileSources={tileSources}
-          selected={brush}
+          <TileBrushPanel
+            tileSources={paletteSources}
+            selected={brush}
           selectedPattern={
             selectedPattern
               ? {
@@ -2853,15 +3198,24 @@ export default function TestScreen() {
               setBrush(next);
               return;
             }
-            if (next.mode === 'fixed') {
-              const rotation = paletteRotations[next.index] ?? next.rotation ?? 0;
-              const mirrorX = paletteMirrors[next.index] ?? next.mirrorX ?? false;
-              const mirrorY = paletteMirrorsY[next.index] ?? next.mirrorY ?? false;
-              setBrush({ mode: 'fixed', index: next.index, rotation, mirrorX, mirrorY });
-            } else {
-              setBrush(next);
-            }
-          }}
+              if (next.mode === 'fixed') {
+                const rotation = paletteRotations[next.index] ?? next.rotation ?? 0;
+                const mirrorX = paletteMirrors[next.index] ?? next.mirrorX ?? false;
+                const mirrorY = paletteMirrorsY[next.index] ?? next.mirrorY ?? false;
+                const fileIndex = paletteIndexToFileIndex[next.index] ?? -1;
+                if (fileIndex >= 0) {
+                  setBrush({
+                    mode: 'fixed',
+                    index: fileIndex,
+                    rotation,
+                    mirrorX,
+                    mirrorY,
+                  });
+                }
+              } else {
+                setBrush(next);
+              }
+            }}
           onRotate={(index) =>
             setPaletteRotations((prev) => {
               const nextRotation = ((prev[index] ?? 0) + 90) % 360;
@@ -3279,7 +3633,7 @@ export default function TestScreen() {
             <Pressable
               style={styles.overlayBackdrop}
               onPress={() => {
-                if (selectedCategories.length === 0) {
+                if (selectedCategories.length === 0 && selectedTileSetIds.length === 0) {
                   setTileSetSelectionError('Select at least one tile set.');
                   return;
                 }
@@ -3298,26 +3652,32 @@ export default function TestScreen() {
                     key={category}
                     onPress={() => {
                       const isSelected = selectedCategories.includes(category);
-                      if (isSelected && selectedCategories.length === 1) {
+                      if (
+                        isSelected &&
+                        selectedCategories.length === 1 &&
+                        selectedTileSetIds.length === 0
+                      ) {
                         setTileSetSelectionError('Select at least one tile set.');
                         return;
                       }
                       const nextCategories = isSelected
                         ? selectedCategories.filter((entry) => entry !== category)
                         : [...selectedCategories, category];
-                      const remappedTiles = remapTilesForCategories(
+                      const nextPaletteSources = getSourcesForSelection(
                         nextCategories,
-                        tiles
+                        selectedTileSetIds
                       );
+                      const nextSourceNames = ensureFileSourceNames(nextPaletteSources);
                       setTileSetSelectionError(null);
                       setSelectedCategories(nextCategories);
                       if (activeFileId) {
-                        loadTiles(remappedTiles);
                         upsertActiveFile({
-                          tiles: remappedTiles,
+                          tiles,
                           gridLayout,
                           category: nextCategories[0] ?? DEFAULT_CATEGORY,
                           categories: nextCategories,
+                          tileSetIds: selectedTileSetIds,
+                          sourceNames: nextSourceNames,
                           preferredTileSize: fileTileSize,
                           lineWidth: activeLineWidth,
                           lineColor: activeLineColor,
@@ -3338,6 +3698,68 @@ export default function TestScreen() {
                   {tileSetSelectionError}
                 </ThemedText>
               )}
+              </ThemedView>
+              <ThemedView style={styles.sectionGroup}>
+                <ThemedText type="defaultSemiBold">My Tile Sets</ThemedText>
+                {userTileSets.length === 0 ? (
+                  <ThemedText type="defaultSemiBold" style={styles.emptyText}>
+                    No tile sets yet
+                  </ThemedText>
+                ) : (
+                  <ThemedView style={styles.overlayList}>
+                    {userTileSets.map((set) => {
+                      const isSelected = selectedTileSetIds.includes(set.id);
+                      return (
+                        <Pressable
+                          key={set.id}
+                          onPress={() => {
+                            if (
+                              isSelected &&
+                              selectedTileSetIds.length === 1 &&
+                              selectedCategories.length === 0
+                            ) {
+                              setTileSetSelectionError('Select at least one tile set.');
+                              return;
+                            }
+                            const nextTileSetIds = isSelected
+                              ? selectedTileSetIds.filter((entry) => entry !== set.id)
+                              : [...selectedTileSetIds, set.id];
+                            setTileSetSelectionError(null);
+                            setSelectedTileSetIds(nextTileSetIds);
+                            const nextReady = areTileSetsReady(nextTileSetIds);
+                            if (nextReady) {
+                              setAppliedTileSetIds(nextTileSetIds);
+                            }
+                            const nextPaletteSources = getSourcesForSelection(
+                              selectedCategories,
+                              nextTileSetIds
+                            );
+                            const nextSourceNames = ensureFileSourceNames(nextPaletteSources);
+                            if (activeFileId) {
+                              upsertActiveFile({
+                                tiles,
+                                gridLayout,
+                                category: selectedCategories[0] ?? DEFAULT_CATEGORY,
+                                categories: selectedCategories,
+                                tileSetIds: nextTileSetIds,
+                                sourceNames: nextSourceNames,
+                                preferredTileSize: fileTileSize,
+                                lineWidth: activeLineWidth,
+                                lineColor: activeLineColor,
+                              });
+                            }
+                          }}
+                          style={[
+                            styles.overlayItem,
+                            isSelected && styles.overlayItemSelected,
+                          ]}
+                        >
+                          <ThemedText type="defaultSemiBold">{set.name}</ThemedText>
+                        </Pressable>
+                      );
+                    })}
+                  </ThemedView>
+                )}
               </ThemedView>
             </ThemedView>
           </ThemedView>
@@ -3626,6 +4048,9 @@ const styles = StyleSheet.create({
   errorText: {
     color: '#ef4444',
     marginTop: 6,
+  },
+  emptyText: {
+    color: '#6b7280',
   },
   screen: {
     flex: 1,

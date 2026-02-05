@@ -12,6 +12,8 @@ export type TileFile = {
   grid: { rows: number; columns: number };
   category: TileCategory;
   categories: TileCategory[];
+  tileSetIds: string[];
+  sourceNames: string[];
   preferredTileSize: number;
   lineWidth: number;
   lineColor: string;
@@ -33,6 +35,8 @@ const defaultFile = (category: TileCategory): TileFile => ({
   grid: { rows: 0, columns: 0 },
   category,
   categories: [category],
+  tileSetIds: [],
+  sourceNames: [],
   preferredTileSize: 45,
   lineWidth: 10,
   lineColor: '#ffffff',
@@ -86,6 +90,12 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
                 grid: file.grid ?? { rows: 0, columns: 0 },
                 category: categories[0] ?? safeCategory,
                 categories,
+                tileSetIds: Array.isArray(file.tileSetIds)
+                  ? file.tileSetIds.filter((entry) => typeof entry === 'string')
+                  : [],
+                sourceNames: Array.isArray(file.sourceNames)
+                  ? file.sourceNames.filter((entry) => typeof entry === 'string')
+                  : [],
                 preferredTileSize: file.preferredTileSize ?? 45,
                 lineWidth: file.lineWidth ?? 10,
                 lineColor: file.lineColor ?? '#ffffff',
@@ -145,6 +155,8 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
       gridLayout: GridLayout;
       category: TileCategory;
       categories?: TileCategory[];
+      tileSetIds?: string[];
+      sourceNames?: string[];
       preferredTileSize: number;
       lineWidth?: number;
       lineColor?: string;
@@ -166,6 +178,10 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
                   payload.categories ??
                   file.categories ??
                   (payload.category ? [payload.category] : [file.category]),
+                tileSetIds:
+                  payload.tileSetIds !== undefined ? payload.tileSetIds : file.tileSetIds,
+                sourceNames:
+                  payload.sourceNames !== undefined ? payload.sourceNames : file.sourceNames,
                 preferredTileSize: payload.preferredTileSize,
                 lineWidth:
                   payload.lineWidth !== undefined ? payload.lineWidth : file.lineWidth,
@@ -213,6 +229,8 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
         grid: { rows: 0, columns: 0 },
         category,
         categories: [category],
+        tileSetIds: [],
+        sourceNames: [],
         preferredTileSize,
         lineWidth: 10,
         lineColor: '#ffffff',

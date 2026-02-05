@@ -9,6 +9,8 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
+import * as FileSystem from 'expo-file-system';
+import JSZip from 'jszip';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import ViewShot from 'react-native-view-shot';
@@ -47,7 +49,8 @@ export default function TileSetCreatorScreen() {
   const { width } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { tileSets, createTileSet, deleteTileSet, updateTileSet } = useTileSets();
+  const { tileSets, bakedSourcesBySetId, createTileSet, deleteTileSet, updateTileSet } =
+    useTileSets();
   const [isSelectMode, setIsSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const selectBarAnim = useRef(new Animated.Value(0)).current;
@@ -55,6 +58,9 @@ export default function TileSetCreatorScreen() {
   const [newCategories, setNewCategories] = useState<TileCategory[]>([DEFAULT_CATEGORY]);
   const [newResolution, setNewResolution] = useState(4);
   const [newName, setNewName] = useState('4x4 (New)');
+  const [downloadSetId, setDownloadSetId] = useState<string | null>(null);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
+  const [isDownloadingZip, setIsDownloadingZip] = useState(false);
   const [bakedPreviews, setBakedPreviews] = useState<Record<string, BakedPreview>>(
     {}
   );
@@ -249,6 +255,51 @@ export default function TileSetCreatorScreen() {
     clearSelection();
   };
 
+  const downloadTileSetZip = async (setId: string) => {
+    if (Platform.OS !== 'web') {
+      return;
+    }
+    const set = tileSets.find((entry) => entry.id === setId);
+    if (!set) {
+      return;
+    }
+    const sources = bakedSourcesBySetId[setId] ?? [];
+    if (sources.length === 0) {
+      setDownloadError('No baked tiles available yet.');
+      return;
+    }
+    setIsDownloadingZip(true);
+    setDownloadError(null);
+    try {
+      const zip = new JSZip();
+      for (let i = 0; i < sources.length; i += 1) {
+        const source = sources[i];
+        const uri = (source.source as { uri?: string })?.uri;
+        if (!uri) {
+          continue;
+        }
+        const svg = await FileSystem.readAsStringAsync(uri);
+        const fileName = source.name ?? `tile_${i}.svg`;
+        zip.file(fileName, svg);
+      }
+      const blob = await zip.generateAsync({ type: 'blob' });
+      const safeName = set.name.trim().replace(/[^\w\-]+/g, '_') || 'tile-set';
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${safeName}.zip`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      setDownloadSetId(null);
+    } catch {
+      setDownloadError('Failed to build zip.');
+    } finally {
+      setIsDownloadingZip(false);
+    }
+  };
+
   return (
     <ThemedView
       style={[
@@ -364,6 +415,13 @@ export default function TileSetCreatorScreen() {
                       params: { setId: set.id },
                     });
                   }
+                }}
+                onLongPress={() => {
+                  if (Platform.OS !== 'web' || isSelectMode) {
+                    return;
+                  }
+                  setDownloadError(null);
+                  setDownloadSetId(set.id);
                 }}
                 accessibilityRole="button"
                 accessibilityLabel={`Open ${set.name}`}
@@ -504,6 +562,51 @@ export default function TileSetCreatorScreen() {
               >
                 <ThemedText type="defaultSemiBold" style={styles.actionButtonText}>
                   Create
+                </ThemedText>
+              </Pressable>
+            </ThemedView>
+          </ThemedView>
+        </ThemedView>
+      )}
+      {downloadSetId && (
+        <ThemedView style={styles.overlay} accessibilityRole="dialog">
+          <Pressable
+            style={styles.overlayBackdrop}
+            onPress={() => setDownloadSetId(null)}
+            accessibilityRole="button"
+            accessibilityLabel="Close download dialog"
+          />
+          <ThemedView style={styles.overlayPanel}>
+            <ThemedText type="title">Download Tile Set</ThemedText>
+            <ThemedText type="defaultSemiBold">
+              Download all tiles in this set as a zip of SVGs.
+            </ThemedText>
+            {downloadError && (
+              <ThemedText type="defaultSemiBold" style={styles.errorText}>
+                {downloadError}
+              </ThemedText>
+            )}
+            <ThemedView style={styles.modalActions}>
+              <Pressable
+                onPress={() => setDownloadSetId(null)}
+                style={[styles.actionButton, styles.actionButtonGhost]}
+                accessibilityRole="button"
+                accessibilityLabel="Cancel download"
+              >
+                <ThemedText type="defaultSemiBold">Cancel</ThemedText>
+              </Pressable>
+              <Pressable
+                onPress={() => downloadTileSetZip(downloadSetId)}
+                style={[
+                  styles.actionButton,
+                  styles.actionButtonPrimary,
+                  isDownloadingZip && styles.actionButtonDisabled,
+                ]}
+                accessibilityRole="button"
+                accessibilityLabel="Download tile set"
+              >
+                <ThemedText type="defaultSemiBold" style={styles.actionButtonText}>
+                  {isDownloadingZip ? 'Preparing…' : 'Download'}
                 </ThemedText>
               </Pressable>
             </ThemedView>
@@ -894,6 +997,9 @@ const styles = StyleSheet.create({
   actionButtonPrimary: {
     backgroundColor: '#111',
   },
+  actionButtonDisabled: {
+    opacity: 0.6,
+  },
   actionButtonText: {
     color: '#fff',
   },
@@ -906,5 +1012,8 @@ const styles = StyleSheet.create({
   },
   overlayItemSelected: {
     borderColor: '#22c55e',
+  },
+  errorText: {
+    color: '#ef4444',
   },
 });

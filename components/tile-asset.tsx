@@ -184,6 +184,37 @@ export function TileAsset({
       if (uri) {
         if (!cancelled) {
           setSvgUri((prev) => (prev === uri ? prev : uri));
+          if (uri.startsWith('data:image/svg+xml')) {
+            const cached = svgXmlCache.get(uri);
+            if (cached) {
+              setSvgXml((prev) => (prev === cached ? prev : cached));
+              return;
+            }
+            const parts = uri.split(',');
+            const header = parts[0] ?? '';
+            const body = parts.slice(1).join(',');
+            let xml = '';
+            if (header.includes(';base64')) {
+              try {
+                if (typeof atob === 'function') {
+                  xml = atob(body);
+                }
+              } catch {
+                xml = '';
+              }
+            } else {
+              try {
+                xml = decodeURIComponent(body);
+              } catch {
+                xml = body;
+              }
+            }
+            if (!cancelled && xml) {
+              svgXmlCache.set(uri, xml);
+              setSvgXml((prev) => (prev === xml ? prev : xml));
+              return;
+            }
+          }
           const cached = svgXmlCache.get(uri);
           if (cached) {
             setSvgXml((prev) => (prev === cached ? prev : cached));
