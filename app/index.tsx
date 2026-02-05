@@ -2831,7 +2831,7 @@ export default function TestScreen() {
               }}
             />
             <ToolbarButton
-              label="Flood Complete"
+              label="Flood"
               icon="format-color-fill"
               onPress={() => {
                 if (pendingFloodCompleteRef.current) {
@@ -2839,7 +2839,7 @@ export default function TestScreen() {
                 }
                 pendingFloodCompleteRef.current = setTimeout(() => {
                   pendingFloodCompleteRef.current = null;
-                  floodComplete();
+                  floodFill();
                 }, 0);
               }}
               onLongPress={() => {
@@ -2847,7 +2847,7 @@ export default function TestScreen() {
                   clearTimeout(pendingFloodCompleteRef.current);
                   pendingFloodCompleteRef.current = null;
                 }
-                floodFill();
+                floodComplete();
               }}
             />
             <ToolbarButton
