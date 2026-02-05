@@ -172,6 +172,16 @@ type GridBackgroundProps = {
   lineWidth: number;
 };
 
+type GridLinesOverlayProps = {
+  rows: number;
+  columns: number;
+  tileSize: number;
+  width: number;
+  height: number;
+  lineColor: string;
+  lineWidth: number;
+};
+
 function GridBackground({
   rows,
   columns,
@@ -220,6 +230,55 @@ function GridBackground({
             ]}
           />
         ))}
+    </View>
+  );
+}
+
+function GridLinesOverlay({
+  rows,
+  columns,
+  tileSize,
+  width,
+  height,
+  lineColor,
+  lineWidth,
+}: GridLinesOverlayProps) {
+  if (rows <= 0 || columns <= 0 || tileSize <= 0) {
+    return null;
+  }
+  const verticalLines = Array.from({ length: Math.max(0, columns - 1) }, (_, i) => i + 1);
+  const horizontalLines = Array.from({ length: Math.max(0, rows - 1) }, (_, i) => i + 1);
+  const strokeWidth = Math.max(1, lineWidth);
+  return (
+    <View pointerEvents="none" style={styles.gridLinesOverlay}>
+      {verticalLines.map((col) => (
+        <View
+          key={`grid-overlay-v-${col}`}
+          style={[
+            styles.gridLineVertical,
+            {
+              left: col * tileSize - strokeWidth / 2,
+              width: strokeWidth,
+              height,
+              backgroundColor: lineColor,
+            },
+          ]}
+        />
+      ))}
+      {horizontalLines.map((row) => (
+        <View
+          key={`grid-overlay-h-${row}`}
+          style={[
+            styles.gridLineHorizontal,
+            {
+              top: row * tileSize - strokeWidth / 2,
+              height: strokeWidth,
+              width,
+              backgroundColor: lineColor,
+            },
+          ]}
+        />
+      ))}
     </View>
   );
 }
@@ -385,6 +444,7 @@ export default function ModifyTileScreen() {
             errorSource: ERROR_TILE,
             lineColor: tileSet.lineColor,
             lineWidth: tileSet.lineWidth,
+            backgroundColor: tileCanvasBackground,
             maxDimension: 192,
           });
         } else {
@@ -559,6 +619,9 @@ export default function ModifyTileScreen() {
   const currentConnectivity = borderConnectionStatus
     ? borderConnectionStatus.map((value) => (value ? '1' : '0')).join('')
     : '00000000';
+  const tileCanvasBackground = '#0F1430';
+  const tileCanvasLineColor = 'rgba(203, 213, 245, 0.25)';
+  const tileCanvasLineWidth = 0.5;
 
   if (!tileSet || !tileEntry) {
     return (
@@ -572,6 +635,12 @@ export default function ModifyTileScreen() {
 
   return (
     <ThemedView style={[styles.screen, { paddingTop: insets.top }]}>
+      {insets.top > 0 && (
+        <View
+          pointerEvents="none"
+          style={[styles.statusBarBackground, { height: insets.top }]}
+        />
+      )}
       <ThemedView
         style={[
           styles.titleContainer,
@@ -637,9 +706,9 @@ export default function ModifyTileScreen() {
           tileSize={gridLayout.tileSize}
           width={gridWidth}
           height={gridHeight}
-          backgroundColor={settings.backgroundColor}
-          lineColor={settings.backgroundLineColor}
-          lineWidth={settings.backgroundLineWidth}
+          backgroundColor={tileCanvasBackground}
+          lineColor={tileCanvasLineColor}
+          lineWidth={tileCanvasLineWidth}
         />
         {(settings.mirrorHorizontal || settings.mirrorVertical) &&
           gridWidth > 0 &&
@@ -712,7 +781,10 @@ export default function ModifyTileScreen() {
           onLayout={updateGridOffset}
           style={{ width: gridWidth, height: gridHeight }}
         >
-          <ViewShot ref={thumbnailShotRef} style={{ width: gridWidth, height: gridHeight }}>
+          <ViewShot
+            ref={thumbnailShotRef}
+            style={{ width: gridWidth, height: gridHeight, backgroundColor: tileCanvasBackground }}
+          >
             <ThemedView
               style={[styles.grid, { width: gridWidth, height: gridHeight }]}
               onStartShouldSetResponder={() => true}
@@ -800,6 +872,17 @@ export default function ModifyTileScreen() {
             </ThemedView>
           </ViewShot>
         </View>
+        {gridWidth > 0 && gridHeight > 0 && (
+          <GridLinesOverlay
+            rows={gridLayout.rows}
+            columns={gridLayout.columns}
+            tileSize={gridLayout.tileSize}
+            width={gridWidth}
+            height={gridHeight}
+            lineColor={tileCanvasLineColor}
+            lineWidth={tileCanvasLineWidth}
+          />
+        )}
       </View>
       <View style={styles.brushPanelWrap}>
         <TileBrushPanel
@@ -878,7 +961,15 @@ export default function ModifyTileScreen() {
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: '#3f3f3f',
+    backgroundColor: '#0F1430',
+  },
+  statusBarBackground: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: '#e5e5e5',
+    zIndex: 5,
   },
   titleContainer: {
     flexDirection: 'row',
@@ -930,6 +1021,10 @@ const styles = StyleSheet.create({
   },
   gridBackground: {
     ...StyleSheet.absoluteFillObject,
+  },
+  gridLinesOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 1,
   },
   gridLineVertical: {
     position: 'absolute',

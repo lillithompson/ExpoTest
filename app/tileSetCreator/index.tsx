@@ -166,7 +166,7 @@ export default function TileSetCreatorScreen() {
           gridLayout: {
             rows: 2,
             columns: 2,
-            tileSize: 128,
+            tileSize: 192,
           },
           tileSources: compositeSources,
           gridGap: 3,
@@ -175,7 +175,7 @@ export default function TileSetCreatorScreen() {
           backgroundColor: '#000',
           backgroundLineColor: '#9ca3af',
           backgroundLineWidth: 5,
-          maxDimension: 512,
+          maxDimension: 768,
         });
 
         if (compositeUri) {
@@ -720,7 +720,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 12,
-    backgroundColor: '#2a2a2a',
+    backgroundColor: '#202125',
   },
   fileTitle: {
     color: '#fff',

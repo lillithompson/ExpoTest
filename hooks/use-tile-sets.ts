@@ -136,7 +136,7 @@ export const useTileSets = () => {
         category: payload.category,
         categories: [payload.category],
         resolution,
-        lineWidth: payload.lineWidth ?? 10,
+        lineWidth: payload.lineWidth ?? 13,
         lineColor: payload.lineColor ?? '#ffffff',
         tiles: [initialTile],
         updatedAt: createdAt,
