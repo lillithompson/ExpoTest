@@ -16,6 +16,8 @@ type Brush =
 type Props = {
   tileSources: TileSource[];
   selected: Brush;
+  strokeColor?: string;
+  strokeWidth?: number;
   selectedPattern?: {
     tiles: { imageIndex: number; rotation: number; mirrorX: boolean; mirrorY: boolean }[];
     width: number;
@@ -106,6 +108,8 @@ const favoritesStore = (() => {
 export function TileBrushPanel({
   tileSources,
   selected,
+  strokeColor,
+  strokeWidth,
   selectedPattern,
   onSelect,
   onRotate,
@@ -442,6 +446,8 @@ export function TileBrushPanel({
                                     <TileAsset
                                       source={source}
                                       name={tileName}
+                                      strokeColor={strokeColor}
+                                      strokeWidth={strokeWidth}
                                       style={{
                                         width: '100%',
                                         height: '100%',
@@ -467,7 +473,8 @@ export function TileBrushPanel({
                     <TileAsset
                       source={entry.tile.source}
                       name={entry.tile.name}
-                      strokeColor={favoriteColor ?? undefined}
+                      strokeColor={favoriteColor ?? strokeColor}
+                      strokeWidth={strokeWidth}
                       style={[
                         styles.image,
                         {

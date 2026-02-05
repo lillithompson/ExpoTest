@@ -929,6 +929,8 @@ export default function ModifyTileScreen() {
         <TileBrushPanel
           tileSources={tileSources}
           selected={brush}
+          strokeColor={tileSet.lineColor}
+          strokeWidth={tileSet.lineWidth}
           showPattern={false}
           rows={brushRows}
           selectedPattern={

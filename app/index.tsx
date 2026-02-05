@@ -696,6 +696,18 @@ export default function TestScreen() {
     });
     return paletteSources.map((source) => indexByName.get(source.name) ?? -1);
   }, [fileSourceNames, paletteSources]);
+  const selectedPaletteBrush = useMemo(() => {
+    if (brush.mode !== 'fixed') {
+      return brush;
+    }
+    const paletteIndex = paletteIndexToFileIndex.findIndex(
+      (fileIndex) => fileIndex === brush.index
+    );
+    if (paletteIndex < 0) {
+      return { ...brush, index: -1 };
+    }
+    return { ...brush, index: paletteIndex };
+  }, [brush, paletteIndexToFileIndex]);
   const randomSourceIndices = useMemo(
     () => paletteIndexToFileIndex.filter((index) => index >= 0),
     [paletteIndexToFileIndex]
@@ -3172,7 +3184,9 @@ export default function TestScreen() {
         )}
           <TileBrushPanel
             tileSources={paletteSources}
-            selected={brush}
+            selected={selectedPaletteBrush}
+            strokeColor={activeLineColor}
+            strokeWidth={activeLineWidth}
           selectedPattern={
             selectedPattern
               ? {
@@ -3219,10 +3233,11 @@ export default function TestScreen() {
           onRotate={(index) =>
             setPaletteRotations((prev) => {
               const nextRotation = ((prev[index] ?? 0) + 90) % 360;
-              if (brush.mode === 'fixed' && brush.index === index) {
+              const fileIndex = paletteIndexToFileIndex[index] ?? -1;
+              if (brush.mode === 'fixed' && fileIndex >= 0 && brush.index === fileIndex) {
                 setBrush({
                   mode: 'fixed',
-                  index,
+                  index: fileIndex,
                   rotation: nextRotation,
                   mirrorX: brush.mirrorX,
                   mirrorY: brush.mirrorY,
@@ -3237,10 +3252,11 @@ export default function TestScreen() {
           onMirror={(index) =>
             setPaletteMirrors((prev) => {
               const nextMirror = !(prev[index] ?? false);
-              if (brush.mode === 'fixed' && brush.index === index) {
+              const fileIndex = paletteIndexToFileIndex[index] ?? -1;
+              if (brush.mode === 'fixed' && fileIndex >= 0 && brush.index === fileIndex) {
                 setBrush({
                   mode: 'fixed',
-                  index,
+                  index: fileIndex,
                   rotation: brush.rotation,
                   mirrorX: nextMirror,
                   mirrorY: brush.mirrorY,
@@ -3255,10 +3271,11 @@ export default function TestScreen() {
           onMirrorVertical={(index) =>
             setPaletteMirrorsY((prev) => {
               const nextMirror = !(prev[index] ?? false);
-              if (brush.mode === 'fixed' && brush.index === index) {
+              const fileIndex = paletteIndexToFileIndex[index] ?? -1;
+              if (brush.mode === 'fixed' && fileIndex >= 0 && brush.index === fileIndex) {
                 setBrush({
                   mode: 'fixed',
-                  index,
+                  index: fileIndex,
                   rotation: brush.rotation,
                   mirrorX: brush.mirrorX,
                   mirrorY: nextMirror,
