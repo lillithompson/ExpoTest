@@ -1146,10 +1146,15 @@ export const useTileGrid = ({
     const snapshot = normalizeTiles(tiles, totalCells, tileSourcesLength);
     const nextTiles = [...snapshot];
     const allowedSet = randomSourceSet ?? null;
-    const maxPasses = Math.max(1, Math.min(6, totalCells));
+    const maxPasses = Math.min(50, Math.max(8, gridLayout.rows + gridLayout.columns));
     for (let pass = 0; pass < maxPasses; pass += 1) {
       let changed = false;
-      for (const index of getDrivenCellIndices()) {
+      const indices = [...getDrivenCellIndices()];
+      for (let i = indices.length - 1; i > 0; i -= 1) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [indices[i], indices[j]] = [indices[j], indices[i]];
+      }
+      for (const index of indices) {
         const tile = nextTiles[index];
         if (!tile || tile.imageIndex < 0) {
           continue;
@@ -1161,10 +1166,8 @@ export const useTileGrid = ({
         if (candidates.length === 0) {
           continue;
         }
-        applyPlacementsToArrayOverride(
-          nextTiles,
-          getMirroredPlacements(index, candidates[0])
-        );
+        const pick = candidates[Math.floor(Math.random() * candidates.length)];
+        applyPlacementsToArrayOverride(nextTiles, getMirroredPlacements(index, pick));
         changed = true;
       }
       if (!changed) {

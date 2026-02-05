@@ -478,6 +478,9 @@ const TileCell = memo(
       >
         {source && (
           <TileAsset
+            key={`${tileName}:${tile.imageIndex}:${tile.rotation}:${tile.mirrorX ? 1 : 0}:${
+              tile.mirrorY ? 1 : 0
+            }`}
             source={source}
             name={tileName}
             strokeColor={tile.imageIndex >= 0 ? strokeColor : '#ffffff'}
@@ -513,7 +516,10 @@ const TileCell = memo(
     );
   },
   (prev, next) =>
-    prev.tile === next.tile &&
+    prev.tile.imageIndex === next.tile.imageIndex &&
+    prev.tile.rotation === next.tile.rotation &&
+    prev.tile.mirrorX === next.tile.mirrorX &&
+    prev.tile.mirrorY === next.tile.mirrorY &&
     prev.tileSize === next.tileSize &&
     prev.showDebug === next.showDebug &&
     prev.strokeColor === next.strokeColor &&
