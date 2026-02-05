@@ -1149,7 +1149,7 @@ export const useTileGrid = ({
     const maxPasses = Math.max(1, Math.min(6, totalCells));
     for (let pass = 0; pass < maxPasses; pass += 1) {
       let changed = false;
-      for (let index = 0; index < totalCells; index += 1) {
+      for (const index of getDrivenCellIndices()) {
         const tile = nextTiles[index];
         if (!tile || tile.imageIndex < 0) {
           continue;
@@ -1161,7 +1161,10 @@ export const useTileGrid = ({
         if (candidates.length === 0) {
           continue;
         }
-        nextTiles[index] = candidates[0];
+        applyPlacementsToArrayOverride(
+          nextTiles,
+          getMirroredPlacements(index, candidates[0])
+        );
         changed = true;
       }
       if (!changed) {
