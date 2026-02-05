@@ -576,7 +576,7 @@ export default function TestScreen() {
     | { mode: 'erase' }
     | { mode: 'clone' }
     | { mode: 'pattern' }
-    | { mode: 'fixed'; index: number; rotation: number; mirrorX: boolean }
+    | { mode: 'fixed'; index: number; rotation: number; mirrorX: boolean; mirrorY: boolean }
   >({
     mode: 'random',
   });
@@ -584,6 +584,9 @@ export default function TestScreen() {
     {}
   );
   const [paletteMirrors, setPaletteMirrors] = useState<Record<number, boolean>>({});
+  const [paletteMirrorsY, setPaletteMirrorsY] = useState<Record<number, boolean>>(
+    {}
+  );
   const { patternsByCategory, createPattern, deletePatterns } = useTilePatterns();
   const [selectedPatternId, setSelectedPatternId] = useState<string | null>(null);
   const [isPatternCreationMode, setIsPatternCreationMode] = useState(false);
@@ -2845,7 +2848,8 @@ export default function TestScreen() {
             if (next.mode === 'fixed') {
               const rotation = paletteRotations[next.index] ?? next.rotation ?? 0;
               const mirrorX = paletteMirrors[next.index] ?? next.mirrorX ?? false;
-              setBrush({ mode: 'fixed', index: next.index, rotation, mirrorX });
+              const mirrorY = paletteMirrorsY[next.index] ?? next.mirrorY ?? false;
+              setBrush({ mode: 'fixed', index: next.index, rotation, mirrorX, mirrorY });
             } else {
               setBrush(next);
             }
@@ -2859,6 +2863,7 @@ export default function TestScreen() {
                   index,
                   rotation: nextRotation,
                   mirrorX: brush.mirrorX,
+                  mirrorY: brush.mirrorY,
                 });
               }
               return {
@@ -2876,6 +2881,25 @@ export default function TestScreen() {
                   index,
                   rotation: brush.rotation,
                   mirrorX: nextMirror,
+                  mirrorY: brush.mirrorY,
+                });
+              }
+              return {
+                ...prev,
+                [index]: nextMirror,
+              };
+            })
+          }
+          onMirrorVertical={(index) =>
+            setPaletteMirrorsY((prev) => {
+              const nextMirror = !(prev[index] ?? false);
+              if (brush.mode === 'fixed' && brush.index === index) {
+                setBrush({
+                  mode: 'fixed',
+                  index,
+                  rotation: brush.rotation,
+                  mirrorX: brush.mirrorX,
+                  mirrorY: nextMirror,
                 });
               }
               return {
@@ -2886,6 +2910,7 @@ export default function TestScreen() {
           }
           getRotation={(index) => paletteRotations[index] ?? 0}
           getMirror={(index) => paletteMirrors[index] ?? false}
+          getMirrorVertical={(index) => paletteMirrorsY[index] ?? false}
           onPatternLongPress={() => {
             if (brush.mode !== 'pattern') {
               setBrush({ mode: 'pattern' });

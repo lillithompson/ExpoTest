@@ -1,5 +1,6 @@
-import { useRef, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Modal, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { TileAsset } from '@/components/tile-asset';
@@ -10,7 +11,7 @@ type Brush =
   | { mode: 'erase' }
   | { mode: 'clone' }
   | { mode: 'pattern' }
-  | { mode: 'fixed'; index: number; rotation: number; mirrorX: boolean };
+  | { mode: 'fixed'; index: number; rotation: number; mirrorX: boolean; mirrorY: boolean };
 
 type Props = {
   tileSources: TileSource[];
@@ -25,15 +26,82 @@ type Props = {
   onSelect: (brush: Brush) => void;
   onRotate: (index: number) => void;
   onMirror: (index: number) => void;
+  onMirrorVertical: (index: number) => void;
   onPatternLongPress?: () => void;
   getRotation: (index: number) => number;
   getMirror: (index: number) => boolean;
+  getMirrorVertical: (index: number) => boolean;
   height: number;
   itemSize: number;
   rowGap: number;
   rows?: number;
   showPattern?: boolean;
 };
+
+type FavoritesState = {
+  favorites: Record<string, string>;
+  lastColor: string;
+};
+
+const FAVORITES_STORAGE_KEY = 'tile-brush-favorites-v1';
+const defaultFavoritesState: FavoritesState = {
+  favorites: {},
+  lastColor: '#f59e0b',
+};
+
+const favoritesStore = (() => {
+  let state: FavoritesState = defaultFavoritesState;
+  let loaded = false;
+  let loading: Promise<void> | null = null;
+  const listeners = new Set<(next: FavoritesState) => void>();
+
+  const notify = () => {
+    listeners.forEach((listener) => listener(state));
+  };
+
+  const setState = (next: FavoritesState) => {
+    state = next;
+    notify();
+    void AsyncStorage.setItem(FAVORITES_STORAGE_KEY, JSON.stringify(state));
+  };
+
+  const ensureLoaded = async () => {
+    if (loaded) {
+      return;
+    }
+    if (loading) {
+      await loading;
+      return;
+    }
+    loading = (async () => {
+      try {
+        const raw = await AsyncStorage.getItem(FAVORITES_STORAGE_KEY);
+        if (raw) {
+          const parsed = JSON.parse(raw) as Partial<FavoritesState>;
+          state = {
+            favorites: parsed?.favorites ?? {},
+            lastColor: parsed?.lastColor ?? defaultFavoritesState.lastColor,
+          };
+        }
+      } catch {
+        // ignore load failures
+      } finally {
+        loaded = true;
+        loading = null;
+        notify();
+      }
+    })();
+    await loading;
+  };
+
+  const subscribe = (listener: (next: FavoritesState) => void) => {
+    listeners.add(listener);
+    listener(state);
+    return () => listeners.delete(listener);
+  };
+
+  return { subscribe, setState, ensureLoaded, getState: () => state };
+})();
 
 export function TileBrushPanel({
   tileSources,
@@ -42,9 +110,11 @@ export function TileBrushPanel({
   onSelect,
   onRotate,
   onMirror,
+  onMirrorVertical,
   onPatternLongPress,
   getRotation,
   getMirror,
+  getMirrorVertical,
   height,
   itemSize,
   rowGap,
@@ -57,6 +127,97 @@ export function TileBrushPanel({
   const rowCount = Math.max(1, rows);
   const columnHeight = itemSize * rowCount + rowGap * Math.max(0, rowCount - 1);
   const lastTapRef = useRef<{ time: number; index: number } | null>(null);
+  const [favorites, setFavorites] = useState<Record<string, string>>(
+    defaultFavoritesState.favorites
+  );
+  const [favoriteDialog, setFavoriteDialog] = useState<{
+    name: string;
+    index: number;
+    mode: 'add' | 'remove';
+  } | null>(null);
+  const [favoriteColorDraft, setFavoriteColorDraft] = useState(
+    defaultFavoritesState.lastColor
+  );
+  const lastFavoriteColorRef = useRef(defaultFavoritesState.lastColor);
+
+  useEffect(() => {
+    const unsubscribe = favoritesStore.subscribe((next) => {
+      setFavorites(next.favorites);
+      lastFavoriteColorRef.current = next.lastColor;
+    });
+    void favoritesStore.ensureLoaded();
+    return unsubscribe;
+  }, []);
+
+  const tileEntries = useMemo(
+    () =>
+      tileSources.map((tile, index) => ({
+        type: 'fixed' as const,
+        tile,
+        index,
+        isFavorite: Boolean(favorites[tile.name]),
+      })),
+    [favorites, tileSources]
+  );
+  const favoriteColorOptions = useMemo(
+    () => ['#ef4444', '#f59e0b', '#22c55e', '#3b82f6', '#a855f7', '#e5e7eb'],
+    []
+  );
+  const orderedTileEntries = useMemo(
+    () =>
+      [...tileEntries].sort((a, b) => {
+        if (a.isFavorite === b.isFavorite) {
+          return a.index - b.index;
+        }
+        return a.isFavorite ? -1 : 1;
+      }),
+    [tileEntries]
+  );
+  const cycleRef = useRef<Record<string, number>>({});
+
+  const openFavoriteDialog = (entry: { tile: TileSource; index: number }) => {
+    const existing = favorites[entry.tile.name];
+    if (existing) {
+      setFavoriteDialog({ name: entry.tile.name, index: entry.index, mode: 'remove' });
+      return;
+    }
+    setFavoriteColorDraft(lastFavoriteColorRef.current);
+    setFavoriteDialog({ name: entry.tile.name, index: entry.index, mode: 'add' });
+  };
+
+  const closeFavoriteDialog = () => {
+    setFavoriteDialog(null);
+  };
+
+  const commitFavorite = () => {
+    if (!favoriteDialog) {
+      return;
+    }
+    if (favoriteDialog.mode === 'remove') {
+    const nextFavorites = { ...favorites };
+    delete nextFavorites[favoriteDialog.name];
+    favoritesStore.setState({
+      favorites: nextFavorites,
+      lastColor: lastFavoriteColorRef.current,
+    });
+    closeFavoriteDialog();
+    return;
+  }
+  const nextColor = favoriteColorDraft.trim();
+  if (!nextColor) {
+      closeFavoriteDialog();
+      return;
+    }
+    favoritesStore.setState({
+      favorites: {
+        ...favorites,
+        [favoriteDialog.name]: nextColor,
+      },
+      lastColor: nextColor,
+    });
+    lastFavoriteColorRef.current = nextColor;
+    closeFavoriteDialog();
+  };
 
   return (
     <View
@@ -77,12 +238,8 @@ export function TileBrushPanel({
             { type: 'random' as const },
             { type: 'clone' as const },
             { type: 'erase' as const },
-          ...(showPattern ? [{ type: 'pattern' as const }] : []),
-            ...tileSources.map((tile, index) => ({
-              type: 'fixed' as const,
-              tile,
-              index,
-            })),
+            ...(showPattern ? [{ type: 'pattern' as const }] : []),
+            ...orderedTileEntries,
           ].map((entry, idx) => {
             const isRandom = entry.type === 'random';
             const isErase = entry.type === 'erase';
@@ -107,6 +264,14 @@ export function TileBrushPanel({
               !isRandom && !isErase && !isClone && !isPattern
                 ? getMirror(entry.index)
                 : false;
+            const mirrorY =
+              !isRandom && !isErase && !isClone && !isPattern
+                ? getMirrorVertical(entry.index)
+                : false;
+            const favoriteColor =
+              !isRandom && !isErase && !isClone && !isPattern
+                ? favorites[entry.tile.name]
+                : null;
             const previewRotationCW = ((selectedPattern?.rotation ?? 0) + 360) % 360;
             const previewRotationCCW = (360 - previewRotationCW) % 360;
             const previewMirrorX = selectedPattern?.mirrorX ?? false;
@@ -144,9 +309,9 @@ export function TileBrushPanel({
                         ? { mode: 'erase' }
                         : isClone
                           ? { mode: 'clone' }
-                          : isPattern
-                            ? { mode: 'pattern' }
-                            : { mode: 'fixed', index: entry.index, rotation, mirrorX }
+                    : isPattern
+                      ? { mode: 'pattern' }
+                      : { mode: 'fixed', index: entry.index, rotation, mirrorX, mirrorY }
                   )
                 }
                 onPress={() => {
@@ -156,7 +321,17 @@ export function TileBrushPanel({
                   const now = Date.now();
                   const lastTap = lastTapRef.current;
                   if (lastTap && lastTap.index === entry.index && now - lastTap.time < 260) {
-                    onMirror(entry.index);
+                    const name = entry.tile.name;
+                    const current = cycleRef.current[name] ?? 0;
+                    const next = (current + 1) % 5;
+                    cycleRef.current[name] = next;
+                    if (current < 3) {
+                      onRotate(entry.index);
+                    } else if (current === 3) {
+                      onMirror(entry.index);
+                    } else {
+                      onMirrorVertical(entry.index);
+                    }
                     lastTapRef.current = null;
                   } else {
                     lastTapRef.current = { time: now, index: entry.index };
@@ -167,8 +342,8 @@ export function TileBrushPanel({
                     onPatternLongPress?.();
                     return;
                   }
-                  if (!isRandom && !isErase && !isClone) {
-                    onRotate(entry.index);
+                  if (!isRandom && !isErase && !isClone && !isPattern) {
+                    openFavoriteDialog(entry);
                   }
                 }}
                 style={[
@@ -292,11 +467,13 @@ export function TileBrushPanel({
                     <TileAsset
                       source={entry.tile.source}
                       name={entry.tile.name}
+                      strokeColor={favoriteColor ?? undefined}
                       style={[
                         styles.image,
                         {
                           transform: [
                             { scaleX: mirrorX ? -1 : 1 },
+                            { scaleY: mirrorY ? -1 : 1 },
                             { rotate: `${rotation}deg` },
                           ],
                         },
@@ -310,6 +487,75 @@ export function TileBrushPanel({
           })}
         </View>
       </ScrollView>
+      <Modal
+        visible={favoriteDialog !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={closeFavoriteDialog}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalPanel}>
+            <ThemedText type="title" style={styles.modalTitle}>
+              {favoriteDialog?.mode === 'remove'
+                ? 'Remove from favorites?'
+                : 'Favorite this tile?'}
+            </ThemedText>
+            {favoriteDialog?.mode === 'add' && (
+              <View style={styles.modalSection}>
+                <ThemedText type="defaultSemiBold">Color</ThemedText>
+                <View style={styles.colorOptions}>
+                  {favoriteColorOptions.map((color) => (
+                    <Pressable
+                      key={color}
+                      onPress={() => setFavoriteColorDraft(color)}
+                      style={[
+                        styles.colorSwatch,
+                        { backgroundColor: color },
+                        favoriteColorDraft === color && styles.colorSwatchSelected,
+                      ]}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Choose ${color}`}
+                    />
+                  ))}
+                </View>
+                <TextInput
+                  value={favoriteColorDraft}
+                  onChangeText={setFavoriteColorDraft}
+                  style={styles.colorInput}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  placeholder="#f59e0b"
+                  placeholderTextColor="#9ca3af"
+                />
+              </View>
+            )}
+            <View style={styles.modalActions}>
+              <Pressable
+                onPress={closeFavoriteDialog}
+                style={[styles.modalButton, styles.modalButtonGhost]}
+                accessibilityRole="button"
+                accessibilityLabel="Cancel favorite"
+              >
+                <ThemedText type="defaultSemiBold">Cancel</ThemedText>
+              </Pressable>
+              <Pressable
+                onPress={commitFavorite}
+                style={[styles.modalButton, styles.modalButtonPrimary]}
+                accessibilityRole="button"
+                accessibilityLabel={
+                  favoriteDialog?.mode === 'remove'
+                    ? 'Remove from favorites'
+                    : 'Favorite tile'
+                }
+              >
+                <ThemedText type="defaultSemiBold" style={styles.modalButtonText}>
+                  {favoriteDialog?.mode === 'remove' ? 'Remove' : 'Favorite'}
+                </ThemedText>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -372,5 +618,73 @@ const styles = StyleSheet.create({
   patternButton: {
     alignItems: 'center',
     gap: 4,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 20,
+  },
+  modalPanel: {
+    width: '100%',
+    maxWidth: 360,
+    backgroundColor: '#fff',
+    borderRadius: 10,
+    padding: 16,
+    gap: 12,
+  },
+  modalTitle: {
+    color: '#111',
+  },
+  modalSection: {
+    gap: 10,
+  },
+  colorOptions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  colorSwatch: {
+    width: 28,
+    height: 28,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#d1d5db',
+  },
+  colorSwatchSelected: {
+    borderColor: '#111',
+    borderWidth: 2,
+  },
+  colorInput: {
+    borderWidth: 1,
+    borderColor: '#1f1f1f',
+    borderRadius: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    color: '#111',
+    backgroundColor: '#fff',
+  },
+  modalActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 8,
+  },
+  modalButton: {
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#1f1f1f',
+    alignItems: 'center',
+  },
+  modalButtonGhost: {
+    backgroundColor: '#fff',
+  },
+  modalButtonPrimary: {
+    backgroundColor: '#111',
+  },
+  modalButtonText: {
+    color: '#fff',
   },
 });

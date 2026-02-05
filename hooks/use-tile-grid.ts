@@ -28,7 +28,7 @@ type Params = {
     | { mode: 'erase' }
     | { mode: 'clone' }
     | { mode: 'pattern' }
-    | { mode: 'fixed'; index: number; rotation: number; mirrorX: boolean };
+    | { mode: 'fixed'; index: number; rotation: number; mirrorX: boolean; mirrorY: boolean };
   mirrorHorizontal: boolean;
   mirrorVertical: boolean;
   pattern:
@@ -790,7 +790,7 @@ export const useTileGrid = ({
           imageIndex: fixedIndex,
           rotation: brush.rotation,
           mirrorX: brush.mirrorX,
-          mirrorY: false,
+          mirrorY: brush.mirrorY,
         });
       }
       return;

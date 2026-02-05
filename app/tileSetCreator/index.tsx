@@ -448,7 +448,11 @@ export default function TileSetCreatorScreen() {
                     setNewResolution(value);
                     setNewName((prev) => {
                       const trimmed = prev.trim();
-                      if (trimmed.length > 0 && trimmed !== 'New Tile Set') {
+                      const isAutoName =
+                        trimmed.length === 0 ||
+                        trimmed === 'New Tile Set' ||
+                        /^\d+x\d+\s*\(New\)$/i.test(trimmed);
+                      if (!isAutoName) {
                         return prev;
                       }
                       return `${value}x${value} (New)`;
