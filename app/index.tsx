@@ -2231,7 +2231,7 @@ export default function TestScreen() {
 
   if (viewMode === 'file') {
     const fileCardWidth = isWeb
-      ? 120
+      ? 200
       : Math.floor(
           (contentWidth -
             FILE_GRID_SIDE_PADDING * 2 -
