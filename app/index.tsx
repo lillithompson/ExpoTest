@@ -5045,7 +5045,7 @@ const styles = StyleSheet.create({
   },
   mirrorLines: {
     ...StyleSheet.absoluteFillObject,
-    zIndex: 2,
+    zIndex: 7,
     backgroundColor: 'transparent',
   },
   mirrorLineHorizontal: {
