@@ -138,6 +138,7 @@ const buildBakeSignature = (set: TileSet) => {
 
 export const useTileSets = () => {
   const [tileSets, setTileSets] = useState<TileSet[]>([]);
+  const [isLoaded, setIsLoaded] = useState(false);
   const [bakedSourcesBySetId, setBakedSourcesBySetId] = useState<
     Record<string, TileSource[]>
   >({});
@@ -213,8 +214,10 @@ export const useTileSets = () => {
         }
       }
       setTileSets(next);
+      setIsLoaded(true);
     } catch (error) {
       console.warn('Failed to load tile sets', error);
+      setIsLoaded(true);
     }
   }, []);
 
@@ -536,6 +539,7 @@ export const useTileSets = () => {
 
   return {
     tileSets,
+    isLoaded,
     bakedSourcesBySetId,
     createTileSet,
     deleteTileSet,

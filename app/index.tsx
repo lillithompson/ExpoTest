@@ -18,6 +18,7 @@ import * as Sharing from 'expo-sharing';
 import ViewShot from 'react-native-view-shot';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import Constants from 'expo-constants';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import {
@@ -27,9 +28,12 @@ import {
 } from '@/assets/images/tiles/manifest';
 import { TileBrushPanel } from '@/components/tile-brush-panel';
 import { TileDebugOverlay } from '@/components/tile-debug-overlay';
+import { TileGridCanvas } from '@/components/tile-grid-canvas';
 import { TileAsset, prefetchTileAssets } from '@/components/tile-asset';
+import { TileAtlasSprite } from '@/components/tile-atlas-sprite';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { useTileAtlas } from '@/hooks/use-tile-atlas';
 import { useTileGrid } from '@/hooks/use-tile-grid';
 import { usePersistedSettings } from '@/hooks/use-persisted-settings';
 import { useTileFiles, type TileFile } from '@/hooks/use-tile-files';
@@ -61,6 +65,7 @@ const DEFAULT_CATEGORY = (TILE_CATEGORIES as string[]).includes('angular')
 const ERROR_TILE = require('@/assets/images/tiles/tile_error.svg');
 const PREVIEW_DIR = `${FileSystem.cacheDirectory ?? ''}tile-previews/`;
 const THUMB_SIZE = 256;
+const DEBUG_LOAD_TRACE = true;
 const clamp = (value: number, min: number, max: number) =>
   Math.min(max, Math.max(min, value));
 const hexToRgb = (value: string) => {
@@ -353,6 +358,7 @@ type TileCellProps = {
   strokeColor: string;
   strokeWidth: number;
   strokeScaleByName?: Map<string, number>;
+  atlas?: ReturnType<typeof useTileAtlas> | null;
   isCloneSource: boolean;
   isCloneSample: boolean;
   isCloneTargetOrigin: boolean;
@@ -439,6 +445,7 @@ const TileCell = memo(
     strokeColor,
     strokeWidth,
     strokeScaleByName,
+    atlas,
     isCloneSource,
     isCloneSample,
     isCloneTargetOrigin,
@@ -477,7 +484,8 @@ const TileCell = memo(
         ]}
       >
         {source && (
-          <TileAsset
+          <TileAtlasSprite
+            atlas={atlas}
             key={`${tileName}:${tile.imageIndex}:${tile.rotation}:${tile.mirrorX ? 1 : 0}:${
               tile.mirrorY ? 1 : 0
             }`}
@@ -525,6 +533,7 @@ const TileCell = memo(
     prev.strokeColor === next.strokeColor &&
     prev.strokeWidth === next.strokeWidth &&
     prev.strokeScaleByName === next.strokeScaleByName &&
+    prev.atlas === next.atlas &&
     prev.showOverlays === next.showOverlays &&
     prev.tileSources === next.tileSources &&
     prev.isCloneSource === next.isCloneSource &&
@@ -565,17 +574,22 @@ export default function TestScreen() {
   const [selectedFileIds, setSelectedFileIds] = useState<Set<string>>(new Set());
   const selectBarAnim = useRef(new Animated.Value(0)).current;
   const [isHydratingFile, setIsHydratingFile] = useState(false);
-  const [showGrid, setShowGrid] = useState(true);
+  const [gridStabilized, setGridStabilized] = useState(false);
   const [isPrefetchingTiles, setIsPrefetchingTiles] = useState(false);
-  const [showPreview, setShowPreview] = useState(false);
+  const [isPrefetchingTileSources, setIsPrefetchingTileSources] = useState(false);
+  const [tileSourcesPrefetched, setTileSourcesPrefetched] = useState(false);
   const [suspendTiles, setSuspendTiles] = useState(false);
   const [loadRequestId, setLoadRequestId] = useState(0);
   const [loadToken, setLoadToken] = useState(0);
   const [loadedToken, setLoadedToken] = useState(0);
+  const [sourcesStable, setSourcesStable] = useState(false);
+  const [tilesStable, setTilesStable] = useState(false);
+  const loadTraceRef = useRef<string>('');
   const [loadPreviewUri, setLoadPreviewUri] = useState<string | null>(null);
   const [isCapturingPreview, setIsCapturingPreview] = useState(false);
   const [isClearing, setIsClearing] = useState(false);
   const [clearPreviewUri, setClearPreviewUri] = useState<string | null>(null);
+  const [isInteracting, setIsInteracting] = useState(false);
   const NEW_FILE_TILE_SIZES = [25, 50, 75, 100, 150, 200] as const;
   const [viewMode, setViewMode] = useState<'modify' | 'file'>('file');
   const [brush, setBrush] = useState<
@@ -614,6 +628,8 @@ export default function TestScreen() {
   const patternLastTapRef = useRef<{ id: string; time: number } | null>(null);
   // tileSources is set after we resolve the active file/category.
   const isWeb = Platform.OS === 'web';
+  const isExpoGo = Constants.appOwnership === 'expo';
+  const useSkiaGrid = Platform.OS !== 'web' && !isExpoGo;
   const shouldUseAspectRatio = false;
   const aspectRatio = null;
   const safeWidth = Math.max(0, width);
@@ -648,7 +664,11 @@ export default function TestScreen() {
     upsertActiveFile,
     ready,
   } = useTileFiles(DEFAULT_CATEGORY);
-  const { tileSets: userTileSets, bakedSourcesBySetId } = useTileSets();
+  const {
+    tileSets: userTileSets,
+    bakedSourcesBySetId,
+    isLoaded: tileSetsLoaded,
+  } = useTileSets();
 
   const activeCategories = useMemo(
     () => normalizeCategories(selectedCategories),
@@ -705,6 +725,26 @@ export default function TestScreen() {
       );
     });
   }, [activeFile, fileSourceNames, paletteSources, allSourceLookup]);
+  const tileSourcesSignature = useMemo(
+    () =>
+      tileSources
+        .map((source) => {
+          const raw = source.source as { uri?: string } | number | undefined;
+          const uri =
+            typeof raw === 'object' && raw && 'uri' in raw ? raw.uri ?? '' : String(raw ?? '');
+          return `${source.name}:${uri}`;
+        })
+        .join('|'),
+    [tileSources]
+  );
+  const tileSourcesPrefetchKey = useMemo(() => {
+    const stored =
+      activeFile && Array.isArray(activeFile.sourceNames) && activeFile.sourceNames.length > 0
+        ? activeFile.sourceNames
+        : fileSourceNames;
+    return `${activeFileId ?? 'none'}|${loadToken}|${stored.join('|')}`;
+  }, [activeFileId, loadToken, activeFile, fileSourceNames]);
+  const renderTileSources = useMemo(() => tileSources, [tileSourcesSignature]);
   const paletteIndexToFileIndex = useMemo(() => {
     const indexByName = new Map<string, number>();
     fileSourceNames.forEach((name, index) => {
@@ -753,10 +793,6 @@ export default function TestScreen() {
       });
       if (changed) {
         setFileSourceNames(next);
-        console.log(
-          '[fileSources:extend]',
-          JSON.stringify({ added: next.length - fileSourceNames.length })
-        );
       }
       return changed ? next : fileSourceNames;
     },
@@ -882,6 +918,18 @@ export default function TestScreen() {
       : null,
     patternAnchorKey: selectedPattern?.id ?? null,
   });
+  const tilesSignature = useMemo(
+    () =>
+      tiles
+        .map(
+          (tile) =>
+            `${tile.imageIndex}:${tile.rotation}:${tile.mirrorX ? 1 : 0}:${
+              tile.mirrorY ? 1 : 0
+            }`
+        )
+        .join('|'),
+    [tiles]
+  );
   useEffect(() => {
     if (prevTileSourcesKeyRef.current === tileSourcesKey) {
       return;
@@ -895,7 +943,6 @@ export default function TestScreen() {
     setShowPatternChooser(false);
   }, [tileSourcesKey, clearCloneSource]);
   const displayTiles = tiles;
-  const showOverlays = !isCapturingPreview && !suspendTiles && showGrid;
   const gridWidth =
     gridLayout.columns * gridLayout.tileSize +
     GRID_GAP * Math.max(0, gridLayout.columns - 1);
@@ -922,12 +969,31 @@ export default function TestScreen() {
         brushRows
     )
   );
+  const gridAtlas = useTileAtlas({
+    tileSources: renderTileSources,
+    tileSize: gridLayout.tileSize,
+    strokeColor: activeLineColor,
+    strokeWidth: activeLineWidth,
+    strokeScaleByName,
+  });
+  const brushAtlas = useTileAtlas({
+    tileSources: paletteSources,
+    tileSize: brushItemSize,
+    strokeColor: activeLineColor,
+    strokeWidth: activeLineWidth,
+    strokeScaleByName,
+  });
   const lastPaintedRef = useRef<number | null>(null);
+  const isInteractingRef = useRef(false);
   const longPressTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const longPressTriggeredRef = useRef(false);
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const previewSaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const loadTokenRef = useRef(0);
   const isHydratingFileRef = useRef(false);
+  const interactionStartRef = useRef<{ id: number; time: number } | null>(null);
+  const interactionPendingRef = useRef(false);
+  const interactionCounterRef = useRef(0);
   const viewShotRef = useRef<ViewShot>(null);
   const downloadExpectedRef = useRef(0);
   const pendingFloodCompleteRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -947,6 +1013,24 @@ export default function TestScreen() {
     isHydratingFileRef.current = value;
     setIsHydratingFile(value);
   }, []);
+  const setInteracting = useCallback((value: boolean) => {
+    if (isInteractingRef.current === value) {
+      return;
+    }
+    isInteractingRef.current = value;
+    setIsInteracting(value);
+  }, []);
+  const markInteractionStart = useCallback(() => {
+    if (interactionPendingRef.current) {
+      return;
+    }
+    interactionCounterRef.current += 1;
+    interactionStartRef.current = {
+      id: interactionCounterRef.current,
+      time: Date.now(),
+    };
+    interactionPendingRef.current = true;
+  }, []);
   const setGridNode = useCallback((node: any) => {
     gridRef.current = node;
     gridCaptureRef.current = node;
@@ -963,6 +1047,126 @@ export default function TestScreen() {
     () => files.find((file) => file.id === downloadTargetId) ?? null,
     [files, downloadTargetId]
   );
+  const activeFileSourceNames = useMemo(() => {
+    if (activeFile && Array.isArray(activeFile.sourceNames) && activeFile.sourceNames.length > 0) {
+      return activeFile.sourceNames;
+    }
+    if (fileSourceNames.length > 0) {
+      return fileSourceNames;
+    }
+    return [];
+  }, [activeFile, fileSourceNames]);
+  const hasActiveFileTiles =
+    !!activeFile && Array.isArray(activeFile.tiles) && activeFile.tiles.length > 0;
+  const areActiveFileSourcesResolved = useMemo(() => {
+    if (!hasActiveFileTiles) {
+      return true;
+    }
+    if (activeFileSourceNames.length === 0) {
+      return false;
+    }
+    return activeFileSourceNames.every((name) => allSourceLookup.has(name));
+  }, [activeFileSourceNames, allSourceLookup, hasActiveFileTiles]);
+  const isTileSetSourcesReadyForActiveFile = useMemo(() => {
+    const file = activeFile ?? null;
+    if (!file) {
+      return true;
+    }
+    const fileTileSetIds = Array.isArray(file.tileSetIds) ? file.tileSetIds : [];
+    if (fileTileSetIds.length === 0) {
+      return true;
+    }
+    const knownIds = tileSetsLoaded
+      ? fileTileSetIds.filter((id) => userTileSets.some((set) => set.id === id))
+      : fileTileSetIds;
+    if (knownIds.length === 0) {
+      return true;
+    }
+    return areTileSetsReady(knownIds);
+  }, [activeFile, activeFileId, tileSetsLoaded, userTileSets, areTileSetsReady]);
+  const hasMissingTileSources = useMemo(() => {
+    const file = activeFile ?? null;
+    if (!file || viewMode !== 'modify') {
+      return false;
+    }
+    for (let index = 0; index < tiles.length; index += 1) {
+      const tile = tiles[index];
+      if (!tile || tile.imageIndex < 0) {
+        continue;
+      }
+      const sourceEntry = tileSources[tile.imageIndex];
+      if (!sourceEntry) {
+        return true;
+      }
+      if (sourceEntry.source === ERROR_TILE) {
+        return true;
+      }
+    }
+    return false;
+  }, [activeFile, viewMode, tiles, tileSources]);
+  const isActiveFileRenderReady = useMemo(() => {
+    if (viewMode !== 'modify') {
+      return false;
+    }
+    if (isHydratingFile || loadedToken !== loadToken) {
+      return false;
+    }
+    if (!tileSourcesPrefetched) {
+      return false;
+    }
+    if (!isTileSetSourcesReadyForActiveFile || !areActiveFileSourcesResolved) {
+      return false;
+    }
+    if (hasMissingTileSources) {
+      return false;
+    }
+    return true;
+  }, [
+    viewMode,
+    isHydratingFile,
+    loadedToken,
+    loadToken,
+    tileSourcesPrefetched,
+    isTileSetSourcesReadyForActiveFile,
+    areActiveFileSourcesResolved,
+    hasMissingTileSources,
+  ]);
+  const loadPhase = useMemo(() => {
+    if (viewMode !== 'modify' || !activeFileId) {
+      return 'idle';
+    }
+    const isLoading = isHydratingFile || loadedToken !== loadToken;
+    if (!isLoading && hasMissingTileSources) {
+      return 'error';
+    }
+    if (!isLoading && isActiveFileRenderReady) {
+      return 'ready';
+    }
+    return 'loading';
+  }, [
+    viewMode,
+    activeFileId,
+    isHydratingFile,
+    loadedToken,
+    loadToken,
+    hasMissingTileSources,
+    isActiveFileRenderReady,
+  ]);
+  const [readyLatchToken, setReadyLatchToken] = useState(0);
+  useEffect(() => {
+    setReadyLatchToken(0);
+  }, [viewMode, activeFileId, loadToken]);
+  useEffect(() => {
+    if (isActiveFileRenderReady) {
+      setReadyLatchToken(loadToken);
+    }
+  }, [isActiveFileRenderReady, loadToken]);
+  const isReadyLatched = readyLatchToken === loadToken && loadToken !== 0;
+  const showGrid = isReadyLatched;
+  const hasPreview = Boolean(loadPreviewUri || clearPreviewUri);
+  const gridVisible = showGrid && gridStabilized;
+  const showPreview = hasPreview && (isClearing || !gridVisible);
+  const showOverlays = !isCapturingPreview && !suspendTiles && gridVisible;
   const downloadPreviewUri = useMemo(() => {
     if (!downloadTargetFile) {
       return null;
@@ -975,6 +1179,7 @@ export default function TestScreen() {
   const activeFileRef = useRef<TileFile | null>(activeFile ?? null);
   const debugHydrationRef = useRef(0);
   const fileSourcesReadyRef = useRef(false);
+  const fileSourcesInitIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     filesRef.current = files;
@@ -982,6 +1187,10 @@ export default function TestScreen() {
   useEffect(() => {
     activeFileRef.current = activeFile ?? null;
   }, [activeFile]);
+  useEffect(() => {
+    fileSourcesReadyRef.current = false;
+    fileSourcesInitIdRef.current = null;
+  }, [activeFileId]);
 
   const remapTilesForCategories = useCallback(
     (nextCategories: TileCategory[], nextTileSetIds: string[], currentTiles: Tile[]) => {
@@ -1170,67 +1379,79 @@ export default function TestScreen() {
   }, [selectedTileSetIds, areTileSetsReady]);
 
   useEffect(() => {
-    if (!activeFile || !activeFileId) {
+    const file = activeFileRef.current;
+    if (!activeFileId || !file) {
       setFileSourceNames([]);
       fileSourcesReadyRef.current = false;
+      fileSourcesInitIdRef.current = null;
       return;
     }
-    fileSourcesReadyRef.current = false;
-    console.log(
-      '[fileSources:init]',
-      JSON.stringify({
-        activeFileId,
-        tiles: activeFile.tiles.length,
-        hasSourceNames: Array.isArray(activeFile.sourceNames) && activeFile.sourceNames.length > 0,
-        tileSetIds: selectedTileSetIds.length,
-        ready: areTileSetsReady(selectedTileSetIds),
-      })
-    );
+    const alreadyReady =
+      fileSourcesInitIdRef.current === activeFileId && fileSourcesReadyRef.current;
     const stored =
-      Array.isArray(activeFile.sourceNames) && activeFile.sourceNames.length > 0
-        ? activeFile.sourceNames
+      Array.isArray(file.sourceNames) && file.sourceNames.length > 0
+        ? file.sourceNames
         : [];
     if (stored.length > 0) {
-      setFileSourceNames(stored);
+      if (!alreadyReady || fileSourceNames.length !== stored.length) {
+        setFileSourceNames(stored);
+      }
       fileSourcesReadyRef.current = true;
+      fileSourcesInitIdRef.current = activeFileId;
       return;
     }
+    const fileTileSetIds = Array.isArray(file.tileSetIds) ? file.tileSetIds : [];
+    const knownTileSetIds =
+      fileTileSetIds.length === 0
+        ? []
+        : tileSetsLoaded
+          ? fileTileSetIds.filter((id) =>
+              userTileSets.some((set) => set.id === id)
+            )
+          : fileTileSetIds;
+    const pendingTileSetIds =
+      knownTileSetIds.length > 0 ? knownTileSetIds : selectedTileSetIds;
     if (
-      activeFile.tiles.length > 0 &&
-      selectedTileSetIds.length > 0 &&
-      !areTileSetsReady(selectedTileSetIds)
+      file.tiles.length > 0 &&
+      pendingTileSetIds.length > 0 &&
+      !areTileSetsReady(pendingTileSetIds)
     ) {
       // Defer initialization until user tile sets are baked to avoid losing mappings.
-      console.log(
-        '[fileSources:defer]',
-        JSON.stringify({ activeFileId, tileSetIds: selectedTileSetIds })
-      );
       return;
     }
-    const initialSources = getSourcesForFile(activeFile).map((source) => source.name);
+    if (alreadyReady) {
+      return;
+    }
+    const initialSources = getSourcesForFile(file).map((source) => source.name);
     if (initialSources.length === 0) {
-      console.log('[fileSources:empty]', JSON.stringify({ activeFileId }));
       setFileSourceNames([]);
       fileSourcesReadyRef.current = true;
+      fileSourcesInitIdRef.current = activeFileId;
       return;
     }
     setFileSourceNames(initialSources);
-    console.log(
-      '[fileSources:seed]',
-      JSON.stringify({ activeFileId, count: initialSources.length })
-    );
     upsertActiveFile({
-      tiles: activeFile.tiles,
-      gridLayout: activeFile.grid,
+      tiles: file.tiles,
+      gridLayout: file.grid,
       sourceNames: initialSources,
-      preferredTileSize: activeFile.preferredTileSize,
-      lineWidth: activeFile.lineWidth,
-      lineColor: activeFile.lineColor,
-      thumbnailUri: activeFile.thumbnailUri,
-      previewUri: activeFile.previewUri,
+      preferredTileSize: file.preferredTileSize,
+      lineWidth: file.lineWidth,
+      lineColor: file.lineColor,
+      thumbnailUri: file.thumbnailUri,
+      previewUri: file.previewUri,
     });
     fileSourcesReadyRef.current = true;
-  }, [activeFileId, activeFile, getSourcesForFile, upsertActiveFile]);
+    fileSourcesInitIdRef.current = activeFileId;
+  }, [
+    activeFileId,
+    selectedTileSetIds,
+    areTileSetsReady,
+    getSourcesForFile,
+    upsertActiveFile,
+    fileSourceNames.length,
+    tileSetsLoaded,
+    userTileSets,
+  ]);
 
   useEffect(() => {
     if (!activeFileId) {
@@ -1282,39 +1503,15 @@ export default function TestScreen() {
       return;
     }
     debugHydrationRef.current += 1;
-    console.log(
-      '[hydrate:start]',
-      JSON.stringify({
-        tick: debugHydrationRef.current,
-        activeFileId,
-        viewMode,
-        loadRequestId,
-      })
-    );
     const file =
       activeFileRef.current ??
       filesRef.current.find((entry) => entry.id === activeFileId) ??
       null;
     if (!file) {
-      console.log(
-        '[hydrate:missing-file]',
-        JSON.stringify({ tick: debugHydrationRef.current })
-      );
       setHydrating(false);
       setSuspendTiles(false);
-      setShowGrid(true);
       return;
     }
-    console.log(
-      '[hydrate:file]',
-      JSON.stringify({
-        tick: debugHydrationRef.current,
-        tiles: file.tiles.length,
-        rows: file.grid.rows,
-        cols: file.grid.columns,
-        preview: Boolean(file.previewUri ?? file.thumbnailUri),
-      })
-    );
     const resolvedCategories = normalizeCategories(
       file.categories && file.categories.length > 0
         ? file.categories
@@ -1347,8 +1544,6 @@ export default function TestScreen() {
     setLoadedToken(0);
     const previewUri = file.previewUri ?? file.thumbnailUri ?? null;
     setLoadPreviewUri(previewUri);
-    setShowPreview(Boolean(previewUri));
-    setShowGrid(false);
     setHydrating(true);
     setSuspendTiles(true);
     clearCloneSource();
@@ -1368,66 +1563,61 @@ export default function TestScreen() {
       token: nextToken,
       preview: Boolean(previewUri),
     };
-    console.log(
-      '[hydrate:pending]',
-      JSON.stringify({
-        tick: debugHydrationRef.current,
-        token: nextToken,
-        preview: Boolean(previewUri),
-      })
-    );
   }, [activeFileId, loadRequestId, ready, viewMode, clearCloneSource]);
 
   useEffect(() => {
-    if (viewMode !== 'modify') {
-      return;
+    if (DEBUG_LOAD_TRACE) {
+      console.log('[load-trace] mounted');
     }
-    if (isHydratingFile || loadedToken !== loadToken) {
-      setShowGrid(false);
-      return;
-    }
-    setShowGrid(true);
-  }, [isHydratingFile, loadedToken, loadToken, activeFileId, viewMode]);
-
+  }, []);
   useEffect(() => {
-    console.log(
-      '[hydrate:grid-state]',
-      JSON.stringify({
-        activeFileId,
-        viewMode,
-        isHydratingFile,
-        isPrefetchingTiles,
-        loadedToken,
-        loadToken,
-        showGrid,
-      })
-    );
-  }, [activeFileId, viewMode, isHydratingFile, isPrefetchingTiles, loadedToken, loadToken, showGrid]);
-
-
-
+    setGridStabilized(false);
+  }, [activeFileId, loadToken, viewMode]);
   useEffect(() => {
     if (viewMode !== 'modify') {
-      setShowPreview(false);
+      setSourcesStable(false);
       return;
     }
-    if (!loadPreviewUri) {
-      setShowPreview(false);
+    setSourcesStable(false);
+    const timeout = setTimeout(() => {
+      setSourcesStable(true);
+    }, 200);
+    return () => {
+      clearTimeout(timeout);
+    };
+  }, [tileSourcesSignature, viewMode, activeFileId]);
+  useEffect(() => {
+    if (viewMode !== 'modify') {
+      setTileSourcesPrefetched(false);
+      setIsPrefetchingTileSources(false);
       return;
     }
-    if (
-      isHydratingFile ||
-      !showGrid ||
-      loadedToken !== loadToken
-    ) {
-      setShowPreview(true);
+    setTileSourcesPrefetched(false);
+    setIsPrefetchingTileSources(false);
+  }, [tileSourcesPrefetchKey, viewMode]);
+  useEffect(() => {
+    if (viewMode !== 'modify') {
+      setTilesStable(false);
+      return;
+    }
+    setTilesStable(false);
+    const timeout = setTimeout(() => {
+      setTilesStable(true);
+    }, 200);
+    return () => {
+      clearTimeout(timeout);
+    };
+  }, [tilesSignature, viewMode, activeFileId]);
+  useEffect(() => {
+    if (viewMode !== 'modify' || !showGrid) {
+      setGridStabilized(false);
       return;
     }
     let raf1: number | null = null;
     let raf2: number | null = null;
     raf1 = requestAnimationFrame(() => {
       raf2 = requestAnimationFrame(() => {
-        setShowPreview(false);
+        setGridStabilized(true);
       });
     });
     return () => {
@@ -1438,17 +1628,75 @@ export default function TestScreen() {
         cancelAnimationFrame(raf2);
       }
     };
+  }, [viewMode, showGrid]);
+  useEffect(() => {
+    if (!DEBUG_LOAD_TRACE) {
+      return;
+    }
+    const snapshot = JSON.stringify({
+      activeFileId,
+      viewMode,
+      loadPhase,
+      isHydratingFile,
+      isPrefetchingTiles,
+      isPrefetchingTileSources,
+      loadToken,
+      loadedToken,
+      showPreview,
+      showGrid,
+      gridVisible,
+      gridStabilized,
+      isActiveFileRenderReady,
+      isTileSetSourcesReadyForActiveFile,
+      areActiveFileSourcesResolved,
+      hasMissingTileSources,
+      tileSourcesPrefetched,
+      sourcesStable,
+      tilesStable,
+      paletteSources: paletteSources.length,
+      tileSources: tileSources.length,
+      fileSourceNames: fileSourceNames.length,
+      activeFileSourceNames:
+        activeFile && Array.isArray(activeFile.sourceNames)
+          ? activeFile.sourceNames.length
+          : 0,
+      pendingRestore: Boolean(pendingRestoreRef.current),
+    });
+    if (loadTraceRef.current !== snapshot) {
+      loadTraceRef.current = snapshot;
+      console.log('[load-trace]', snapshot);
+    }
   }, [
+    activeFileId,
     viewMode,
+    loadPhase,
     isHydratingFile,
-    showGrid,
-    loadPreviewUri,
-    loadedToken,
+    isPrefetchingTiles,
+    isPrefetchingTileSources,
     loadToken,
+    loadedToken,
+    showPreview,
+    showGrid,
+    gridVisible,
+    gridStabilized,
+    isActiveFileRenderReady,
+    isTileSetSourcesReadyForActiveFile,
+    areActiveFileSourcesResolved,
+    hasMissingTileSources,
+    tileSourcesPrefetched,
+    sourcesStable,
+    tilesStable,
+    paletteSources.length,
+    tileSources.length,
+    fileSourceNames.length,
+    activeFile,
   ]);
 
+
+
+
   useEffect(() => {
-    if (viewMode !== 'modify' || !activeFile) {
+    if (viewMode !== 'modify' || !activeFile || isInteractingRef.current) {
       return;
     }
     let cancelled = false;
@@ -1466,42 +1714,59 @@ export default function TestScreen() {
     return () => {
       cancelled = true;
     };
-  }, [viewMode, activeFileId, paletteSources]);
+  }, [viewMode, activeFileId, paletteSources, isInteracting]);
 
   useEffect(() => {
-    if (viewMode !== 'modify' || !activeFile) {
+    if (viewMode !== 'modify' || !activeFile || isInteractingRef.current) {
       return;
     }
     let cancelled = false;
-    const sources = [ERROR_TILE, ...tileSources.map((tile) => tile.source)];
+    const names =
+      activeFileSourceNames.length > 0 ? activeFileSourceNames : fileSourceNames;
+    const sources = [
+      ERROR_TILE,
+      ...names
+        .map((name) => allSourceLookup.get(name))
+        .filter(Boolean)
+        .map((source) => source!.source),
+    ];
+    const prefetchKey = tileSourcesPrefetchKey;
+    setIsPrefetchingTileSources(true);
     const timeout = setTimeout(() => {
-      if (cancelled) {
+      if (cancelled || isInteractingRef.current) {
         return;
       }
-      void prefetchTileAssets(sources);
-    }, 50);
+      void (async () => {
+        try {
+          await prefetchTileAssets(sources);
+        } finally {
+          if (!cancelled && prefetchKey === tileSourcesPrefetchKey) {
+            setTileSourcesPrefetched(true);
+            setIsPrefetchingTileSources(false);
+          }
+        }
+      })();
+    }, 150);
     return () => {
       cancelled = true;
       clearTimeout(timeout);
     };
-  }, [viewMode, activeFileId, tileSources]);
+  }, [
+    viewMode,
+    activeFileId,
+    loadToken,
+    activeFileSourceNames,
+    fileSourceNames,
+    allSourceLookup,
+    isInteracting,
+    tileSourcesPrefetchKey,
+  ]);
 
   useEffect(() => {
     const pending = pendingRestoreRef.current;
     if (!pending || activeFileId !== pending.fileId) {
       return;
     }
-    console.log(
-      '[hydrate:apply-check]',
-      JSON.stringify({
-        tick: debugHydrationRef.current,
-        pendingToken: pending.token,
-        grid: `${gridLayout.rows}x${gridLayout.columns}`,
-        pendingGrid: `${pending.rows}x${pending.columns}`,
-        tileSize: gridLayout.tileSize,
-        pendingTiles: pending.tiles.length,
-      })
-    );
     const gridMatches =
       pending.rows === gridLayout.rows && pending.columns === gridLayout.columns;
     const allowFallback = pending.rows === 0 || pending.columns === 0;
@@ -1525,14 +1790,6 @@ export default function TestScreen() {
       } else {
         finalize();
       }
-      console.log(
-        '[hydrate:applied]',
-        JSON.stringify({
-          tick: debugHydrationRef.current,
-          token: pending.token,
-          preview: pending.preview,
-        })
-      );
       return;
     }
     if (gridLayout.tileSize > 0 && pending.rows === 0 && pending.columns === 0) {
@@ -1541,13 +1798,6 @@ export default function TestScreen() {
       setHydrating(false);
       setSuspendTiles(false);
       setLoadedToken(pending.token ?? 0);
-      console.log(
-        '[hydrate:reset]',
-        JSON.stringify({
-          tick: debugHydrationRef.current,
-          token: pending.token,
-        })
-      );
     }
   }, [
     activeFileId,
@@ -1563,8 +1813,14 @@ export default function TestScreen() {
     if (!ready || !activeFileId || viewMode !== 'modify') {
       return;
     }
+    if (!isReadyLatched) {
+      return;
+    }
     const pending = pendingRestoreRef.current;
     if (suppressAutosaveRef.current) {
+      return;
+    }
+    if (isInteractingRef.current) {
       return;
     }
     if (isHydratingFile || (pending && pending.fileId === activeFileId)) {
@@ -1608,9 +1864,63 @@ export default function TestScreen() {
         });
       })();
     }, 150);
+    if (Platform.OS === 'web') {
+      if (previewSaveTimeoutRef.current) {
+        clearTimeout(previewSaveTimeoutRef.current);
+      }
+      previewSaveTimeoutRef.current = setTimeout(() => {
+        void (async () => {
+          if (
+            suppressAutosaveRef.current ||
+            isHydratingFile ||
+            viewMode !== 'modify' ||
+            isInteractingRef.current
+          ) {
+            return;
+          }
+          const previewUri = await renderTileCanvasToDataUrl({
+            tiles,
+            gridLayout,
+            tileSources,
+            gridGap: GRID_GAP,
+            blankSource: null,
+            errorSource: ERROR_TILE,
+            lineColor: activeLineColor,
+            lineWidth: activeLineWidth,
+            strokeScaleByName,
+            maxDimension: 0,
+            format: 'image/png',
+            quality: 1,
+          });
+          if (!previewUri) {
+            return;
+          }
+          const resolvedSourceNames =
+            fileSourceNames.length > 0
+              ? fileSourceNames
+              : tileSources.map((source) => source.name);
+          if (fileSourceNames.length === 0 && resolvedSourceNames.length > 0) {
+            setFileSourceNames(resolvedSourceNames);
+          }
+          upsertActiveFile({
+            tiles,
+            gridLayout,
+            category: primaryCategory,
+            categories: activeCategories,
+            preferredTileSize: fileTileSize,
+            previewUri,
+            sourceNames: resolvedSourceNames,
+          });
+        })();
+      }, 800);
+    }
     return () => {
       if (saveTimeoutRef.current) {
         clearTimeout(saveTimeoutRef.current);
+      }
+      if (previewSaveTimeoutRef.current) {
+        clearTimeout(previewSaveTimeoutRef.current);
+        previewSaveTimeoutRef.current = null;
       }
     };
   }, [
@@ -1628,7 +1938,18 @@ export default function TestScreen() {
     upsertActiveFile,
     isHydratingFile,
     viewMode,
+    isInteracting,
+    strokeScaleByName,
   ]);
+
+  useEffect(() => {
+    if (!interactionPendingRef.current || !interactionStartRef.current) {
+      return;
+    }
+    const { id, time } = interactionStartRef.current;
+    const now = Date.now();
+    interactionPendingRef.current = false;
+  }, [tiles]);
 
 
   const getRelativePoint = (event: any) => {
@@ -1723,8 +2044,6 @@ export default function TestScreen() {
     const clearId = clearSequenceRef.current;
     suppressAutosaveRef.current = true;
     setIsClearing(true);
-    setShowGrid(false);
-    setShowPreview(Boolean(clearPreviewUri ?? loadPreviewUri));
     resetTiles();
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
@@ -1760,8 +2079,6 @@ export default function TestScreen() {
           setIsCapturingPreview(false);
           suppressAutosaveRef.current = false;
           setIsClearing(false);
-          setShowGrid(true);
-          setShowPreview(false);
         })();
       });
     });
@@ -2113,9 +2430,7 @@ export default function TestScreen() {
     const previewUri = file.previewUri ?? file.thumbnailUri ?? null;
     setLoadRequestId((prev) => prev + 1);
     setLoadPreviewUri(previewUri);
-    setShowPreview(Boolean(previewUri));
     setSuspendTiles(true);
-    setShowGrid(false);
     setHydrating(true);
     setActive(file.id);
     setViewMode('modify');
@@ -2397,14 +2712,14 @@ export default function TestScreen() {
                     { width: fileCardWidth, aspectRatio: thumbAspect },
                   ]}
                 >
-                  {file.thumbnailUri ? (
+                  {file.thumbnailUri || file.previewUri ? (
                     <TileAsset
-                      source={{ uri: file.thumbnailUri }}
+                      source={{ uri: file.thumbnailUri ?? file.previewUri ?? undefined }}
                       name="thumbnail.png"
                       style={styles.fileThumbImage}
                       resizeMode="cover"
                     />
-                  ) : (
+                  ) : Platform.OS !== 'web' ? (
                     <ThemedView style={styles.fileThumbGrid}>
                       {Array.from({ length: file.grid.rows }, (_, rowIndex) => (
                         <ThemedView
@@ -2448,6 +2763,8 @@ export default function TestScreen() {
                         </ThemedView>
                       ))}
                     </ThemedView>
+                  ) : (
+                    <ThemedView style={styles.fileThumbPlaceholder} />
                   )}
                 </ThemedView>
               </Pressable>
@@ -2761,8 +3078,6 @@ export default function TestScreen() {
                       setFileSourceNames(initialSources);
                       setLoadRequestId((prev) => prev + 1);
                       setLoadPreviewUri(null);
-                      setShowGrid(false);
-                      setShowPreview(false);
                       setSuspendTiles(true);
                       setLoadedToken(0);
                       setHydrating(true);
@@ -2998,12 +3313,24 @@ export default function TestScreen() {
             lineColor={settings.backgroundLineColor}
             lineWidth={settings.backgroundLineWidth}
           />
-          {showPreview && !showGrid && (loadPreviewUri || clearPreviewUri) && (
-            <Image
-              source={{ uri: clearPreviewUri ?? loadPreviewUri ?? undefined }}
-              style={styles.gridPreview}
-              resizeMode="cover"
-            />
+          {showPreview && (loadPreviewUri || clearPreviewUri) && (
+            <>
+              {isTransparentPreview(clearPreviewUri ?? loadPreviewUri) && (
+                <View
+                  pointerEvents="none"
+                  style={[
+                    styles.gridPreviewBackdrop,
+                    { backgroundColor: settings.backgroundColor },
+                  ]}
+                />
+              )}
+              <Image
+                source={{ uri: clearPreviewUri ?? loadPreviewUri ?? undefined }}
+                style={styles.gridPreview}
+                resizeMode="cover"
+                pointerEvents="none"
+              />
+            </>
           )}
           {(settings.mirrorHorizontal || settings.mirrorVertical) &&
             gridWidth > 0 &&
@@ -3050,9 +3377,9 @@ export default function TestScreen() {
           {Platform.OS === 'web' ? (
             <ThemedView
               ref={setGridNode}
-              style={[styles.grid, { opacity: showGrid ? 1 : 0 }]}
+              style={[styles.grid, { opacity: gridVisible ? 1 : 0 }]}
               accessibilityRole="grid"
-              pointerEvents={showGrid && !isClearing ? 'auto' : 'none'}
+              pointerEvents={gridVisible && !isClearing ? 'auto' : 'none'}
               onLayout={(event: any) => {
                 const layout = event?.nativeEvent?.layout;
                 if (layout) {
@@ -3061,8 +3388,10 @@ export default function TestScreen() {
                   gridOffsetRef.current = { x: 0, y: 0 };
                 }
               }}
-              onMouseDown={(event: any) => {
-                const point = getRelativePoint(event);
+                onMouseDown={(event: any) => {
+                  setInteracting(true);
+                  markInteractionStart();
+                  const point = getRelativePoint(event);
                 if (point) {
                   const cellIndex = getCellIndexForPoint(point.x, point.y);
                   if (cellIndex === null) {
@@ -3098,9 +3427,11 @@ export default function TestScreen() {
                 }
               }}
               onMouseLeave={() => {
+                setInteracting(false);
                 lastPaintedRef.current = null;
               }}
               onMouseUp={() => {
+                setInteracting(false);
                 if (isPatternCreationMode) {
                   if (patternSelection) {
                     setShowPatternSaveModal(true);
@@ -3121,11 +3452,12 @@ export default function TestScreen() {
                         cellIndex={cellIndex}
                         tileSize={gridLayout.tileSize}
                         tile={item}
-                        tileSources={tileSources}
+                        tileSources={renderTileSources}
                         showDebug={settings.showDebug}
                         strokeColor={activeLineColor}
                         strokeWidth={activeLineWidth}
                         strokeScaleByName={strokeScaleByName}
+                        atlas={gridAtlas}
                         showOverlays={showOverlays}
                         isCloneSource={
                           brush.mode === 'clone' && cloneSourceIndex === cellIndex
@@ -3152,52 +3484,75 @@ export default function TestScreen() {
               style={[
                 styles.grid,
                 {
-                  opacity: showGrid || isCapturingPreview ? 1 : 0,
+                  opacity: gridVisible || isCapturingPreview ? 1 : 0,
                   width: gridWidth,
                   height: gridHeight,
                 },
               ]}
               pointerEvents="none"
             >
-              {rowIndices.map((rowIndex) => (
-                <ThemedView key={`row-${rowIndex}`} style={styles.row}>
-                  {columnIndices.map((columnIndex) => {
-                    const cellIndex = rowIndex * gridLayout.columns + columnIndex;
-                    const item = displayTiles[cellIndex];
-                    return (
-                      <TileCell
-                        key={`cell-${cellIndex}`}
-                        cellIndex={cellIndex}
-                        tileSize={gridLayout.tileSize}
-                        tile={item}
-                        tileSources={tileSources}
-                        showDebug={settings.showDebug}
-                        strokeColor={activeLineColor}
-                        strokeWidth={activeLineWidth}
-                        strokeScaleByName={strokeScaleByName}
-                        showOverlays={showOverlays}
-                        isCloneSource={
-                          brush.mode === 'clone' && cloneSourceIndex === cellIndex
-                        }
-                        isCloneSample={
-                          brush.mode === 'clone' && cloneSampleIndex === cellIndex
-                        }
-                        isCloneTargetOrigin={
-                          brush.mode === 'clone' && cloneAnchorIndex === cellIndex
-                        }
-                        isCloneCursor={
-                          brush.mode === 'clone' && cloneCursorIndex === cellIndex
-                        }
-                      />
-                    );
-                  })}
-                </ThemedView>
-              ))}
-              </ViewShot>
+              {useSkiaGrid ? (
+                <TileGridCanvas
+                  width={gridWidth}
+                  height={gridHeight}
+                  tileSize={gridLayout.tileSize}
+                  rows={gridLayout.rows}
+                  columns={gridLayout.columns}
+                  tiles={displayTiles}
+                  tileSources={renderTileSources}
+                  errorSource={ERROR_TILE}
+                  strokeColor={activeLineColor}
+                  strokeWidth={activeLineWidth}
+                  strokeScaleByName={strokeScaleByName}
+                  showDebug={settings.showDebug}
+                  showOverlays={showOverlays}
+                  cloneSourceIndex={brush.mode === 'clone' ? cloneSourceIndex : null}
+                  cloneSampleIndex={brush.mode === 'clone' ? cloneSampleIndex : null}
+                  cloneAnchorIndex={brush.mode === 'clone' ? cloneAnchorIndex : null}
+                  cloneCursorIndex={brush.mode === 'clone' ? cloneCursorIndex : null}
+                />
+              ) : (
+                rowIndices.map((rowIndex) => (
+                  <ThemedView key={`row-${rowIndex}`} style={styles.row}>
+                    {columnIndices.map((columnIndex) => {
+                      const cellIndex = rowIndex * gridLayout.columns + columnIndex;
+                      const item = displayTiles[cellIndex];
+                      return (
+                        <TileCell
+                          key={`cell-${cellIndex}`}
+                          cellIndex={cellIndex}
+                          tileSize={gridLayout.tileSize}
+                          tile={item}
+                          tileSources={renderTileSources}
+                          showDebug={settings.showDebug}
+                          strokeColor={activeLineColor}
+                          strokeWidth={activeLineWidth}
+                          strokeScaleByName={strokeScaleByName}
+                          atlas={gridAtlas}
+                          showOverlays={showOverlays}
+                          isCloneSource={
+                            brush.mode === 'clone' && cloneSourceIndex === cellIndex
+                          }
+                          isCloneSample={
+                            brush.mode === 'clone' && cloneSampleIndex === cellIndex
+                          }
+                          isCloneTargetOrigin={
+                            brush.mode === 'clone' && cloneAnchorIndex === cellIndex
+                          }
+                          isCloneCursor={
+                            brush.mode === 'clone' && cloneCursorIndex === cellIndex
+                          }
+                        />
+                      );
+                    })}
+                  </ThemedView>
+                ))
+              )}
+            </ViewShot>
               <View
                 ref={gridTouchRef}
                 style={StyleSheet.absoluteFillObject}
-                pointerEvents={showGrid && !isClearing ? 'auto' : 'none'}
+                pointerEvents={gridVisible && !isClearing ? 'auto' : 'none'}
                 onLayout={(event: any) => {
                   const layout = event?.nativeEvent?.layout;
                   if (layout) {
@@ -3212,6 +3567,8 @@ export default function TestScreen() {
                 onMoveShouldSetResponderCapture={() => true}
                 onResponderTerminationRequest={() => false}
                 onResponderGrant={(event: any) => {
+                  setInteracting(true);
+                  markInteractionStart();
                   const point = getRelativePoint(event);
                   if (point) {
                     const cellIndex = getCellIndexForPoint(point.x, point.y);
@@ -3261,6 +3618,7 @@ export default function TestScreen() {
                   }
                 }}
                 onResponderRelease={() => {
+                  setInteracting(false);
                   if (isPatternCreationMode) {
                     if (patternSelection) {
                       setShowPatternSaveModal(true);
@@ -3277,6 +3635,7 @@ export default function TestScreen() {
                   lastPaintedRef.current = null;
                 }}
                 onResponderTerminate={() => {
+                  setInteracting(false);
                   if (longPressTimeoutRef.current) {
                     clearTimeout(longPressTimeoutRef.current);
                     longPressTimeoutRef.current = null;
@@ -3315,12 +3674,13 @@ export default function TestScreen() {
             ]}
           />
         )}
-          <TileBrushPanel
-            tileSources={paletteSources}
-            selected={selectedPaletteBrush}
-            strokeColor={activeLineColor}
-            strokeWidth={activeLineWidth}
-            strokeScaleByName={strokeScaleByName}
+        <TileBrushPanel
+          tileSources={paletteSources}
+          selected={selectedPaletteBrush}
+          strokeColor={activeLineColor}
+          strokeWidth={activeLineWidth}
+          strokeScaleByName={strokeScaleByName}
+          atlas={brushAtlas}
           selectedPattern={
             selectedPattern
               ? {
@@ -3346,24 +3706,24 @@ export default function TestScreen() {
               setBrush(next);
               return;
             }
-              if (next.mode === 'fixed') {
-                const rotation = paletteRotations[next.index] ?? next.rotation ?? 0;
-                const mirrorX = paletteMirrors[next.index] ?? next.mirrorX ?? false;
-                const mirrorY = paletteMirrorsY[next.index] ?? next.mirrorY ?? false;
-                const fileIndex = paletteIndexToFileIndex[next.index] ?? -1;
-                if (fileIndex >= 0) {
-                  setBrush({
-                    mode: 'fixed',
-                    index: fileIndex,
-                    rotation,
-                    mirrorX,
-                    mirrorY,
-                  });
-                }
-              } else {
-                setBrush(next);
+            if (next.mode === 'fixed') {
+              const rotation = paletteRotations[next.index] ?? next.rotation ?? 0;
+              const mirrorX = paletteMirrors[next.index] ?? next.mirrorX ?? false;
+              const mirrorY = paletteMirrorsY[next.index] ?? next.mirrorY ?? false;
+              const fileIndex = paletteIndexToFileIndex[next.index] ?? -1;
+              if (fileIndex >= 0) {
+                setBrush({
+                  mode: 'fixed',
+                  index: fileIndex,
+                  rotation,
+                  mirrorX,
+                  mirrorY,
+                });
               }
-            }}
+            } else {
+              setBrush(next);
+            }
+          }}
           onRotate={(index) =>
             setPaletteRotations((prev) => {
               const nextRotation = ((prev[index] ?? 0) + 90) % 360;
@@ -4334,6 +4694,11 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
   },
+  fileThumbPlaceholder: {
+    flex: 1,
+    backgroundColor: '#0f0f0f',
+    borderRadius: 4,
+  },
   fileMenuPanel: {
     width: 220,
     borderRadius: 8,
@@ -4638,6 +5003,11 @@ const styles = StyleSheet.create({
   },
   gridPreview: {
     ...StyleSheet.absoluteFillObject,
+    zIndex: 6,
+  },
+  gridPreviewBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 5,
   },
   row: {
     flexDirection: 'row',

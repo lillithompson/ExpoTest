@@ -18,9 +18,10 @@ import {
 } from '@/assets/images/tiles/manifest';
 import { TileBrushPanel } from '@/components/tile-brush-panel';
 import { TileDebugOverlay } from '@/components/tile-debug-overlay';
-import { TileAsset } from '@/components/tile-asset';
+import { TileAtlasSprite } from '@/components/tile-atlas-sprite';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { useTileAtlas } from '@/hooks/use-tile-atlas';
 import { useTileGrid } from '@/hooks/use-tile-grid';
 import { usePersistedSettings } from '@/hooks/use-persisted-settings';
 import { useTilePatterns } from '@/hooks/use-tile-patterns';
@@ -80,6 +81,7 @@ type TileCellProps = {
   showDebug: boolean;
   strokeColor: string;
   strokeWidth: number;
+  atlas?: ReturnType<typeof useTileAtlas> | null;
   isCloneSource: boolean;
   isCloneSample: boolean;
   isCloneTargetOrigin: boolean;
@@ -96,6 +98,7 @@ const TileCell = memo(
     showDebug,
     strokeColor,
     strokeWidth,
+    atlas,
     isCloneSource,
     isCloneSample,
     isCloneTargetOrigin,
@@ -132,7 +135,8 @@ const TileCell = memo(
         ]}
       >
         {source && (
-          <TileAsset
+          <TileAtlasSprite
+            atlas={atlas}
             source={source}
             name={tileName}
             strokeColor={tile.imageIndex >= 0 ? strokeColor : '#ffffff'}
@@ -422,6 +426,18 @@ export default function ModifyTileScreen() {
         brushRows
     )
   );
+  const gridAtlas = useTileAtlas({
+    tileSources,
+    tileSize: gridLayout.tileSize,
+    strokeColor: tileSet?.lineColor,
+    strokeWidth: tileSet?.lineWidth,
+  });
+  const brushAtlas = useTileAtlas({
+    tileSources,
+    tileSize: brushItemSize,
+    strokeColor: tileSet?.lineColor,
+    strokeWidth: tileSet?.lineWidth,
+  });
 
   const gridOffsetRef = useRef({ x: 0, y: 0 });
   const lastPaintedRef = useRef<number | null>(null);
@@ -887,6 +903,7 @@ export default function ModifyTileScreen() {
                       showDebug={settings.showDebug}
                       strokeColor={tileSet.lineColor}
                       strokeWidth={tileSet.lineWidth}
+                      atlas={gridAtlas}
                       showOverlays
                       isCloneSource={brush.mode === 'clone' && cloneSourceIndex === cellIndex}
                       isCloneSample={brush.mode === 'clone' && cloneSampleIndex === cellIndex}
@@ -926,6 +943,7 @@ export default function ModifyTileScreen() {
                       showDebug={false}
                       strokeColor={tileSet.lineColor}
                       strokeWidth={tileSet.lineWidth}
+                      atlas={gridAtlas}
                       showOverlays={false}
                       isCloneSource={false}
                       isCloneSample={false}
@@ -956,6 +974,7 @@ export default function ModifyTileScreen() {
           selected={brush}
           strokeColor={tileSet.lineColor}
           strokeWidth={tileSet.lineWidth}
+          atlas={brushAtlas}
           showPattern={false}
           rows={brushRows}
           selectedPattern={

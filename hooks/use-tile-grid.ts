@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { type TileSource } from '@/assets/images/tiles/manifest';
-import { parseTileConnections, transformConnections } from '@/utils/tile-compat';
+import { buildCompatibilityTables } from '@/utils/tile-compat';
 import {
   buildInitialTiles,
   computeFixedGridLayout,
@@ -237,14 +237,11 @@ export const useTileGrid = ({
     patternAnchorRef.current = null;
   }, [brush.mode, patternAnchorKey]);
 
-  const tileSourceMeta = useMemo(
-    () =>
-      tileSources.map((source) => ({
-        ...source,
-        connections: parseTileConnections(source.name),
-      })),
-    [tileSources]
+  const compatTables = useMemo(
+    () => buildCompatibilityTables(tileSources),
+    [tileSourcesKey]
   );
+  const connectionsByIndex = compatTables.connectionsByIndex;
 
   const getPairsForDirection = (index: number) => {
     switch (index) {
@@ -306,17 +303,16 @@ export const useTileGrid = ({
         if (!neighborTile || neighborTile.imageIndex < 0) {
           return null;
         }
-        const neighborMeta = tileSourceMeta[neighborTile.imageIndex];
-        if (!neighborMeta || !neighborMeta.connections) {
-          return null;
-        }
-        const transformedNeighbor = transformConnections(
-          neighborMeta.connections,
+        const neighborConnections = compatTables.getConnectionsForPlacement(
+          neighborTile.imageIndex,
           neighborTile.rotation,
           neighborTile.mirrorX,
           neighborTile.mirrorY
         );
-        return { pairs: getPairsForDirection(index), connections: transformedNeighbor };
+        if (!neighborConnections) {
+          return null;
+        }
+        return { pairs: getPairsForDirection(index), connections: neighborConnections };
       })
       .filter(
         (value): value is { pairs: Array<[number, number]>; connections: boolean[] } =>
@@ -325,11 +321,11 @@ export const useTileGrid = ({
 
     const candidates: Array<Tile> = [];
 
-    tileSourceMeta.forEach((meta, index) => {
+    connectionsByIndex.forEach((connections, index) => {
       if (allowedIndices && !allowedIndices.has(index)) {
         return;
       }
-      if (!meta.connections) {
+      if (!connections) {
         candidates.push({
           imageIndex: index,
           rotation: 0,
@@ -338,38 +334,23 @@ export const useTileGrid = ({
         });
         return;
       }
-
-      const rotations = [0, 90, 180, 270];
-      const mirrorOptions = [
-        { mirrorX: false, mirrorY: false },
-        { mirrorX: true, mirrorY: false },
-        { mirrorX: false, mirrorY: true },
-        { mirrorX: true, mirrorY: true },
-      ];
-
-      rotations.forEach((rotation) => {
-        mirrorOptions.forEach((mirror) => {
-          const transformed = transformConnections(
-            meta.connections,
-            rotation,
-            mirror.mirrorX,
-            mirror.mirrorY
-          );
-          const matches = neighborConstraints.every((constraint) =>
-            constraint.pairs.every(
-              ([candidateIndex, neighborIndex]) =>
-                transformed[candidateIndex] === constraint.connections[neighborIndex]
-            )
-          );
-          if (matches) {
-            candidates.push({
-              imageIndex: index,
-              rotation,
-              mirrorX: mirror.mirrorX,
-              mirrorY: mirror.mirrorY,
-            });
-          }
-        });
+      const variants = compatTables.variantsByIndex[index] ?? [];
+      variants.forEach((variant) => {
+        const matches = neighborConstraints.every((constraint) =>
+          constraint.pairs.every(
+            ([candidateIndex, neighborIndex]) =>
+              variant.connections[candidateIndex] ===
+              constraint.connections[neighborIndex]
+          )
+        );
+        if (matches) {
+          candidates.push({
+            imageIndex: index,
+            rotation: variant.rotation,
+            mirrorX: variant.mirrorX,
+            mirrorY: variant.mirrorY,
+          });
+        }
       });
     });
 
@@ -403,8 +384,13 @@ export const useTileGrid = ({
     placement: Tile,
     tilesState: Tile[]
   ) => {
-    const meta = tileSourceMeta[placement.imageIndex];
-    if (!meta || !meta.connections) {
+    const transformed = compatTables.getConnectionsForPlacement(
+      placement.imageIndex,
+      placement.rotation,
+      placement.mirrorX,
+      placement.mirrorY
+    );
+    if (!transformed) {
       return true;
     }
 
@@ -420,13 +406,6 @@ export const useTileGrid = ({
       { dr: 0, dc: -1 },
       { dr: -1, dc: -1 },
     ];
-
-    const transformed = transformConnections(
-      meta.connections,
-      placement.rotation,
-      placement.mirrorX,
-      placement.mirrorY
-    );
 
     return directions.every((dir, index) => {
       const r = row + dir.dr;
@@ -444,16 +423,15 @@ export const useTileGrid = ({
       if (!neighborTile || neighborTile.imageIndex < 0) {
         return true;
       }
-      const neighborMeta = tileSourceMeta[neighborTile.imageIndex];
-      if (!neighborMeta || !neighborMeta.connections) {
-        return true;
-      }
-      const neighborTransformed = transformConnections(
-        neighborMeta.connections,
+      const neighborTransformed = compatTables.getConnectionsForPlacement(
+        neighborTile.imageIndex,
         neighborTile.rotation,
         neighborTile.mirrorX,
         neighborTile.mirrorY
       );
+      if (!neighborTransformed) {
+        return true;
+      }
 
       return getPairsForDirection(index).every(
         ([candidateIndex, neighborIndexValue]) =>
@@ -492,46 +470,8 @@ export const useTileGrid = ({
       return;
     }
 
-    const nextConnections = tileSources.map((source) =>
-      parseTileConnections(source.name)
-    );
-    const nextLookup = new Map<
-      string,
-      Array<{ index: number; rotation: number; mirrorX: boolean; mirrorY: boolean }>
-    >();
-    nextConnections.forEach((connections, index) => {
-      if (!connections) {
-        return;
-      }
-      const rotations = [0, 90, 180, 270];
-      const mirrors = [
-        { mirrorX: false, mirrorY: false },
-        { mirrorX: true, mirrorY: false },
-        { mirrorX: false, mirrorY: true },
-        { mirrorX: true, mirrorY: true },
-      ];
-      rotations.forEach((rotation) => {
-        mirrors.forEach(({ mirrorX, mirrorY }) => {
-          const transformed = transformConnections(
-            connections,
-            rotation,
-            mirrorX,
-            mirrorY
-          );
-          const key = toConnectionKey(transformed);
-          if (!key) {
-            return;
-          }
-          const existing = nextLookup.get(key);
-          const entry = { index, rotation, mirrorX, mirrorY };
-          if (existing) {
-            existing.push(entry);
-          } else {
-            nextLookup.set(key, [entry]);
-          }
-        });
-      });
-    });
+    const nextLookup = compatTables.variantsByKey;
+    const previousTables = buildCompatibilityTables(previousSources);
 
     setTiles((prev) =>
       normalizeTiles(prev, totalCells, previousSources.length).map((tile) => {
@@ -545,12 +485,8 @@ export const useTileGrid = ({
         if (!previousSource) {
           return { imageIndex: -1, rotation: 0, mirrorX: false, mirrorY: false };
         }
-        const previousConnections = parseTileConnections(previousSource.name);
-        if (!previousConnections) {
-          return { imageIndex: -1, rotation: 0, mirrorX: false, mirrorY: false };
-        }
-        const transformedPrevious = transformConnections(
-          previousConnections,
+        const transformedPrevious = previousTables.getConnectionsForPlacement(
+          tile.imageIndex,
           tile.rotation,
           tile.mirrorX,
           tile.mirrorY
@@ -572,7 +508,7 @@ export const useTileGrid = ({
         };
       })
     );
-  }, [tileSourcesKey, suspendRemap, tileSourcesLength, totalCells]);
+  }, [tileSourcesKey, suspendRemap, tileSourcesLength, totalCells, compatTables]);
 
   const getMirroredPlacements = (cellIndex: number, placement: Tile) => {
     const row = Math.floor(cellIndex / gridLayout.columns);
@@ -1184,46 +1120,34 @@ export const useTileGrid = ({
       return;
     }
     const allowedSet = randomSourceSet ?? null;
-    const lookup = new Map<
-      string,
-      Array<{ index: number; rotation: number; mirrorX: boolean; mirrorY: boolean }>
-    >();
-    tileSourceMeta.forEach((meta, index) => {
-      if (allowedSet && !allowedSet.has(index)) {
-        return;
-      }
-      if (!meta.connections) {
-        return;
-      }
-      const rotations = [0, 90, 180, 270];
-      const mirrors = [
-        { mirrorX: false, mirrorY: false },
-        { mirrorX: true, mirrorY: false },
-        { mirrorX: false, mirrorY: true },
-        { mirrorX: true, mirrorY: true },
-      ];
-      rotations.forEach((rotation) => {
-        mirrors.forEach(({ mirrorX, mirrorY }) => {
-          const transformed = transformConnections(
-            meta.connections!,
-            rotation,
-            mirrorX,
-            mirrorY
-          );
-          const key = toConnectionKey(transformed);
-          if (!key) {
-            return;
-          }
-          const entry = { index, rotation, mirrorX, mirrorY };
-          const existing = lookup.get(key);
-          if (existing) {
-            existing.push(entry);
-          } else {
-            lookup.set(key, [entry]);
-          }
-        });
-      });
-    });
+    const lookup = allowedSet
+      ? (() => {
+          const next = new Map<
+            string,
+            Array<{ index: number; rotation: number; mirrorX: boolean; mirrorY: boolean }>
+          >();
+          compatTables.variantsByIndex.forEach((variants, index) => {
+            if (!allowedSet.has(index)) {
+              return;
+            }
+            variants.forEach((variant) => {
+              const existing = next.get(variant.key);
+              const entry = {
+                index: variant.index,
+                rotation: variant.rotation,
+                mirrorX: variant.mirrorX,
+                mirrorY: variant.mirrorY,
+              };
+              if (existing) {
+                existing.push(entry);
+              } else {
+                next.set(variant.key, [entry]);
+              }
+            });
+          });
+          return next;
+        })()
+      : compatTables.variantsByKey;
 
     const nextTiles = [...normalizeTiles(tiles, totalCells, tileSourcesLength)];
     for (const index of getDrivenCellIndices()) {
@@ -1231,16 +1155,15 @@ export const useTileGrid = ({
       if (!current || current.imageIndex < 0) {
         continue;
       }
-      const meta = tileSourceMeta[current.imageIndex];
-      if (!meta?.connections) {
-        continue;
-      }
-      const transformed = transformConnections(
-        meta.connections,
+      const transformed = compatTables.getConnectionsForPlacement(
+        current.imageIndex,
         current.rotation,
         current.mirrorX,
         current.mirrorY
       );
+      if (!transformed) {
+        continue;
+      }
       const key = toConnectionKey(transformed);
       if (!key) {
         continue;

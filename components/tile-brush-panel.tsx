@@ -3,8 +3,10 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Modal, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
+import { TileAtlasSprite } from '@/components/tile-atlas-sprite';
 import { TileAsset } from '@/components/tile-asset';
 import { type TileSource } from '@/assets/images/tiles/manifest';
+import { type TileAtlas } from '@/utils/tile-atlas';
 
 type Brush =
   | { mode: 'random' }
@@ -19,6 +21,7 @@ type Props = {
   strokeColor?: string;
   strokeWidth?: number;
   strokeScaleByName?: Map<string, number>;
+  atlas?: TileAtlas | null;
   selectedPattern?: {
     tiles: { imageIndex: number; rotation: number; mirrorX: boolean; mirrorY: boolean }[];
     width: number;
@@ -115,6 +118,7 @@ export function TileBrushPanel({
   strokeColor,
   strokeWidth,
   strokeScaleByName,
+  atlas,
   selectedPattern,
   onSelect,
   onRotate,
@@ -517,7 +521,8 @@ export function TileBrushPanel({
                   </View>
                 ) : (
                   <View style={styles.imageBox}>
-                    <TileAsset
+                    <TileAtlasSprite
+                      atlas={atlas}
                       source={entry.tile.source}
                       name={entry.tile.name}
                       strokeColor={favoriteColor ?? strokeColor}

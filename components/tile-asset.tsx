@@ -15,6 +15,46 @@ type Props = {
 };
 
 const svgXmlCache = new Map<string, string>();
+const svgOverrideCache = new Map<string, string>();
+const svgXmlInflight = new Map<string, Promise<string | null>>();
+
+const cacheSvgXml = (primary: string, xml: string, alias?: string | null) => {
+  svgXmlCache.set(primary, xml);
+  if (alias && alias !== primary) {
+    svgXmlCache.set(alias, xml);
+  }
+};
+
+const loadSvgXmlOnce = async (
+  primary: string,
+  alias: string | null,
+  loader: () => Promise<string>
+) => {
+  const cached = svgXmlCache.get(primary) ?? (alias ? svgXmlCache.get(alias) : null);
+  if (cached) {
+    return cached;
+  }
+  const inflightKey = alias ?? primary;
+  const inflight = svgXmlInflight.get(inflightKey);
+  if (inflight) {
+    return inflight;
+  }
+  const promise = (async () => {
+    try {
+      const xml = await loader();
+      if (xml) {
+        cacheSvgXml(primary, xml, alias);
+      }
+      return xml;
+    } catch {
+      return null;
+    } finally {
+      svgXmlInflight.delete(inflightKey);
+    }
+  })();
+  svgXmlInflight.set(inflightKey, promise);
+  return promise;
+};
 
 const resolveSourceUri = (source: unknown) => {
   if (!source) {
@@ -143,7 +183,7 @@ const stripOuterBorder = (xml: string) => {
 export const prefetchTileAssets = async (sources: unknown[]) => {
   const tasks = sources.map(async (source) => {
     const uri = resolveSourceUri(source);
-    if (!uri || !uri.toLowerCase().includes('.svg') || svgXmlCache.has(uri)) {
+    if (!uri || !uri.toLowerCase().includes('.svg')) {
       return;
     }
     let resolvedUri = uri;
@@ -154,20 +194,95 @@ export const prefetchTileAssets = async (sources: unknown[]) => {
       }
       resolvedUri = asset.localUri ?? asset.uri ?? uri;
     }
-    if (svgXmlCache.has(resolvedUri)) {
+    const cached =
+      svgXmlCache.get(uri) ?? svgXmlCache.get(resolvedUri);
+    if (cached) {
       return;
     }
-    try {
-      const xml =
-        Platform.OS === 'web'
-          ? await fetch(resolvedUri).then((response) => response.text())
-          : await FileSystem.readAsStringAsync(resolvedUri);
-      svgXmlCache.set(resolvedUri, xml);
-    } catch {
-      // ignore prefetch errors
-    }
+    await loadSvgXmlOnce(resolvedUri, uri, async () => {
+      return Platform.OS === 'web'
+        ? await fetch(resolvedUri).then((response) => response.text())
+        : await FileSystem.readAsStringAsync(resolvedUri);
+    });
   });
   await Promise.all(tasks);
+};
+
+export const getSvgXmlWithOverrides = async (
+  source: unknown,
+  strokeColor?: string,
+  strokeWidth?: number
+) => {
+  const uri = resolveSourceUri(source);
+  if (!uri || !uri.toLowerCase().includes('.svg')) {
+    return null;
+  }
+  const overrideKey = `${uri}|${strokeColor ?? ''}|${strokeWidth ?? ''}`;
+  const cachedOverride = svgOverrideCache.get(overrideKey);
+  if (cachedOverride) {
+    return cachedOverride;
+  }
+
+  const start = Date.now();
+  if (uri.startsWith('data:image/svg+xml')) {
+    const cached = svgXmlCache.get(uri);
+    let xml = cached ?? '';
+    if (!xml) {
+      const parts = uri.split(',');
+      const header = parts[0] ?? '';
+      const body = parts.slice(1).join(',');
+      if (header.includes(';base64')) {
+        try {
+          if (typeof atob === 'function') {
+            xml = atob(body);
+          }
+        } catch {
+          xml = '';
+        }
+      } else {
+        try {
+          xml = decodeURIComponent(body);
+        } catch {
+          xml = body;
+        }
+      }
+      if (xml) {
+        cacheSvgXml(uri, xml);
+      }
+    }
+    if (!xml) {
+      return null;
+    }
+    const stripped = stripOuterBorder(xml);
+    const normalized = normalizeSvgRoot(stripped);
+    const overridden = applySvgOverrides(normalized, strokeColor, strokeWidth);
+    svgOverrideCache.set(overrideKey, overridden);
+    console.log('[perf:svg-load]', { uri, ms: Date.now() - start, cache: cached ? true : false });
+    return overridden;
+  }
+
+  let resolvedUri = uri;
+  if (typeof source === 'number') {
+    const asset = Asset.fromModule(source);
+    if (!asset.downloaded && Platform.OS !== 'web') {
+      await asset.downloadAsync();
+    }
+    resolvedUri = asset.localUri ?? asset.uri ?? uri;
+  }
+
+  const xml = await loadSvgXmlOnce(resolvedUri, uri, async () => {
+    return Platform.OS === 'web'
+      ? await fetch(resolvedUri).then((response) => response.text())
+      : await FileSystem.readAsStringAsync(resolvedUri);
+  });
+  if (!xml) {
+    return null;
+  }
+  const stripped = stripOuterBorder(xml);
+  const normalized = normalizeSvgRoot(stripped);
+  const overridden = applySvgOverrides(normalized, strokeColor, strokeWidth);
+  svgOverrideCache.set(overrideKey, overridden);
+  return overridden;
 };
 
 export function TileAsset({
@@ -203,7 +318,25 @@ export function TileAsset({
       return;
     }
     let cancelled = false;
+    const overrideKey = uri
+      ? `${uri}|${strokeColor ?? ''}|${strokeWidth ?? ''}`
+      : null;
+    if (overrideKey) {
+      const cachedOverride = svgOverrideCache.get(overrideKey);
+      if (cachedOverride) {
+        setSvgXml((prev) => (prev === cachedOverride ? prev : cachedOverride));
+        setSvgXmlWithOverrides((prev) =>
+          prev === cachedOverride ? prev : cachedOverride
+        );
+        overrideRef.current = cachedOverride;
+        setSvgUri((prev) => (prev === uri ? prev : uri));
+        return () => {
+          cancelled = true;
+        };
+      }
+    }
     const resolveSvg = async () => {
+      const start = Date.now();
       if (uri) {
         if (!cancelled) {
           setSvgUri((prev) => (prev === uri ? prev : uri));
@@ -211,6 +344,7 @@ export function TileAsset({
             const cached = svgXmlCache.get(uri);
             if (cached) {
               setSvgXml((prev) => (prev === cached ? prev : cached));
+              console.log('[perf:svg-load]', { uri, ms: Date.now() - start, cache: true });
               return;
             }
             const parts = uri.split(',');
@@ -233,14 +367,16 @@ export function TileAsset({
               }
             }
             if (!cancelled && xml) {
-              svgXmlCache.set(uri, xml);
+              cacheSvgXml(uri, xml);
               setSvgXml((prev) => (prev === xml ? prev : xml));
+              console.log('[perf:svg-load]', { uri, ms: Date.now() - start, cache: false });
               return;
             }
           }
           const cached = svgXmlCache.get(uri);
           if (cached) {
             setSvgXml((prev) => (prev === cached ? prev : cached));
+            console.log('[perf:svg-load]', { uri, ms: Date.now() - start, cache: true });
             return;
           }
           if (Platform.OS === 'web') {
@@ -248,8 +384,9 @@ export function TileAsset({
               const response = await fetch(uri);
               const xml = await response.text();
               if (!cancelled) {
-                svgXmlCache.set(uri, xml);
+                cacheSvgXml(uri, xml);
                 setSvgXml((prev) => (prev === xml ? prev : xml));
+                console.log('[perf:svg-load]', { uri, ms: Date.now() - start, cache: false });
               }
             } catch {
               // ignore, fall back to uri rendering
@@ -258,8 +395,9 @@ export function TileAsset({
             try {
               const xml = await FileSystem.readAsStringAsync(uri);
               if (!cancelled) {
-                svgXmlCache.set(uri, xml);
+                cacheSvgXml(uri, xml);
                 setSvgXml((prev) => (prev === xml ? prev : xml));
+                console.log('[perf:svg-load]', { uri, ms: Date.now() - start, cache: false });
               }
             } catch {
               if (typeof source === 'number') {
@@ -275,12 +413,22 @@ export function TileAsset({
                       setSvgXml((prev) =>
                         prev === cachedResolved ? prev : cachedResolved
                       );
+                      console.log('[perf:svg-load]', {
+                        uri: resolved,
+                        ms: Date.now() - start,
+                        cache: true,
+                      });
                       return;
                     }
                     const xml = await FileSystem.readAsStringAsync(resolved);
                     if (!cancelled) {
-                      svgXmlCache.set(resolved, xml);
+                      cacheSvgXml(resolved, xml, uri);
                       setSvgXml((prev) => (prev === xml ? prev : xml));
+                      console.log('[perf:svg-load]', {
+                        uri: resolved,
+                        ms: Date.now() - start,
+                        cache: false,
+                      });
                     }
                   }
                 } catch {
@@ -309,13 +457,23 @@ export function TileAsset({
                   setSvgXml((prev) =>
                     prev === cachedResolved ? prev : cachedResolved
                   );
+                  console.log('[perf:svg-load]', {
+                    uri: resolved,
+                    ms: Date.now() - start,
+                    cache: true,
+                  });
                   return;
                 }
                 const response = await fetch(resolved);
                 const xml = await response.text();
                 if (!cancelled) {
-                  svgXmlCache.set(resolved, xml);
+                  cacheSvgXml(resolved, xml, uri);
                   setSvgXml((prev) => (prev === xml ? prev : xml));
+                  console.log('[perf:svg-load]', {
+                    uri: resolved,
+                    ms: Date.now() - start,
+                    cache: false,
+                  });
                 }
               } catch {
                 // ignore, fall back to uri rendering
@@ -327,12 +485,22 @@ export function TileAsset({
                   setSvgXml((prev) =>
                     prev === cachedResolved ? prev : cachedResolved
                   );
+                  console.log('[perf:svg-load]', {
+                    uri: resolved,
+                    ms: Date.now() - start,
+                    cache: true,
+                  });
                   return;
                 }
                 const xml = await FileSystem.readAsStringAsync(resolved);
                 if (!cancelled) {
                   svgXmlCache.set(resolved, xml);
                   setSvgXml((prev) => (prev === xml ? prev : xml));
+                  console.log('[perf:svg-load]', {
+                    uri: resolved,
+                    ms: Date.now() - start,
+                    cache: false,
+                  });
                 }
               } catch {
                 // ignore, fall back to uri rendering
@@ -362,6 +530,15 @@ export function TileAsset({
       setSvgXmlWithOverrides(next);
     }
   }, [svgXml, strokeColor, strokeWidth]);
+  useEffect(() => {
+    if (!svgXml || !uri) {
+      return;
+    }
+    const key = `${uri}|${strokeColor ?? ''}|${strokeWidth ?? ''}`;
+    if (svgXmlWithOverrides && !svgOverrideCache.has(key)) {
+      svgOverrideCache.set(key, svgXmlWithOverrides);
+    }
+  }, [svgXml, svgXmlWithOverrides, uri, strokeColor, strokeWidth]);
 
   useEffect(() => {
     if (!isSvg || !onLoad || !svgUri || loadCalledRef.current) {
