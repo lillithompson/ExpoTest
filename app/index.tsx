@@ -776,6 +776,16 @@ export default function TestScreen() {
           );
         });
       }
+      if (file.tiles.length > 0) {
+        const legacyCategories = normalizeCategories(
+          file.categories && file.categories.length > 0
+            ? file.categories
+            : file.category
+              ? [file.category]
+              : []
+        );
+        return getSourcesForSelection(legacyCategories, []);
+      }
       return getSourcesForSelection(selectedCategories, selectedTileSetIds);
     },
     [allSourceLookup, getSourcesForSelection, selectedCategories, selectedTileSetIds]
