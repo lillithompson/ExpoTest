@@ -2896,10 +2896,8 @@ export default function TestScreen() {
             <NavButton
               label="< Modify"
               onPress={() => {
-                void (async () => {
-                  await persistActiveFileNow();
-                  setViewMode('file');
-                })();
+                void persistActiveFileNow();
+                setViewMode('file');
               }}
             />
             <ThemedView style={styles.controls}>
