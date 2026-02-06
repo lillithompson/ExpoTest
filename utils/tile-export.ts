@@ -508,6 +508,22 @@ export const renderTileCanvasToDataUrl = async ({
 
   const uriCache = new Map<string, HTMLImageElement>();
   const svgCache = new Map<string, string>();
+  const decodeDataSvg = (uri: string) => {
+    const commaIndex = uri.indexOf(',');
+    if (commaIndex < 0) {
+      return null;
+    }
+    const meta = uri.slice(0, commaIndex).toLowerCase();
+    const data = uri.slice(commaIndex + 1);
+    try {
+      if (meta.includes(';base64')) {
+        return atob(data);
+      }
+      return decodeURIComponent(data);
+    } catch {
+      return null;
+    }
+  };
   const getImage = async (
     source: unknown,
     overrides?: { strokeColor?: string; strokeWidth?: number }
@@ -523,11 +539,39 @@ export const renderTileCanvasToDataUrl = async ({
     if (cached) {
       return cached;
     }
+    if (uri.startsWith('data:')) {
+      const lower = uri.toLowerCase();
+      if (!lower.includes('image/svg+xml')) {
+        const img = await loadImage(uri);
+        uriCache.set(cacheKey, img);
+        return img;
+      }
+      const rawSvg = decodeDataSvg(uri);
+      if (!rawSvg) {
+        return null;
+      }
+      let nextXml = stripOuterBorder(rawSvg);
+      if (overrides) {
+        nextXml = applySvgOverrides(nextXml, overrides.strokeColor, overrides.strokeWidth);
+      }
+      const blob = new Blob([nextXml], { type: 'image/svg+xml' });
+      const blobUrl = URL.createObjectURL(blob);
+      const img = await loadImage(blobUrl);
+      URL.revokeObjectURL(blobUrl);
+      uriCache.set(cacheKey, img);
+      return img;
+    }
     if (uri.toLowerCase().includes('.svg')) {
       let xml = svgCache.get(uri);
       if (!xml) {
-        const response = await fetch(uri);
-        xml = await response.text();
+        try {
+          const response = await fetch(uri);
+          xml = await response.text();
+        } catch {
+          const img = await loadImage(uri);
+          uriCache.set(cacheKey, img);
+          return img;
+        }
         svgCache.set(uri, xml);
       }
       let nextXml = stripOuterBorder(xml);
