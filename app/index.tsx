@@ -1341,12 +1341,6 @@ export default function TestScreen() {
         lineColor: file.lineColor,
       });
     }
-    const same =
-      resolvedCategories.length === selectedCategories.length &&
-      resolvedCategories.every((value, index) => value === selectedCategories[index]);
-    if (!same) {
-      setSelectedCategories(resolvedCategories);
-    }
     const nextToken = loadTokenRef.current + 1;
     loadTokenRef.current = nextToken;
     setLoadToken(nextToken);
@@ -1459,7 +1453,7 @@ export default function TestScreen() {
     }
     let cancelled = false;
     setIsPrefetchingTiles(true);
-    const sources = [ERROR_TILE, ...tileSources.map((tile) => tile.source)];
+    const sources = [ERROR_TILE, ...paletteSources.map((tile) => tile.source)];
     void (async () => {
       try {
         await prefetchTileAssets(sources);
@@ -1472,15 +1466,25 @@ export default function TestScreen() {
     return () => {
       cancelled = true;
     };
-  }, [
-    viewMode,
-    activeFileId,
-    tileSources,
-    loadPreviewUri,
-    isHydratingFile,
-    loadedToken,
-    loadToken,
-  ]);
+  }, [viewMode, activeFileId, paletteSources]);
+
+  useEffect(() => {
+    if (viewMode !== 'modify' || !activeFile) {
+      return;
+    }
+    let cancelled = false;
+    const sources = [ERROR_TILE, ...tileSources.map((tile) => tile.source)];
+    const timeout = setTimeout(() => {
+      if (cancelled) {
+        return;
+      }
+      void prefetchTileAssets(sources);
+    }, 50);
+    return () => {
+      cancelled = true;
+      clearTimeout(timeout);
+    };
+  }, [viewMode, activeFileId, tileSources]);
 
   useEffect(() => {
     const pending = pendingRestoreRef.current;
@@ -2250,27 +2254,27 @@ export default function TestScreen() {
     }
   };
 
-  if (viewMode === 'file') {
-    const fileCardWidth = isWeb
-      ? 200
-      : Math.floor(
-          (contentWidth -
-            FILE_GRID_SIDE_PADDING * 2 -
-            FILE_GRID_GAP * (FILE_GRID_COLUMNS_MOBILE - 1)) /
-            FILE_GRID_COLUMNS_MOBILE
-        );
-    return (
-      <ThemedView
-        style={[
-          styles.screen,
-          {
-            paddingTop: insets.top,
-            paddingBottom: 0,
-            paddingLeft: 0,
-            paddingRight: 0,
-          },
-        ]}
-      >
+  const fileCardWidth = isWeb
+    ? 200
+    : Math.floor(
+        (contentWidth -
+          FILE_GRID_SIDE_PADDING * 2 -
+          FILE_GRID_GAP * (FILE_GRID_COLUMNS_MOBILE - 1)) /
+          FILE_GRID_COLUMNS_MOBILE
+      );
+  const fileView = (
+    <ThemedView
+      style={[
+        styles.screen,
+        {
+          paddingTop: insets.top,
+          paddingBottom: 0,
+          paddingLeft: 0,
+          paddingRight: 0,
+          display: viewMode === 'file' ? 'flex' : 'none',
+        },
+      ]}
+    >
         {insets.top > 0 && (
           <View
             pointerEvents="none"
@@ -2863,11 +2867,10 @@ export default function TestScreen() {
             </ScrollView>
           </ThemedView>
         )}
-      </ThemedView>
-    );
-  }
+    </ThemedView>
+  );
 
-  return (
+  const modifyView = (
     <ThemedView
       style={[
         styles.screen,
@@ -2876,6 +2879,7 @@ export default function TestScreen() {
           paddingBottom: 0,
           paddingLeft: 0,
           paddingRight: 0,
+          display: viewMode === 'file' ? 'none' : 'flex',
         },
       ]}
     >
@@ -4029,6 +4033,13 @@ export default function TestScreen() {
         )}
       </ThemedView>
     </ThemedView>
+  );
+
+  return (
+    <>
+      {fileView}
+      {modifyView}
+    </>
   );
 }
 
