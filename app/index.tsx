@@ -688,10 +688,14 @@ export default function TestScreen() {
     return map;
   }, [bakedSourcesBySetId]);
   const tileSources = useMemo(() => {
-    if (fileSourceNames.length === 0) {
+    const stored =
+      activeFile && Array.isArray(activeFile.sourceNames) && activeFile.sourceNames.length > 0
+        ? activeFile.sourceNames
+        : fileSourceNames;
+    if (stored.length === 0) {
       return paletteSources;
     }
-    return fileSourceNames.map((name) => {
+    return stored.map((name) => {
       const resolved = allSourceLookup.get(name);
       return (
         resolved ?? {
@@ -700,7 +704,7 @@ export default function TestScreen() {
         }
       );
     });
-  }, [fileSourceNames, paletteSources, allSourceLookup]);
+  }, [activeFile, fileSourceNames, paletteSources, allSourceLookup]);
   const paletteIndexToFileIndex = useMemo(() => {
     const indexByName = new Map<string, number>();
     fileSourceNames.forEach((name, index) => {
@@ -784,7 +788,8 @@ export default function TestScreen() {
               ? [file.category]
               : []
         );
-        return getSourcesForSelection(legacyCategories, []);
+        const legacyTileSetIds = Array.isArray(file.tileSetIds) ? file.tileSetIds : [];
+        return getSourcesForSelection(legacyCategories, legacyTileSetIds);
       }
       return getSourcesForSelection(selectedCategories, selectedTileSetIds);
     },
@@ -969,6 +974,7 @@ export default function TestScreen() {
   const filesRef = useRef(files);
   const activeFileRef = useRef<TileFile | null>(activeFile ?? null);
   const debugHydrationRef = useRef(0);
+  const fileSourcesReadyRef = useRef(false);
 
   useEffect(() => {
     filesRef.current = files;
@@ -1166,8 +1172,10 @@ export default function TestScreen() {
   useEffect(() => {
     if (!activeFile || !activeFileId) {
       setFileSourceNames([]);
+      fileSourcesReadyRef.current = false;
       return;
     }
+    fileSourcesReadyRef.current = false;
     console.log(
       '[fileSources:init]',
       JSON.stringify({
@@ -1184,6 +1192,7 @@ export default function TestScreen() {
         : [];
     if (stored.length > 0) {
       setFileSourceNames(stored);
+      fileSourcesReadyRef.current = true;
       return;
     }
     if (
@@ -1202,6 +1211,7 @@ export default function TestScreen() {
     if (initialSources.length === 0) {
       console.log('[fileSources:empty]', JSON.stringify({ activeFileId }));
       setFileSourceNames([]);
+      fileSourcesReadyRef.current = true;
       return;
     }
     setFileSourceNames(initialSources);
@@ -1219,6 +1229,7 @@ export default function TestScreen() {
       thumbnailUri: activeFile.thumbnailUri,
       previewUri: activeFile.previewUri,
     });
+    fileSourcesReadyRef.current = true;
   }, [activeFileId, activeFile, getSourcesForFile, upsertActiveFile]);
 
   useEffect(() => {
@@ -1226,6 +1237,9 @@ export default function TestScreen() {
       return;
     }
     if (isHydratingFile || pendingRestoreRef.current) {
+      return;
+    }
+    if (!fileSourcesReadyRef.current) {
       return;
     }
     const nextNames = ensureFileSourceNames(paletteSources);
@@ -1572,6 +1586,13 @@ export default function TestScreen() {
                 maxDimension: 192,
               })
             : undefined;
+        const resolvedSourceNames =
+          fileSourceNames.length > 0
+            ? fileSourceNames
+            : tileSources.map((source) => source.name);
+        if (fileSourceNames.length === 0 && resolvedSourceNames.length > 0) {
+          setFileSourceNames(resolvedSourceNames);
+        }
         upsertActiveFile({
           tiles,
           gridLayout,
@@ -1579,6 +1600,7 @@ export default function TestScreen() {
           categories: activeCategories,
           preferredTileSize: fileTileSize,
           thumbnailUri,
+          sourceNames: resolvedSourceNames,
         });
       })();
     }, 150);
@@ -1593,6 +1615,8 @@ export default function TestScreen() {
     primaryCategory,
     activeCategories,
     fileTileSize,
+    fileSourceNames,
+    tileSources,
     activeLineColor,
     activeLineWidth,
     ready,
@@ -1989,7 +2013,14 @@ export default function TestScreen() {
         preferredTileSize: fileTileSize,
         thumbnailUri,
         previewUri,
+        sourceNames:
+          fileSourceNames.length > 0
+            ? fileSourceNames
+            : tileSources.map((source) => source.name),
       });
+      if (fileSourceNames.length === 0 && tileSources.length > 0) {
+        setFileSourceNames(tileSources.map((source) => source.name));
+      }
       return;
     }
     const previewUri = await renderTileCanvasToDataUrl({
@@ -2026,7 +2057,14 @@ export default function TestScreen() {
       preferredTileSize: fileTileSize,
       thumbnailUri,
       previewUri,
+      sourceNames:
+        fileSourceNames.length > 0
+          ? fileSourceNames
+          : tileSources.map((source) => source.name),
     });
+    if (fileSourceNames.length === 0 && tileSources.length > 0) {
+      setFileSourceNames(tileSources.map((source) => source.name));
+    }
   };
 
   useEffect(() => {
@@ -2707,10 +2745,16 @@ export default function TestScreen() {
                   <Pressable
                     key={`new-file-size-${size}`}
                     onPress={() => {
+                      const initialSources = getSourcesForSelection(
+                        activeCategories,
+                        appliedTileSetIds
+                      ).map((source) => source.name);
                       createFile(DEFAULT_CATEGORY, size, {
                         lineWidth: activeLineWidth,
                         lineColor: activeLineColor,
+                        sourceNames: initialSources,
                       });
+                      setFileSourceNames(initialSources);
                       setLoadRequestId((prev) => prev + 1);
                       setLoadPreviewUri(null);
                       setShowGrid(false);
