@@ -1,115 +1,133 @@
 # App State Overview
 
-This document captures the current structure, views, controls, and behaviors in the app so we can verify understanding and update high‑level instructions later.
+This document is the single source of truth for reconstructing the app from scratch. It describes routes, screens, modals, UI rules, and the behavior and data flow of the tile system.
 
-## Views
+**Structure**
 
-### File View (root)
-- **Header (fixed, non-scrolling)**  
-  - **Title:** `File` (left-aligned).  
-  - **Actions (right-aligned):**
-    - **+**: Opens the New File modal (tile size picker).  
-    - **Gear**: Opens the Settings modal (global settings).
-- **File Grid (scrolling)**  
-  - Displays saved tile canvas files as thumbnails.  
-  - Thumbnails maintain the canvas aspect ratio based on the file’s grid rows/columns.  
-  - Tapping a thumbnail opens that file in Modify view.  
-  - Long-pressing a thumbnail opens the File Options modal (Duplicate/Delete/Download).
-- **Background:** dark gray, matching the Modify view.
+Main Routes
+- `/` (app/index.tsx): File and Modify modes in one screen, controlled by `viewMode`.
+- `/tileSetCreator` (app/tileSetCreator/index.tsx): Tile Set list and management.
+- `/tileSetCreator/editor` (app/tileSetCreator/editor.tsx): Tile Set details and tile list.
+- `/tileSetCreator/modifyTile` (app/tileSetCreator/modifyTile.tsx): Tile editor for a single tile template.
+- `/modal` (app/modal.tsx): Example modal route, not used by core flows.
 
-### Modify View
-- **Header / Toolbar Row (fixed)**  
-  - **Left:** `< Modify` button returns to File view (and persists the current file first).  
-  - **Right:** Tool actions (icon buttons):
-    - **Tile Set** (grid icon): opens Tile Set chooser overlay.
-    - **Reset** (refresh icon): clears all tiles on the canvas.
-    - **Flood Complete** (fill icon): fills empty tiles based on current brush (random or fixed), respecting mirrors.
-    - **Mirror Horizontal** (flip-horizontal icon): toggles horizontal mirroring.
-    - **Mirror Vertical** (flip-vertical icon): toggles vertical mirroring.
-- **Tile Canvas**  
-  - Displays the tile grid for the active file.  
-  - Grid layout uses square tiles and a 0px gap.  
-  - Rows/columns are computed to fit the available canvas area given the file's tile size, then stored with the file.  
-  - When loading a file, the stored rows/columns and tile size define the grid; tiles are normalized to that cell count.  
-  - Supports touch/drag painting and mouse painting.  
-  - Shows optional mirror guide lines when mirror toggles are enabled.  
-  - Shows clone overlays when Clone tool is active (blue and red outlines).
-- **Tile Palette (bottom)**  
-  - Two-row grid of tile buttons sized to fill the palette height.  
-  - Long-press a tile to rotate it (90° steps).  
-  - Double-tap a tile to mirror it horizontally.  
-  - Selecting a tile makes it the “fixed” brush with that rotation/mirror.
+File View (viewMode = "file")
+- Status bar background strip at the top (white).
+- Header row: Title "File" (press navigates to Tile Set Creator), actions on the right.
+- Header actions: New File (plus), Select Mode (checkbox), Settings (cog).
+- Select mode bar: Animated bar with Delete button (left), selected count (center), Exit (right).
+- File grid: Scrollable list of file cards, sorted by `updatedAt` descending. Cards show previews (thumbnail/preview if available, otherwise live tile grid on native; web uses placeholder).
+- File card interactions: Tap opens Modify view; long press opens File Options menu.
+- File Options menu: Download (web direct or native overlay), Download SVG (web only), Duplicate, Delete.
+- New File modal: Tile size selection grid of [25, 50, 75, 100, 150, 200].
+- Settings overlay (file view): Allow Border Connections toggle, Show Debug toggle, background color picker, background line color picker, background line width slider.
 
-## Modals and Overlays
+Modify View (viewMode = "modify")
+- Status bar background strip at the top (white).
+- Header row: Back button "< Modify" (saves then returns to File view) and toolbar actions.
+- Toolbar actions: Reset, Flood (tap) / Flood Complete (long press), Reconcile (tap) / Controlled Randomize (long press), Mirror Horizontal toggle, Mirror Vertical toggle.
+- Canvas frame: Grid background, optional mirror guide lines, optional preview image during hydration.
+- Tile grid: Renders all cells with TileAsset and overlays. Uses touch responders on native and mouse handlers on web.
+- Pattern creation overlays: Top and bottom overlays shown while in pattern creation mode.
+- Brush panel: Scrollable two or three row tile palette plus Random, Clone, Erase, and Pattern buttons.
+- Pattern chooser modal: Lists patterns for the active category with actions for create and select mode.
+- Pattern save modal: Preview of the selection with Save/Cancel.
+- Tile Set chooser overlay: Select built-in categories and user tile sets to define the active palette.
+- Settings overlay (modify view): Allow Border Connections toggle, Download PNG action, Show Debug toggle, background color and line controls.
+- Download overlay (native): ViewShot capture with background toggle and PNG/SVG actions.
 
-### Tile Set Chooser (Modify view)
-- List of tile categories.
-- Selecting a category updates the active file’s tile set (file-level).
-- The selected tile set is stored with the file.
+Tile Set Creator List (tileSetCreator/index.tsx)
+- Header row: Title "Tile Sets" (tap returns to File view), actions for Create and Select Mode.
+- Select mode bar: Animated bar with Delete, selected count, Exit.
+- Tile set grid: Cards with 2x2 previews (baked or live). Long press (web only) opens download modal.
+- Create Tile Set modal: Name input and resolution options 2, 3, 4.
+- Download Tile Set modal (web only): Downloads all tiles in the set as a ZIP of SVGs.
 
-### Settings (File view)
-- **Aspect Ratio:** iPhone 15, iPad Pro, or Web.  
-  - Only impacts web layout framing.  
-- **AllowEdgeConections:** toggle (On/Off).  
-  - When Off, edges behave as if surrounded by empty tiles (no connections).  
-- **Show Debug:** toggle.  
-  - Displays the debug overlay for tile connection visualization.
-- Settings are persisted locally across app launches.
+Tile Set Editor (tileSetCreator/editor.tsx)
+- Header row: Back, tile set name, actions for Add Tile, Select Mode, and Settings.
+- Select mode bar: Animated bar with Delete, selected count, Exit.
+- Tile grid: Cards with thumbnails or live previews.
+- Context menu (web only): Duplicate, Download SVG, Delete, Cancel.
+- Settings overlay: Rename tile set.
 
-### New File Modal (from File view “+”)
-- A 2×3 grid of tile size buttons: **25, 50, 75, 100, 150, 200**.  
-- Tapping a size creates a new file, closes the modal, and opens Modify view.  
-- Tile size is locked to the file once created.
+Tile Modify View (tileSetCreator/modifyTile.tsx)
+- Header row and toolbar actions similar to Modify View.
+- Grid background and optional debug overlay.
+- Brush panel identical to Modify View for editing the tile template.
 
-### File Options Modal (long-press a thumbnail)
-- **Duplicate:** creates a copy and makes it active.  
-- **Delete:** removes the file; if it was the last file, the list becomes empty.  
-- **Download:** exports a baked PNG of the canvas.
+Core Behaviors and Tool Rules
+- Tile connectivity is driven by `tile_########.png/svg` naming (see AI_ASSET_RULES). Connections are used to validate random placements and compatibility.
+- Allow Border Connections: When off, edges behave as if neighbors are empty and connections cannot extend past the grid.
+- Random brush tap: Attempts to place a compatible tile at the tapped cell. If no legal placement is found and legal placement is required, the tap does nothing. Otherwise an error tile is placed.
+- Random brush double tap: Opens the Tile Set chooser.
+- Random brush long press: Opens the Tile Set chooser.
+- Fixed brush tap: Places the selected tile with current rotation/mirror and mirrors to linked cells when mirror toggles are enabled.
+- Fixed brush double tap (palette): Cycles rotation three times, then mirror X, then mirror Y.
+- Fixed brush long press (palette): Opens Favorites dialog to add/remove the tile with a color tag.
+- Erase brush: Tap clears a tile. Flood clears all tiles.
+- Clone brush: First tap sets clone source. Drag paints clones relative to the anchor cell. Long press on canvas resets clone source to the pressed cell. Clone wraps around grid edges.
+- Pattern brush: Uses a pattern anchor cell to map pattern tiles by offset. Pattern mirrors can be toggled in the pattern picker. Pattern rotation is 90-degree increments. Pattern brush long press/double tap opens the pattern picker.
+- Pattern creation: Drag-select in the grid to define a pattern. Save dialog prompts to store it in category storage.
+- Flood (tap): Fills all cells based on brush mode (random, fixed, pattern, erase). Respects mirror toggles.
+- Flood Complete (long press): Fills only empty cells. When mirrors are enabled, it treats mirrors as a unit and expands driven indices if any mirrored target is filled.
+- Reconcile (tap): Iteratively replaces invalid tiles with compatible candidates to reduce invalid connections.
+- Controlled Randomize (long press): Replaces tiles with connection-compatible equivalents based on their current connection signature.
 
-### Download Overlay (iOS)
-- Full-screen transparent black overlay with a preview of the canvas.
-- Action bar with **Download** and **Cancel**.
-- Download uses a baked PNG captured from a hidden render surface.
+**UI**
 
-## Tools / Brush Modes
+Visual Rules
+- Backgrounds: Main screen background is dark gray (#3f3f3f). File and Tile Set list headers are near-black (#202125). Tile Set editor uses a light header (#E2E3E9).
+- Panels and overlays: Modal panels are white with dark borders (#1f1f1f). Backdrops are translucent black (rgba(0,0,0,0.7)).
+- Highlights: Selection and active states use green (#22c55e). Destructive actions use red (#dc2626).
+- Grid visuals: Grid background and line colors are configurable. Line width is configurable. Mirror guides appear as thin lines over the grid.
+- Typography: Uses ThemedText variants for title, default, and semi-bold text. All main labels are uppercase or title case, not icon-only.
+- Icons: MaterialCommunityIcons for toolbar and header actions.
+- Cards and thumbnails: Dark frames with borders; selection adds a green border and thicker stroke.
 
-### Random (default)
-- Single-tap paints a compatible random tile.
-- Flood Complete fills empty tiles randomly, respecting mirror settings.
+Layout Rules
+- Headers are fixed height (50). Tool buttons are square (40). Brush panel height is 160 with 1px row gaps.
+- File grids are 3 columns on mobile with side padding (12) and gaps (12).
+- Tile palette can be 2 or 3 rows on iOS depending on available height.
 
-### Fixed (tile palette selection)
-- Places the selected tile with its chosen rotation/mirror.
-- Flood Complete fills empty tiles with that fixed tile, respecting mirrors.
+**Infrastructure**
 
-### Erase
-- Tap removes a tile (sets it to blank).
+Persistence and Storage
+- Files stored in AsyncStorage key `tile-files-v1` and active file id in `tile-files-active-v1`.
+- Settings stored in AsyncStorage key `tile-settings-v1` (mirror toggles, border rules, background colors, line width, tile set selections).
+- Patterns stored in AsyncStorage key `tile-patterns-v1`.
+- Tile sets stored in AsyncStorage key `tile-sets-v1`; baked tile sources cached in `tile-sets-bakes-v1`.
+- Brush favorites stored in AsyncStorage key `tile-brush-favorites-v1`.
 
-### Clone
-- **Activation:** first tap after switching to Clone sets the clone source.  
-  - Clone source highlight: **blue outline**.  
-  - Clone sample (current source used) highlight: **blue outline at 30% opacity**.  
-  - Clone target origin highlight: **red outline**.  
-  - Clone cursor highlight: **red outline at 30% opacity**.  
-- **Long-press (while in Clone):** changes the clone source without leaving the tool.  
-- Clone wraps around the grid horizontally and vertically.
+File Data Model
+- Each file stores: id, name, tiles array, grid rows/columns, category and categories, tileSetIds, sourceNames, preferredTileSize, lineWidth, lineColor, thumbnailUri, previewUri, updatedAt.
+- Tile placement uses `imageIndex`, `rotation`, `mirrorX`, `mirrorY`. Empty tiles are `imageIndex = -1`; error tiles are `imageIndex = -2`.
 
-## Persistence and Data Rules
+Autosave and Preview Pipeline
+- Autosave is debounced (150ms). Web preview capture is additionally delayed (800ms).
+- On native, saving uses ViewShot capture and writes PNGs to cache `tile-previews/` for full preview and thumbnail.
+- On web, previews and thumbnails are generated via `renderTileCanvasToDataUrl`.
+- Leaving Modify view triggers a full save via `persistActiveFileNow`.
 
-- **Files are auto-saved** on every action. There is no manual save.  
-- **Each file stores its own:**
-  - tile grid contents
-  - grid size (rows/columns)
-  - tile set category
-  - tile size (locked once created)
-  - thumbnail (baked PNG)
-- **Tile set is file-level only** (no global tile set setting).  
-- **Settings are global** and persisted across app launches (aspect ratio, edge connections, debug, mirror toggles).  
-- Thumbnails are baked PNGs, not live renders.
+Hydration and Rendering
+- File changes run through a hydrate pipeline that suspends rendering and uses `loadToken`/`loadedToken` gating.
+- During hydration, preview images are shown and grid rendering is hidden until tiles are applied.
 
-## Navigation Summary
+Tile Source Mapping
+- Active palette sources are built from selected categories plus baked user tile sets.
+- Each file stores `sourceNames` so tile indices remain stable even if available sources change.
+- If a file has no `sourceNames`, it is seeded from the current selection and stored back into the file.
+- When palette sources expand, `sourceNames` are extended and persisted.
 
-- App opens in **File** view by default.  
-- `File` view → tap a thumbnail → `Modify` view.  
-- `Modify` view → `< Modify` → `File` view.  
-- `+` in File header opens New File modal.  
-- Gear in File header opens Settings modal.
+Tile Set Baking and Caching
+- Tile sets are baked into SVGs. Web stores data URIs; native writes files under `documentDirectory/tile-sets/<setId>/`.
+- Bake signatures and per-tile signatures prevent redundant work. A memory cache stores SVG XML for reuse during baking.
+
+SVG Loading and Caching (TileAsset)
+- SVG XML is cached in-memory (`svgXmlCache`) by URI. SVG overrides are cached in `svgOverrideCache`.
+- SVGs are loaded via `FileSystem.readAsStringAsync` on native and `fetch` on web.
+- `prefetchTileAssets` warms the cache for palette and file sources during Modify view.
+
+Performance and Interaction
+- Touch and mouse inputs track interaction start/end for perf logging.
+- Clone and pattern tools use anchors and wrap-around indexing for consistent offsets.
+- Mirroring is applied by deriving driven cells and mapping to mirrored targets.

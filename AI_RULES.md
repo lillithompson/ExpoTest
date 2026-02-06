@@ -9,3 +9,6 @@
 - Functional components only
 - Prefer hooks
 - Separate UI from logic
+
+## App State
+- After every change, update `APP_STATE.md` to keep it in sync with the codebase
