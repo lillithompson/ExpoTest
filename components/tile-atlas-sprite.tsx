@@ -25,7 +25,8 @@ export function TileAtlasSprite({
   onLoad,
 }: Props) {
   const entry = atlas?.entries.get(name);
-  if (Platform.OS === 'web' && atlas && entry) {
+  const wantsStroke = Boolean(strokeColor) || strokeWidth !== undefined;
+  if (Platform.OS === 'web' && atlas && entry && !wantsStroke) {
     const backgroundStyle = {
       backgroundImage: `url(${atlas.uri})`,
       backgroundPosition: `-${entry.x}px -${entry.y}px`,
