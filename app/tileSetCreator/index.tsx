@@ -55,7 +55,6 @@ export default function TileSetCreatorScreen() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const selectBarAnim = useRef(new Animated.Value(0)).current;
   const [showCreateModal, setShowCreateModal] = useState(false);
-  const [newCategories, setNewCategories] = useState<TileCategory[]>([DEFAULT_CATEGORY]);
   const [newResolution, setNewResolution] = useState(2);
   const [newName, setNewName] = useState('4x4 (New)');
   const [downloadSetId, setDownloadSetId] = useState<string | null>(null);
@@ -241,7 +240,6 @@ export default function TileSetCreatorScreen() {
   const openCreateModal = () => {
     const defaultResolution = 2;
     setNewName(`${defaultResolution}x${defaultResolution} (New)`);
-    setNewCategories([DEFAULT_CATEGORY]);
     setNewResolution(defaultResolution);
     setShowCreateModal(true);
   };
@@ -486,34 +484,6 @@ export default function TileSetCreatorScreen() {
                 returnKeyType="done"
               />
             </ThemedView>
-            <ThemedText type="defaultSemiBold">Tile Set</ThemedText>
-            <ThemedView style={styles.overlayList}>
-              {TILE_CATEGORIES.map((category) => (
-                <Pressable
-                  key={category}
-                  onPress={() =>
-                    setNewCategories((prev) => {
-                      const next = new Set(prev);
-                      if (next.has(category)) {
-                        next.delete(category);
-                      } else {
-                        next.add(category);
-                      }
-                      if (next.size === 0) {
-                        next.add(DEFAULT_CATEGORY);
-                      }
-                      return Array.from(next);
-                    })
-                  }
-                  style={[
-                    styles.overlayItem,
-                    newCategories.includes(category) && styles.overlayItemSelected,
-                  ]}
-                >
-                  <ThemedText type="defaultSemiBold">{category}</ThemedText>
-                </Pressable>
-              ))}
-            </ThemedView>
             <ThemedText type="defaultSemiBold">Resolution</ThemedText>
             <ThemedView style={styles.inlineOptions}>
               {[2, 3, 4].map((value) => (
@@ -558,16 +528,9 @@ export default function TileSetCreatorScreen() {
                     name:
                       newName.trim() ||
                       `${newResolution}x${newResolution} (New)`,
-                    category: newCategories[0] ?? DEFAULT_CATEGORY,
+                    category: DEFAULT_CATEGORY,
                     resolution: newResolution,
                   });
-                  if (newCategories.length > 1) {
-                    updateTileSet(id, (set) => ({
-                      ...set,
-                      categories: newCategories,
-                      updatedAt: Date.now(),
-                    }));
-                  }
                   router.push({
                     pathname: '/tileSetCreator/editor',
                     params: { setId: id },

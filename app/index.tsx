@@ -776,17 +776,9 @@ export default function TestScreen() {
           );
         });
       }
-      const categories = normalizeCategories(
-        file.categories && file.categories.length > 0
-          ? file.categories
-          : file.category
-            ? [file.category]
-            : []
-      );
-      const tileSetIds = Array.isArray(file.tileSetIds) ? file.tileSetIds : [];
-      return getSourcesForSelection(categories, tileSetIds);
+      return getSourcesForSelection(selectedCategories, selectedTileSetIds);
     },
-    [allSourceLookup, getSourcesForSelection]
+    [allSourceLookup, getSourcesForSelection, selectedCategories, selectedTileSetIds]
   );
   const activePatterns = useMemo(
     () => patternsByCategory.get(primaryCategory) ?? [],
@@ -1110,31 +1102,23 @@ export default function TestScreen() {
   }, [isPatternSelectMode, patternSelectAnim]);
 
   useEffect(() => {
-    if (activeFile?.categories && activeFile.categories.length > 0) {
-      const normalized = normalizeCategories(activeFile.categories);
-      const same =
-        normalized.length === selectedCategories.length &&
-        normalized.every((value, index) => value === selectedCategories[index]);
-      if (!same) {
-        setSelectedCategories(normalized);
-      }
-      return;
+    const storedCategories = Array.isArray(settings.tileSetCategories)
+      ? (settings.tileSetCategories as TileCategory[])
+      : [];
+    const normalized =
+      storedCategories.length > 0
+        ? normalizeCategories(storedCategories)
+        : [DEFAULT_CATEGORY];
+    const same =
+      normalized.length === selectedCategories.length &&
+      normalized.every((value, index) => value === selectedCategories[index]);
+    if (!same) {
+      setSelectedCategories(normalized);
     }
-    if (activeFile?.category) {
-      const normalized = normalizeCategories([activeFile.category]);
-      const same =
-        normalized.length === selectedCategories.length &&
-        normalized.every((value, index) => value === selectedCategories[index]);
-      if (!same) {
-        setSelectedCategories(normalized);
-      }
-    }
-  }, [activeFile?.categories, activeFile?.category, selectedCategories]);
+  }, [settings.tileSetCategories, selectedCategories]);
 
   useEffect(() => {
-    const nextIds = Array.isArray(activeFile?.tileSetIds)
-      ? activeFile?.tileSetIds ?? []
-      : [];
+    const nextIds = Array.isArray(settings.tileSetIds) ? settings.tileSetIds : [];
     const same =
       nextIds.length === selectedTileSetIds.length &&
       nextIds.every((value, index) => value === selectedTileSetIds[index]);
@@ -1152,7 +1136,7 @@ export default function TestScreen() {
         return nextIds;
       });
     }
-  }, [activeFile?.tileSetIds, selectedTileSetIds, areTileSetsReady]);
+  }, [settings.tileSetIds, selectedTileSetIds, areTileSetsReady]);
 
   useEffect(() => {
     if (!areTileSetsReady(selectedTileSetIds)) {
@@ -1180,12 +1164,8 @@ export default function TestScreen() {
         activeFileId,
         tiles: activeFile.tiles.length,
         hasSourceNames: Array.isArray(activeFile.sourceNames) && activeFile.sourceNames.length > 0,
-        tileSetIds: Array.isArray(activeFile.tileSetIds)
-          ? activeFile.tileSetIds.length
-          : 0,
-        ready: areTileSetsReady(
-          Array.isArray(activeFile.tileSetIds) ? activeFile.tileSetIds : []
-        ),
+        tileSetIds: selectedTileSetIds.length,
+        ready: areTileSetsReady(selectedTileSetIds),
       })
     );
     const stored =
@@ -1198,14 +1178,13 @@ export default function TestScreen() {
     }
     if (
       activeFile.tiles.length > 0 &&
-      Array.isArray(activeFile.tileSetIds) &&
-      activeFile.tileSetIds.length > 0 &&
-      !areTileSetsReady(activeFile.tileSetIds)
+      selectedTileSetIds.length > 0 &&
+      !areTileSetsReady(selectedTileSetIds)
     ) {
       // Defer initialization until user tile sets are baked to avoid losing mappings.
       console.log(
         '[fileSources:defer]',
-        JSON.stringify({ activeFileId, tileSetIds: activeFile.tileSetIds })
+        JSON.stringify({ activeFileId, tileSetIds: selectedTileSetIds })
       );
       return;
     }
@@ -1223,9 +1202,6 @@ export default function TestScreen() {
     upsertActiveFile({
       tiles: activeFile.tiles,
       gridLayout: activeFile.grid,
-      category: activeFile.category,
-      categories: activeFile.categories,
-      tileSetIds: activeFile.tileSetIds,
       sourceNames: initialSources,
       preferredTileSize: activeFile.preferredTileSize,
       lineWidth: activeFile.lineWidth,
@@ -1255,9 +1231,6 @@ export default function TestScreen() {
     upsertActiveFile({
       tiles: tilesSnapshot,
       gridLayout: gridSnapshot,
-      category: fileSnapshot?.category ?? primaryCategory,
-      categories: fileSnapshot?.categories ?? activeCategories,
-      tileSetIds: fileSnapshot?.tileSetIds ?? selectedTileSetIds,
       sourceNames: nextNames,
       preferredTileSize: fileSnapshot?.preferredTileSize ?? fileTileSize,
       lineWidth: fileSnapshot?.lineWidth ?? activeLineWidth,
@@ -2724,22 +2697,7 @@ export default function TestScreen() {
                   <Pressable
                     key={`new-file-size-${size}`}
                     onPress={() => {
-                      const nextCategories =
-                        selectedCategories.length > 0
-                          ? selectedCategories
-                          : [DEFAULT_CATEGORY];
-                      const nextTileSetIds = selectedTileSetIds;
-                      const nextPaletteSources = getSourcesForSelection(
-                        nextCategories,
-                        nextTileSetIds
-                      );
-                      const nextSourceNames = nextPaletteSources.map(
-                        (source) => source.name
-                      );
-                      createFile(nextCategories[0] ?? DEFAULT_CATEGORY, size, {
-                        categories: nextCategories,
-                        tileSetIds: nextTileSetIds,
-                        sourceNames: nextSourceNames,
+                      createFile(DEFAULT_CATEGORY, size, {
                         lineWidth: activeLineWidth,
                         lineColor: activeLineColor,
                       });
@@ -3915,13 +3873,15 @@ export default function TestScreen() {
                         const nextSourceNames = ensureFileSourceNames(nextPaletteSources);
                         setTileSetSelectionError(null);
                         setSelectedCategories(nextCategories);
+                        setSettings((prev) => ({
+                          ...prev,
+                          tileSetCategories: nextCategories,
+                          tileSetIds: selectedTileSetIds,
+                        }));
                         if (activeFileId) {
                           upsertActiveFile({
                             tiles,
                             gridLayout,
-                            category: nextCategories[0] ?? DEFAULT_CATEGORY,
-                            categories: nextCategories,
-                            tileSetIds: selectedTileSetIds,
                             sourceNames: nextSourceNames,
                             preferredTileSize: fileTileSize,
                             lineWidth: activeLineWidth,
@@ -3974,6 +3934,11 @@ export default function TestScreen() {
                               : [...selectedTileSetIds, set.id];
                             setTileSetSelectionError(null);
                             setSelectedTileSetIds(nextTileSetIds);
+                            setSettings((prev) => ({
+                              ...prev,
+                              tileSetCategories: selectedCategories,
+                              tileSetIds: nextTileSetIds,
+                            }));
                             const nextReady = areTileSetsReady(nextTileSetIds);
                             if (nextReady) {
                               setAppliedTileSetIds(nextTileSetIds);
@@ -3988,9 +3953,6 @@ export default function TestScreen() {
                               upsertActiveFile({
                                 tiles,
                                 gridLayout,
-                                category: selectedCategories[0] ?? DEFAULT_CATEGORY,
-                                categories: selectedCategories,
-                                tileSetIds: nextTileSetIds,
                                 sourceNames: nextSourceNames,
                                 preferredTileSize: fileTileSize,
                                 lineWidth: activeLineWidth,

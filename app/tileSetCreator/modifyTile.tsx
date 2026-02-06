@@ -11,7 +11,11 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { TILE_MANIFEST } from '@/assets/images/tiles/manifest';
+import {
+  TILE_CATEGORIES,
+  TILE_MANIFEST,
+  type TileCategory,
+} from '@/assets/images/tiles/manifest';
 import { TileBrushPanel } from '@/components/tile-brush-panel';
 import { TileDebugOverlay } from '@/components/tile-debug-overlay';
 import { TileAsset } from '@/components/tile-asset';
@@ -293,19 +297,34 @@ export default function ModifyTileScreen() {
   const { settings, setSettings } = usePersistedSettings();
   const { tileSets, updateTileInSet } = useTileSets();
   const { patternsByCategory } = useTilePatterns();
+  const [showTileSetChooser, setShowTileSetChooser] = useState(false);
+  const [tileSetSelectionError, setTileSetSelectionError] = useState<string | null>(
+    null
+  );
 
   const tileSet = tileSets.find((set) => set.id === setId) ?? null;
   const tileEntry = tileSet?.tiles.find((tile) => tile.id === tileId) ?? null;
-  const tileCategories =
-    tileSet && tileSet.categories && tileSet.categories.length > 0
-      ? tileSet.categories
-      : tileSet
-        ? [tileSet.category]
-        : [];
-  const tileSources = tileCategories.flatMap(
-    (category) => TILE_MANIFEST[category] ?? []
+  const normalizeCategories = (value: TileCategory[] | null | undefined) => {
+    if (!value || value.length === 0) {
+      return [TILE_CATEGORIES[0]];
+    }
+    const valid = value.filter((entry) =>
+      (TILE_CATEGORIES as string[]).includes(entry)
+    );
+    return valid.length > 0 ? valid : [TILE_CATEGORIES[0]];
+  };
+  const selectedCategories = normalizeCategories(
+    Array.isArray(settings.tileModifyCategories)
+      ? (settings.tileModifyCategories as TileCategory[])
+      : []
   );
-  const primaryCategory = tileCategories[0] ?? tileSet?.category ?? null;
+  const tileSources = useMemo(() => {
+    const categorySources = selectedCategories.flatMap(
+      (category) => TILE_MANIFEST[category] ?? []
+    );
+    return [...categorySources];
+  }, [selectedCategories]);
+  const primaryCategory = selectedCategories[0] ?? TILE_CATEGORIES[0];
   const activePatterns = primaryCategory
     ? patternsByCategory.get(primaryCategory) ?? []
     : [];
@@ -374,6 +393,12 @@ export default function ModifyTileScreen() {
       : null,
     patternAnchorKey: selectedPattern?.id ?? null,
   });
+
+  useEffect(() => {
+    if (!showTileSetChooser && tileSetSelectionError) {
+      setTileSetSelectionError(null);
+    }
+  }, [showTileSetChooser, tileSetSelectionError]);
 
   const gridWidth =
     gridLayout.columns * gridLayout.tileSize +
@@ -1013,12 +1038,69 @@ export default function ModifyTileScreen() {
           getRotation={(index) => paletteRotations[index] ?? 0}
           getMirror={(index) => paletteMirrors[index] ?? false}
           getMirrorVertical={(index) => paletteMirrorsY[index] ?? false}
+          onRandomLongPress={() => setShowTileSetChooser(true)}
+          onRandomDoubleTap={() => setShowTileSetChooser(true)}
           height={brushPanelHeight}
           itemSize={brushItemSize}
           rowGap={BRUSH_PANEL_ROW_GAP}
           rows={brushRows}
         />
       </View>
+      {showTileSetChooser && (
+        <View style={styles.overlay} accessibilityRole="dialog">
+            <Pressable
+            style={styles.overlayBackdrop}
+            onPress={() => {
+              if (selectedCategories.length === 0) {
+                setTileSetSelectionError('Select at least one tile set.');
+                return;
+              }
+              setShowTileSetChooser(false);
+            }}
+            accessibilityRole="button"
+            accessibilityLabel="Close tile set chooser"
+          />
+          <View style={styles.overlayPanel}>
+            <ThemedText type="title">Tile Sets</ThemedText>
+            <ThemedView style={styles.sectionGroup}>
+              <ThemedText type="defaultSemiBold">Tile Sets</ThemedText>
+              <ThemedView style={styles.overlayList}>
+                {TILE_CATEGORIES.map((category) => (
+                  <Pressable
+                    key={category}
+                    onPress={() => {
+                      const isSelected = selectedCategories.includes(category);
+                      if (isSelected && selectedCategories.length === 1) {
+                        setTileSetSelectionError('Select at least one tile set.');
+                        return;
+                      }
+                      const nextCategories = isSelected
+                        ? selectedCategories.filter((entry) => entry !== category)
+                        : [...selectedCategories, category];
+                      setTileSetSelectionError(null);
+                      setSettings((prev) => ({
+                        ...prev,
+                        tileModifyCategories: nextCategories,
+                      }));
+                    }}
+                    style={[
+                      styles.overlayItem,
+                      selectedCategories.includes(category) && styles.overlayItemSelected,
+                    ]}
+                  >
+                    <ThemedText type="defaultSemiBold">{category}</ThemedText>
+                  </Pressable>
+                ))}
+              </ThemedView>
+              {tileSetSelectionError && (
+                <ThemedText type="defaultSemiBold" style={styles.errorText}>
+                  {tileSetSelectionError}
+                </ThemedText>
+              )}
+            </ThemedView>
+          </View>
+        </View>
+      )}
     </ThemedView>
   );
 }
@@ -1122,6 +1204,50 @@ const styles = StyleSheet.create({
   mirrorLineVertical: {
     position: 'absolute',
     backgroundColor: '#3b82f6',
+  },
+  overlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'transparent',
+  },
+  overlayBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+  },
+  overlayPanel: {
+    width: '85%',
+    maxHeight: '70%',
+    backgroundColor: '#ffffff',
+    borderRadius: 12,
+    padding: 16,
+  },
+  overlayList: {
+    gap: 8,
+    marginTop: 10,
+  },
+  overlayItem: {
+    borderWidth: 1,
+    borderColor: '#1f2937',
+    borderRadius: 6,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+  },
+  overlayItemSelected: {
+    borderColor: '#60a5fa',
+    backgroundColor: 'rgba(96, 165, 250, 0.15)',
+  },
+  sectionGroup: {
+    marginTop: 12,
+  },
+  emptyText: {
+    color: '#9ca3af',
+    marginTop: 8,
+  },
+  errorText: {
+    color: '#fca5a5',
+    marginTop: 8,
   },
   borderConnectionLines: {
     ...StyleSheet.absoluteFillObject,

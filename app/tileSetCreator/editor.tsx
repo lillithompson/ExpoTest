@@ -128,9 +128,6 @@ export default function TileSetEditorScreen() {
   const [showContextMenu, setShowContextMenu] = useState(false);
   const [contextTileId, setContextTileId] = useState<string | null>(null);
   const [nameDraft, setNameDraft] = useState('');
-  const [tileSetCategoryError, setTileSetCategoryError] = useState<string | null>(
-    null
-  );
 
   const contentWidth = Math.max(0, width);
   const calculatedWidth = Math.floor(
@@ -647,45 +644,6 @@ export default function TileSetEditorScreen() {
                 returnKeyType="done"
               />
             </ThemedView>
-            <ThemedView style={styles.sectionGroup}>
-            <ThemedText type="defaultSemiBold">Tile Sets</ThemedText>
-            <ThemedView style={styles.overlayList}>
-              {TILE_CATEGORIES.map((category) => (
-                <Pressable
-                  key={category}
-                  onPress={() => {
-                    const isSelected = activeCategories.includes(category);
-                    if (isSelected && activeCategories.length === 1) {
-                      setTileSetCategoryError('Select at least one tile set.');
-                      return;
-                    }
-                    const nextCategories = isSelected
-                      ? activeCategories.filter((entry) => entry !== category)
-                      : [...activeCategories, category];
-                    setTileSetCategoryError(null);
-                    updateTileSet(tileSet.id, (set) => ({
-                      ...set,
-                      category: nextCategories[0] ?? set.category,
-                      categories: nextCategories,
-                      tiles: remapTileSetTiles(nextCategories, set.tiles),
-                      updatedAt: Date.now(),
-                    }));
-                  }}
-                  style={[
-                    styles.overlayItem,
-                    activeCategories.includes(category) && styles.overlayItemSelected,
-                  ]}
-                >
-                  <ThemedText type="defaultSemiBold">{category}</ThemedText>
-                </Pressable>
-              ))}
-            </ThemedView>
-            {tileSetCategoryError && (
-              <ThemedText type="defaultSemiBold" style={styles.errorText}>
-                {tileSetCategoryError}
-              </ThemedText>
-            )}
-          </ThemedView>
           </ScrollView>
         </ThemedView>
       )}

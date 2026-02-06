@@ -10,6 +10,9 @@ export type AppSettings = {
   backgroundColor: string;
   backgroundLineColor: string;
   backgroundLineWidth: number;
+  tileSetCategories?: string[];
+  tileSetIds?: string[];
+  tileModifyCategories?: string[];
 };
 
 const STORAGE_KEY = 'tile-settings-v1';
@@ -23,6 +26,9 @@ const getDefaultSettings = (): AppSettings => ({
   backgroundColor: '#4b5a6b',
   backgroundLineColor: '#d1d5db',
   backgroundLineWidth: 1,
+  tileSetCategories: [],
+  tileSetIds: [],
+  tileModifyCategories: [],
 });
 
 type SetSettings = (updater: AppSettings | ((prev: AppSettings) => AppSettings)) => void;
