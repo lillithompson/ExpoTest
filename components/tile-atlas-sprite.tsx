@@ -12,6 +12,7 @@ type Props = {
   style?: ImageProps['style'];
   resizeMode?: ImageProps['resizeMode'];
   onLoad?: () => void;
+  preferAtlas?: boolean;
 };
 
 export function TileAtlasSprite({
@@ -23,10 +24,10 @@ export function TileAtlasSprite({
   style,
   resizeMode,
   onLoad,
+  preferAtlas = true,
 }: Props) {
   const entry = atlas?.entries.get(name);
-  const wantsStroke = Boolean(strokeColor) || strokeWidth !== undefined;
-  if (Platform.OS === 'web' && atlas && entry && !wantsStroke) {
+  if (Platform.OS === 'web' && atlas && entry && preferAtlas) {
     const backgroundStyle = {
       backgroundImage: `url(${atlas.uri})`,
       backgroundPosition: `-${entry.x}px -${entry.y}px`,

@@ -529,6 +529,7 @@ export function TileBrushPanel({
                       strokeWidth={
                         strokeWidth !== undefined ? strokeWidth * tileScale : undefined
                       }
+                      preferAtlas={!favoriteColor}
                       style={[
                         styles.image,
                         {
