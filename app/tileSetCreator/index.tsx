@@ -271,6 +271,23 @@ export default function TileSetCreatorScreen() {
     setIsDownloadingZip(true);
     setDownloadError(null);
     try {
+      const readSvg = async (uri: string) => {
+        if (uri.startsWith('data:image/svg+xml')) {
+          const parts = uri.split(',');
+          const header = parts[0] ?? '';
+          const body = parts.slice(1).join(',');
+          if (header.includes(';base64')) {
+            return typeof atob === 'function' ? atob(body) : '';
+          }
+          try {
+            return decodeURIComponent(body);
+          } catch {
+            return body;
+          }
+        }
+        const response = await fetch(uri);
+        return await response.text();
+      };
       const zip = new JSZip();
       for (let i = 0; i < sources.length; i += 1) {
         const source = sources[i];
@@ -278,7 +295,7 @@ export default function TileSetCreatorScreen() {
         if (!uri) {
           continue;
         }
-        const svg = await FileSystem.readAsStringAsync(uri);
+        const svg = await readSvg(uri);
         const fileName = source.name ?? `tile_${i}.svg`;
         zip.file(fileName, svg);
       }
