@@ -70,7 +70,7 @@ Core Behaviors and Tool Rules
 - Pattern creation: Drag-select in the grid to define a pattern. Save dialog prompts to store it in category storage.
 - Flood (tap): Fills all cells based on brush mode (random, fixed, pattern, erase). Respects mirror toggles.
 - Flood Complete (long press): Fills only empty cells. When mirrors are enabled, it treats mirrors as a unit and expands driven indices if any mirrored target is filled.
-- Reconcile (tap): Iteratively replaces invalid tiles with compatible candidates to reduce invalid connections.
+- Reconcile (tap): Iteratively replaces invalid tiles with compatible candidates to reduce invalid connections. Uninitialized (empty) tiles are never changed; edges to uninitialized neighbors are treated as 00000000 connectivity when validating and picking replacements.
 - Controlled Randomize (long press): Replaces tiles with connection-compatible equivalents based on their current connection signature.
 
 **UI**

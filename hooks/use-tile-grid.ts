@@ -318,7 +318,7 @@ export const useTileGrid = ({
         const neighborIndex = r * gridLayout.columns + c;
         const neighborTile = tilesState[neighborIndex];
         if (!neighborTile || neighborTile.imageIndex < 0) {
-          return null;
+          return { pairs: getPairsForDirection(index), connections: new Array(8).fill(false) };
         }
         const neighborConnections = compatTables.getConnectionsForPlacement(
           neighborTile.imageIndex,
@@ -440,7 +440,9 @@ export const useTileGrid = ({
       const neighborIndex = r * gridLayout.columns + c;
       const neighborTile = tilesState[neighborIndex];
       if (!neighborTile || neighborTile.imageIndex < 0) {
-        return true;
+        return getPairsForDirection(index).every(
+          ([candidateIndex]) => transformed[candidateIndex] === false
+        );
       }
       const neighborTransformed = compatTables.getConnectionsForPlacement(
         neighborTile.imageIndex,
