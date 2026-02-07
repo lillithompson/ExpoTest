@@ -50,6 +50,7 @@ import { getTransformedConnectionsForName, parseTileConnections, transformConnec
 import {
   buildPreviewPath,
   getFilePreviewUri,
+  hasCachedThumbnail,
   hasPreview as hasPreviewState,
   isOwnPreviewUri,
   showPreview as showPreviewState,
@@ -3294,7 +3295,7 @@ export default function TestScreen() {
                     { width: fileCardWidth, aspectRatio: thumbAspect },
                   ]}
                 >
-                  {file.thumbnailUri || file.previewUri ? (
+                  {hasCachedThumbnail(file) ? (
                     <TileAsset
                       source={{
                         uri: file.thumbnailUri ?? file.previewUri ?? undefined,

@@ -16,6 +16,16 @@ export function getFilePreviewUri(file: FileWithPreviewUri | null): string | nul
   return file.previewUri ?? file.thumbnailUri ?? null;
 }
 
+/**
+ * Whether the file list should show the cached thumbnail image (not the live grid).
+ * True when file has thumbnailUri or previewUri. Used so we always show the cached
+ * thumbnail when present (no platform- or tiles-based branching).
+ */
+export function hasCachedThumbnail(file: FileWithPreviewUri | null): boolean {
+  if (!file) return false;
+  return Boolean(file.thumbnailUri || file.previewUri);
+}
+
 /** Whether we have any preview image to show (from load or from clear capture). */
 export function hasPreview(
   loadPreviewUri: string | null,

@@ -4,10 +4,12 @@
  * - Preview is shown when we have a URI and the live grid is not visible (or we're clearing).
  * - Preview/thumb paths are unique per save so the image cache shows the latest state.
  * - We only treat URIs under our preview dir as ours (safe delete).
+ * - File list always shows cached thumbnail when present (hasCachedThumbnail; no platform/tiles branching).
  */
 import {
   buildPreviewPath,
   getFilePreviewUri,
+  hasCachedThumbnail,
   hasPreview,
   isOwnPreviewUri,
   showPreview,
@@ -102,6 +104,48 @@ describe('isOwnPreviewUri', () => {
     expect(isOwnPreviewUri('file:///cache/tile-previews-other/file.png', PREVIEW_DIR)).toBe(
       false
     );
+  });
+});
+
+describe('hasCachedThumbnail', () => {
+  it('returns true when file has thumbnailUri', () => {
+    expect(hasCachedThumbnail({ thumbnailUri: 'file:///thumb.png' })).toBe(true);
+    expect(hasCachedThumbnail({ thumbnailUri: 'file:///thumb.png', previewUri: null })).toBe(true);
+  });
+
+  it('returns true when file has previewUri', () => {
+    expect(hasCachedThumbnail({ previewUri: 'file:///preview.png' })).toBe(true);
+    expect(hasCachedThumbnail({ previewUri: 'file:///preview.png', thumbnailUri: null })).toBe(
+      true
+    );
+  });
+
+  it('returns true when file has both (cached thumbnail should be shown)', () => {
+    expect(
+      hasCachedThumbnail({
+        thumbnailUri: 'file:///thumb.png',
+        previewUri: 'file:///preview.png',
+      })
+    ).toBe(true);
+  });
+
+  it('returns false when file has neither thumbnailUri nor previewUri', () => {
+    expect(hasCachedThumbnail({})).toBe(false);
+    expect(hasCachedThumbnail({ thumbnailUri: null, previewUri: null })).toBe(false);
+  });
+
+  it('returns false for null file', () => {
+    expect(hasCachedThumbnail(null)).toBe(false);
+  });
+
+  it('depends only on thumbnailUri/previewUri (not tiles, grid, or platform)', () => {
+    expect(
+      hasCachedThumbnail({
+        thumbnailUri: 'file:///thumb.png',
+        tiles: [{ id: '1' }],
+        grid: { rows: 2, columns: 2 },
+      } as any)
+    ).toBe(true);
   });
 });
 
