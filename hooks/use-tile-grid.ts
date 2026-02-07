@@ -3,14 +3,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { type TileSource } from '@/assets/images/tiles/manifest';
 import { buildCompatibilityTables } from '@/utils/tile-compat';
 import {
-  buildInitialTiles,
-  computeFixedGridLayout,
-  computeGridLayout,
-  getTileSourceIndexByName,
-  normalizeTiles,
-  pickRotation,
-  type GridLayout,
-  type Tile,
+    buildInitialTiles,
+    computeFixedGridLayout,
+    computeGridLayout,
+    getTileSourceIndexByName,
+    normalizeTiles,
+    type GridLayout,
+    type Tile
 } from '@/utils/tile-grid';
 
 type Params = {

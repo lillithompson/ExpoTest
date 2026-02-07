@@ -5,11 +5,11 @@
  */
 import type { Tile } from '../tile-grid';
 import {
-  buildInitialTiles,
-  getTileSourceIndexByName,
-  hydrateTilesWithSourceNames,
-  normalizeTiles,
-  resolveDisplaySource,
+    buildInitialTiles,
+    getTileSourceIndexByName,
+    hydrateTilesWithSourceNames,
+    normalizeTiles,
+    resolveDisplaySource,
 } from '../tile-grid';
 
 describe('hydrateTilesWithSourceNames', () => {

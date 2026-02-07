@@ -1,33 +1,33 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  Platform,
-  Pressable,
-  StyleSheet,
-  useWindowDimensions,
-  View,
-} from 'react-native';
-import ViewShot from 'react-native-view-shot';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+    Platform,
+    Pressable,
+    StyleSheet,
+    useWindowDimensions,
+    View,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import ViewShot from 'react-native-view-shot';
 
 import {
-  TILE_CATEGORIES,
-  TILE_MANIFEST,
-  type TileCategory,
+    TILE_CATEGORIES,
+    TILE_MANIFEST,
+    type TileCategory,
 } from '@/assets/images/tiles/manifest';
-import { TileBrushPanel } from '@/components/tile-brush-panel';
-import { TileDebugOverlay } from '@/components/tile-debug-overlay';
-import { TileAtlasSprite } from '@/components/tile-atlas-sprite';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { TileAtlasSprite } from '@/components/tile-atlas-sprite';
+import { TileBrushPanel } from '@/components/tile-brush-panel';
+import { TileDebugOverlay } from '@/components/tile-debug-overlay';
+import { usePersistedSettings } from '@/hooks/use-persisted-settings';
 import { useTileAtlas } from '@/hooks/use-tile-atlas';
 import { useTileGrid } from '@/hooks/use-tile-grid';
-import { usePersistedSettings } from '@/hooks/use-persisted-settings';
 import { useTilePatterns } from '@/hooks/use-tile-patterns';
 import { useTileSets } from '@/hooks/use-tile-sets';
-import { renderTileCanvasToDataUrl } from '@/utils/tile-export';
 import { getTransformedConnectionsForName } from '@/utils/tile-compat';
+import { renderTileCanvasToDataUrl } from '@/utils/tile-export';
 import { type Tile } from '@/utils/tile-grid';
 
 const GRID_GAP = 0;
