@@ -49,8 +49,14 @@ export default function TileSetCreatorScreen() {
   const { width } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { tileSets, bakedSourcesBySetId, createTileSet, deleteTileSet, updateTileSet } =
-    useTileSets();
+  const {
+    tileSets,
+    bakedSourcesBySetId,
+    currentBakedNamesBySetId,
+    createTileSet,
+    deleteTileSet,
+    updateTileSet,
+  } = useTileSets();
   const [isSelectMode, setIsSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const selectBarAnim = useRef(new Animated.Value(0)).current;
@@ -64,6 +70,15 @@ export default function TileSetCreatorScreen() {
     {}
   );
   const bakedPreviewRef = useRef<Record<string, BakedPreview>>({});
+  const currentBakedNameSets = useMemo(() => {
+    const map = new Map<string, Set<string>>();
+    Object.entries(currentBakedNamesBySetId).forEach(([setId, names]) => {
+      if (Array.isArray(names) && names.length > 0) {
+        map.set(setId, new Set(names));
+      }
+    });
+    return map;
+  }, [currentBakedNamesBySetId]);
 
   const contentWidth = Math.max(0, width);
   const maxThumbSize = Platform.OS === 'web' ? 150 : Number.POSITIVE_INFINITY;
@@ -262,7 +277,12 @@ export default function TileSetCreatorScreen() {
       return;
     }
     const sources = bakedSourcesBySetId[setId] ?? [];
-    if (sources.length === 0) {
+    const currentNames = currentBakedNameSets.get(setId);
+    const activeSources =
+      currentNames && currentNames.size > 0
+        ? sources.filter((source) => currentNames.has(source.name))
+        : sources;
+    if (activeSources.length === 0) {
       setDownloadError('No baked tiles available yet.');
       return;
     }
@@ -287,8 +307,8 @@ export default function TileSetCreatorScreen() {
         return await response.text();
       };
       const zip = new JSZip();
-      for (let i = 0; i < sources.length; i += 1) {
-        const source = sources[i];
+      for (let i = 0; i < activeSources.length; i += 1) {
+        const source = activeSources[i];
         const uri = (source.source as { uri?: string })?.uri;
         if (!uri) {
           continue;

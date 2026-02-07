@@ -97,10 +97,12 @@ Persistence and Storage
 - Patterns stored in AsyncStorage key `tile-patterns-v1`.
 - Tile sets stored in AsyncStorage key `tile-sets-v1`; baked tile sources cached in `tile-sets-bakes-v1`.
 - Brush favorites stored in AsyncStorage key `tile-brush-favorites-v1`.
+- File hydration sanitizes stored data: `tiles` is coerced to an array and `grid` requires numeric `rows`/`columns`, otherwise defaults are applied.
 
 File Data Model
 - Each file stores: id, name, tiles array, grid rows/columns, category and categories, tileSetIds, sourceNames, preferredTileSize, lineWidth, lineColor, thumbnailUri, previewUri, updatedAt.
 - Tile placement uses `imageIndex`, `rotation`, `mirrorX`, `mirrorY`. Empty tiles are `imageIndex = -1`; error tiles are `imageIndex = -2`.
+- Tiles can also carry a `name` for the original tile source; rendering prefers `name` to avoid index drift when tile set sources change.
 
 Autosave and Preview Pipeline
 - Autosave is debounced (150ms). Web preview capture is additionally delayed (800ms).
@@ -119,10 +121,15 @@ Tile Source Mapping
 - When palette sources expand, `sourceNames` are extended and persisted.
 - File source initialization is guarded to run once per active file id and can defer until baked tile sets are ready.
 - When a file references user tile sets (via `tileSetIds`) but baked sources are not ready yet, source seeding is deferred to avoid remapping tiles to the wrong sources.
+- Palette selection maps tiles to file indices by tile name (not palette position) so adding/removing tile sets does not shift existing mappings.
+- Mapping prefers the active file's `sourceNames` when available to keep palette interactions aligned during hydration.
+- `normalizeTiles` guards against undefined/null tile arrays and falls back to empty tiles for the current grid size.
 
 Tile Set Baking and Caching
 - Tile sets are baked into SVGs. Web stores data URIs; native writes files under `documentDirectory/tile-sets/<setId>/`.
 - Bake signatures and per-tile signatures prevent redundant work. A memory cache stores SVG XML for reuse during baking.
+- While baking on native, placeholder baked sources (with error tiles) can be published early to stabilize source name ordering; these are replaced once SVGs finish writing.
+- Baked tile names include the tile `updatedAt` timestamp; legacy baked sources are kept so existing placed tiles keep rendering even if tiles are edited or deleted. The palette only shows current baked names.
 
 SVG Loading and Caching (TileAsset)
 - SVG XML is cached in-memory (`svgXmlCache`) by URI. SVG overrides are cached in `svgOverrideCache`.

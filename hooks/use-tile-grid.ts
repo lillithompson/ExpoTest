@@ -331,6 +331,7 @@ export const useTileGrid = ({
           rotation: 0,
           mirrorX: false,
           mirrorY: false,
+          name: tileSources[index]?.name,
         });
         return;
       }
@@ -349,6 +350,7 @@ export const useTileGrid = ({
             rotation: variant.rotation,
             mirrorX: variant.mirrorX,
             mirrorY: variant.mirrorY,
+            name: tileSources[index]?.name,
           });
         }
       });
@@ -505,6 +507,7 @@ export const useTileGrid = ({
           rotation: match.rotation,
           mirrorX: match.mirrorX,
           mirrorY: match.mirrorY,
+          name: tileSources[match.index]?.name,
         };
       })
     );
@@ -653,6 +656,7 @@ export const useTileGrid = ({
       rotation: (patternTile.rotation + rotationCW) % 360,
       mirrorX: patternTile.mirrorX !== pattern.mirrorX,
       mirrorY: patternTile.mirrorY,
+      name: patternTile.name,
     };
   };
 
@@ -708,6 +712,7 @@ export const useTileGrid = ({
         rotation: sourceTile.rotation,
         mirrorX: sourceTile.mirrorX,
         mirrorY: sourceTile.mirrorY,
+        name: sourceTile.name,
       });
       return;
     }
@@ -737,6 +742,7 @@ export const useTileGrid = ({
         rotation: tile.rotation,
         mirrorX: tile.mirrorX,
         mirrorY: tile.mirrorY,
+        name: tile.name,
       });
       return;
     }
@@ -748,6 +754,7 @@ export const useTileGrid = ({
           rotation: brush.rotation,
           mirrorX: brush.mirrorX,
           mirrorY: brush.mirrorY,
+          name: tileSources[fixedIndex]?.name,
         });
       }
       return;
@@ -813,12 +820,14 @@ export const useTileGrid = ({
       rotation: selection.rotation,
       mirrorX: selection.mirrorX,
       mirrorY: selection.mirrorY,
+      name: selection.name,
     });
     applyPlacement(cellIndex, {
       imageIndex: selection.imageIndex,
       rotation: selection.rotation,
       mirrorX: selection.mirrorX,
       mirrorY: selection.mirrorY,
+      name: selection.name,
     });
   };
 
@@ -878,6 +887,7 @@ export const useTileGrid = ({
                 rotation: tile.rotation,
                 mirrorX: tile.mirrorX,
                 mirrorY: tile.mirrorY,
+                name: tile.name,
               };
             }
           }
@@ -920,6 +930,7 @@ export const useTileGrid = ({
             rotation: brush.rotation,
             mirrorX: brush.mirrorX,
             mirrorY: false,
+            name: tileSources[fixedIndex]?.name,
           })
         );
       }
@@ -935,6 +946,7 @@ export const useTileGrid = ({
           rotation: brush.rotation,
           mirrorX: false,
           mirrorY: false,
+          name: tileSources[fixedIndex]?.name,
         }))
       );
     });
@@ -999,6 +1011,7 @@ export const useTileGrid = ({
               rotation: tile.rotation,
               mirrorX: tile.mirrorX,
               mirrorY: tile.mirrorY,
+              name: tile.name,
             };
           }
         }
@@ -1066,6 +1079,7 @@ export const useTileGrid = ({
             rotation: brush.rotation,
             mirrorX: false,
             mirrorY: false,
+            name: tileSources[fixedIndex]?.name,
           }),
           index
         );
@@ -1180,6 +1194,7 @@ export const useTileGrid = ({
           rotation: pick.rotation,
           mirrorX: pick.mirrorX,
           mirrorY: pick.mirrorY,
+          name: tileSources[pick.index]?.name,
         })
       );
     }

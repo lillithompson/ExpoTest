@@ -18,6 +18,12 @@ const svgXmlCache = new Map<string, string>();
 const svgOverrideCache = new Map<string, string>();
 const svgXmlInflight = new Map<string, Promise<string | null>>();
 
+export const clearTileAssetCache = () => {
+  svgXmlCache.clear();
+  svgOverrideCache.clear();
+  svgXmlInflight.clear();
+};
+
 const cacheSvgXml = (primary: string, xml: string, alias?: string | null) => {
   svgXmlCache.set(primary, xml);
   if (alias && alias !== primary) {
@@ -160,11 +166,15 @@ const applySvgOverrides = (xml: string, strokeColor?: string, strokeWidth?: numb
     }
   }
   if (strokeColor || strokeWidth !== undefined) {
+    const strokeWidthRule =
+      strokeWidth !== undefined
+        ? `stroke-width: ${strokeWidth} !important;${
+            Platform.OS === 'web' ? ' vector-effect: non-scaling-stroke;' : ''
+          }`
+        : '';
     const overrideRules = [
       strokeColor ? `stroke: ${strokeColor} !important;` : '',
-      strokeWidth !== undefined
-        ? `stroke-width: ${strokeWidth} !important; vector-effect: non-scaling-stroke;`
-        : '',
+      strokeWidthRule,
     ]
       .filter(Boolean)
       .join(' ');

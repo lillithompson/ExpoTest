@@ -44,12 +44,15 @@ export const buildInitialTiles = (count: number) => {
 };
 
 export const normalizeTiles = (
-  currentTiles: Tile[],
+  currentTiles: Tile[] | null | undefined,
   cellCount: number,
   _sourcesLength: number
 ) => {
   if (cellCount <= 0) {
     return [] as Tile[];
+  }
+  if (!Array.isArray(currentTiles)) {
+    return buildInitialTiles(cellCount);
   }
   if (currentTiles.length === 0) {
     return buildInitialTiles(cellCount);
@@ -66,6 +69,7 @@ export const normalizeTiles = (
         rotation: source.rotation,
         mirrorX: source.mirrorX,
         mirrorY: source.mirrorY,
+        name: source.name,
       });
     }
     return next;

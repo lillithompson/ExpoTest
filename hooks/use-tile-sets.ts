@@ -39,6 +39,21 @@ export type TileSet = {
 const STORAGE_KEY = 'tile-sets-v1';
 const BAKED_STORAGE_KEY = 'tile-sets-bakes-v1';
 const ERROR_TILE = require('@/assets/images/tiles/tile_error.svg');
+const qualifyBakedName = (setId: string, name: string) =>
+  name.startsWith(`${setId}:`) ? name : `${setId}:${name}`;
+const getLegacyBakedName = (setId: string, name: string) =>
+  name.startsWith(`${setId}:`) ? name.slice(setId.length + 1) : name;
+const parseBakedName = (name: string) => {
+  const matchWithTimestamp = name.match(/^(.*)_\d+_([01]{8})\.svg$/);
+  if (matchWithTimestamp) {
+    return { tileId: matchWithTimestamp[1], bits: matchWithTimestamp[2] };
+  }
+  const match = name.match(/^(.*)_([01]{8})\.svg$/);
+  if (!match) {
+    return null;
+  }
+  return { tileId: match[1], bits: match[2] };
+};
 
 const createId = (prefix: string) =>
   `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -142,6 +157,9 @@ export const useTileSets = () => {
   const [bakedSourcesBySetId, setBakedSourcesBySetId] = useState<
     Record<string, TileSource[]>
   >({});
+  const [currentBakedNamesBySetId, setCurrentBakedNamesBySetId] = useState<
+    Record<string, string[]>
+  >({});
   const bakeSignatureRef = useRef<Record<string, string>>({});
   const tileSignatureRef = useRef<Record<string, Record<string, string>>>({});
   const svgSourceCacheRef = useRef<Map<string, string>>(new Map());
@@ -200,7 +218,14 @@ export const useTileSets = () => {
             if (!cache?.signature || !Array.isArray(cache.sources)) {
               return;
             }
-            nextBakes[setId] = cache.sources;
+            nextBakes[setId] = cache.sources.map((source) => {
+              if (!source || typeof source.name !== 'string') {
+                return source;
+              }
+              const legacy = getLegacyBakedName(setId, source.name);
+              const qualified = qualifyBakedName(setId, legacy);
+              return source.name === qualified ? source : { ...source, name: qualified };
+            });
             nextBakeSignatures[setId] = cache.signature;
             if (cache.tileSignatures) {
               nextTileSignatures[setId] = cache.tileSignatures;
@@ -249,6 +274,7 @@ export const useTileSets = () => {
         }
       }
       const updates: Record<string, TileSource[]> = {};
+      const currentNameUpdates: Record<string, string[]> = {};
       for (const set of tileSets) {
         const signature = buildBakeSignature(set);
         if (bakeSignatureRef.current[set.id] === signature) {
@@ -270,12 +296,35 @@ export const useTileSets = () => {
         const prevSources = bakedSourcesBySetId[set.id] ?? [];
         const prevByTileId = new Map<string, TileSource>();
         prevSources.forEach((source) => {
-          const match = source.name.match(/^(.*)_([01]{8})\.svg$/);
-          if (match) {
-            prevByTileId.set(match[1], source);
+          if (!source || typeof source.name !== 'string') {
+            return;
+          }
+          const legacy = getLegacyBakedName(set.id, source.name);
+          const parsed = parseBakedName(legacy);
+          if (parsed) {
+            prevByTileId.set(parsed.tileId, source);
           }
         });
+        if (prevSources.length === 0) {
+          const placeholderSources: TileSource[] = set.tiles.map((tile) => {
+            const bits = getTileConnectivityBits(tile, sources);
+            const fileName = `${tile.id}_${tile.updatedAt}_${bits}.svg`;
+            const qualifiedName = qualifyBakedName(set.id, fileName);
+            const prevSource = prevByTileId.get(tile.id);
+            if (prevSource) {
+              return { ...prevSource, name: qualifiedName };
+            }
+            return { name: qualifiedName, source: ERROR_TILE };
+          });
+          if (placeholderSources.length > 0) {
+            setBakedSourcesBySetId((prev) => ({
+              ...prev,
+              [set.id]: placeholderSources,
+            }));
+          }
+        }
         const bakedSources: TileSource[] = [];
+        const currentNames: string[] = [];
         const perTileSignatures: Record<string, string> = {};
         const existingTileSignatures = tileSignatureRef.current[set.id] ?? {};
         for (let index = 0; index < set.tiles.length; index += 1) {
@@ -285,10 +334,16 @@ export const useTileSets = () => {
           const prevSignature = existingTileSignatures[tile.id];
           const prevSource = prevByTileId.get(tile.id);
           if (prevSignature === tileSignature && prevSource) {
-            bakedSources.push(prevSource);
+            const bits = getTileConnectivityBits(tile, sources);
+            const fileName = `${tile.id}_${tile.updatedAt}_${bits}.svg`;
+            const qualifiedName = qualifyBakedName(set.id, fileName);
+            bakedSources.push({ ...prevSource, name: qualifiedName });
+            currentNames.push(qualifiedName);
           } else {
-          const bits = getTileConnectivityBits(tile, sources);
-          const fileName = `${tile.id}_${bits}.svg`;
+            const bits = getTileConnectivityBits(tile, sources);
+            const fileName = `${tile.id}_${tile.updatedAt}_${bits}.svg`;
+            const qualifiedName = qualifyBakedName(set.id, fileName);
+            currentNames.push(qualifiedName);
           const svg = await renderTileCanvasToSvg({
             tiles: tile.tiles,
             gridLayout: {
@@ -306,11 +361,15 @@ export const useTileSets = () => {
             outputSize: set.resolution * 256,
           });
           if (!svg) {
-            bakedSources.push(prevSource ?? { name: fileName, source: ERROR_TILE });
+            if (prevSource) {
+              bakedSources.push({ ...prevSource, name: qualifiedName });
+            } else {
+              bakedSources.push({ name: qualifiedName, source: ERROR_TILE });
+            }
           } else if (Platform.OS === 'web') {
             const dataUri = `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
             bakedSources.push({
-              name: `${tile.id}_${bits}.svg`,
+              name: qualifiedName,
               source: { uri: dataUri },
             });
           } else if (setDir) {
@@ -323,7 +382,7 @@ export const useTileSets = () => {
               // ignore write errors
             }
             bakedSources.push({
-              name: `${tile.id}_${bits}.svg`,
+              name: qualifiedName,
               source: { uri: target },
             });
           }
@@ -332,7 +391,19 @@ export const useTileSets = () => {
             await yieldToEventLoop();
           }
         }
-        updates[set.id] = bakedSources;
+        currentNameUpdates[set.id] = currentNames;
+        const mergedByName = new Map<string, TileSource>();
+        prevSources.forEach((source) => {
+          if (source?.name) {
+            mergedByName.set(source.name, source);
+          }
+        });
+        bakedSources.forEach((source) => {
+          if (source?.name) {
+            mergedByName.set(source.name, source);
+          }
+        });
+        updates[set.id] = Array.from(mergedByName.values());
         bakeSignatureRef.current[set.id] = signature;
         tileSignatureRef.current[set.id] = perTileSignatures;
       }
@@ -341,15 +412,18 @@ export const useTileSets = () => {
         return;
       }
 
-      setBakedSourcesBySetId((prev) => {
-        const next = { ...prev, ...updates };
-        Object.keys(next).forEach((key) => {
-          if (!tileSets.find((set) => set.id === key)) {
-            delete next[key];
-          }
+      setBakedSourcesBySetId((prev) => ({ ...prev, ...updates }));
+      if (!cancelled) {
+        setCurrentBakedNamesBySetId((prev) => {
+          const next = { ...prev, ...currentNameUpdates };
+          Object.keys(next).forEach((key) => {
+            if (!tileSets.find((set) => set.id === key)) {
+              delete next[key];
+            }
+          });
+          return next;
         });
-        return next;
-      });
+      }
     };
 
     void bakeAll();
@@ -541,6 +615,7 @@ export const useTileSets = () => {
     tileSets,
     isLoaded,
     bakedSourcesBySetId,
+    currentBakedNamesBySetId,
     createTileSet,
     deleteTileSet,
     reloadTileSets: loadFromStorage,

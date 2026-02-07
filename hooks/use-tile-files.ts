@@ -83,11 +83,18 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
                 ? file.category
                 : fallbackCategory;
               const categories = normalizeCategories(file.categories, safeCategory);
+              const tiles = Array.isArray(file.tiles) ? file.tiles : [];
+              const grid =
+                file.grid &&
+                typeof file.grid.rows === 'number' &&
+                typeof file.grid.columns === 'number'
+                  ? file.grid
+                  : { rows: 0, columns: 0 };
               return {
                 id: file.id ?? createId(),
                 name: file.name ?? 'Canvas',
-                tiles: file.tiles ?? [],
-                grid: file.grid ?? { rows: 0, columns: 0 },
+                tiles,
+                grid,
                 category: categories[0] ?? safeCategory,
                 categories,
                 tileSetIds: Array.isArray(file.tileSetIds)
