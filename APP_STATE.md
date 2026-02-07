@@ -163,9 +163,7 @@ Performance and Interaction
 - Clone and pattern tools use anchors and wrap-around indexing for consistent offsets.
 - Mirroring is applied by deriving driven cells and mapping to mirrored targets.
 - Tile placement compatibility uses cached connection tables (buildCompatibilityTables) to avoid recomputing connection transforms per brush action.
-- UGC mapping debug logs can be enabled in `app/index.tsx` via `DEBUG_UGC_MAPPING`.
-- When `DEBUG_TILE_RENDER` is on, tiles whose names include a user tile set prefix show a tiny in-cell label with `imageIndex:name` and emit one-time `[ugc-debug] render` logs with resolved name/URI.
-- When `DEBUG_FILE_CHECK` is on, the Settings overlay includes a "Check UGC File" button that logs and alerts whether the first UGC tile name resolves to an on-device SVG file path.
+- When `DEBUG_FILE_CHECK` is on, the Settings overlay includes a "Check UGC File" button that alerts whether the first UGC tile name resolves to an on-device SVG file path.
 
 Testing
 - Unit tests for tile resolution and hydration live in `utils/__tests__/tile-grid.test.ts`. They assert: `hydrateTilesWithSourceNames` assigns `tile.name` from the file's sourceNames so UGC index 0 gets the UGC name; `resolveDisplaySource` uses only name-based resolution when `tile.name` is set (never index, so wrong tile cannot show); `getTileSourceIndexByName` resolves by name; `normalizeTiles` preserves `tile.name`. Run with `npm test` (or `npm run test:watch`). Run tests when changing tile-grid utils or UGC/placement/hydration logic.

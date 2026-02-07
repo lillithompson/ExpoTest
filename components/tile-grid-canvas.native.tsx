@@ -33,8 +33,6 @@ type SvgEntry = {
 };
 
 const DOT_SIZE = 6;
-const loggedRenderMismatch = new Set<string>();
-
 export function TileGridCanvas({
   width,
   height,
@@ -125,21 +123,6 @@ export function TileGridCanvas({
       if (!tileName) {
         continue;
       }
-      if (
-        tile.name &&
-        tileSources[tile.imageIndex] &&
-        tileSources[tile.imageIndex]?.name !== tile.name
-      ) {
-        const key = `mismatch:${tile.name}:${tileSources[tile.imageIndex]?.name ?? ''}`;
-        if (!loggedRenderMismatch.has(key)) {
-          loggedRenderMismatch.add(key);
-          console.log('[ugc-debug] render-mismatch', {
-            tileName: tile.name,
-            imageIndex: tile.imageIndex,
-            indexName: tileSources[tile.imageIndex]?.name ?? null,
-          });
-        }
-      }
       const connections = getTransformedConnectionsForName(
         tileName,
         tile.rotation,
@@ -202,17 +185,6 @@ export function TileGridCanvas({
       const tileName = tile.name ?? tileSources[tile.imageIndex]?.name ?? '';
       const sourceEntry =
         (tileName ? sourceByName.get(tileName) : null) ?? tileSources[tile.imageIndex];
-      if (tileName && !sourceEntry) {
-        const key = `missing:${tileName}`;
-        if (!loggedRenderMismatch.has(key)) {
-          loggedRenderMismatch.add(key);
-          console.log('[ugc-debug] render-missing', {
-            tileName,
-            imageIndex: tile.imageIndex,
-            tileSourcesLength: tileSources.length,
-          });
-        }
-      }
       const svg = sourceEntry ? svgMap.get(sourceEntry.name) : null;
       if (!svg) {
         continue;

@@ -66,10 +66,6 @@ const DEFAULT_CATEGORY = (TILE_CATEGORIES as string[]).includes('angular')
 const ERROR_TILE = require('@/assets/images/tiles/tile_error.svg');
 const PREVIEW_DIR = `${FileSystem.cacheDirectory ?? ''}tile-previews/`;
 const THUMB_SIZE = 256;
-const DEBUG_LOAD_TRACE = false;
-const DEBUG_UGC_MAPPING = true;
-const DEBUG_TILE_RENDER = true;
-const loggedTileRenders = new Set<string>();
 const DEBUG_FILE_CHECK = true;
 const buildUserTileSourceFromName = (name: string): TileSource | null => {
   if (!name.includes(':')) {
@@ -521,60 +517,6 @@ const TileCell = memo(
             ? 'byUgc'
             : 'byNameOrUgcNull'
         : 'byIndex';
-    if (Platform.OS !== 'web' && tile.imageIndex >= 0) {
-      const logKey = `cell-${cellIndex}-${tile.imageIndex}-${tile.name ?? 'no-name'}`;
-      if (!loggedTileRenders.has(logKey)) {
-        loggedTileRenders.add(logKey);
-        console.log('[ugc-debug] TileCell render', {
-          cellIndex,
-          imageIndex: tile.imageIndex,
-          tileName: tile.name ?? null,
-          usedPath,
-          resolvedByName: resolvedByName?.name ?? null,
-          resolvedByUgc: resolvedByUgcFallback?.name ?? null,
-          resolvedByIndex: resolvedByIndex?.name ?? null,
-        });
-      }
-    }
-    const showRenderLabel =
-      DEBUG_TILE_RENDER &&
-      (tileName.includes('tileset-') ||
-        (resolvedByIndex?.name ?? '').includes('tileset-'));
-    if (DEBUG_TILE_RENDER && tile.imageIndex >= 0) {
-      const hasUgc =
-        (tile.name && tile.name.includes('tileset-')) ||
-        (resolvedByIndex?.name ?? '').includes('tileset-') ||
-        (resolvedByName?.name ?? '').includes('tileset-');
-      if (hasUgc) {
-        const key = `${cellIndex}:${tile.imageIndex}:${tile.name ?? ''}:${
-          resolvedByIndex?.name ?? ''
-        }`;
-        if (!loggedTileRenders.has(key)) {
-          loggedTileRenders.add(key);
-          const toUri = (value: unknown) => {
-            if (!value) {
-              return null;
-            }
-            if (typeof value === 'string') {
-              return value;
-            }
-            if (typeof value === 'number') {
-              return `module:${value}`;
-            }
-            const uri = (value as { uri?: string } | null)?.uri;
-            return uri ?? null;
-          };
-          console.log('[ugc-debug] render', {
-            cellIndex,
-            imageIndex: tile.imageIndex,
-            tileName: tile.name ?? null,
-            resolvedByName: resolvedByName?.name ?? null,
-            resolvedByIndex: resolvedByIndex?.name ?? null,
-            resolvedUri: toUri(resolved?.source ?? null),
-          });
-        }
-      }
-    }
     const connections = useMemo(
       () =>
         showDebug && tile.imageIndex >= 0
@@ -631,11 +573,6 @@ const TileCell = memo(
             ]}
             resizeMode="cover"
           />
-        )}
-        {showRenderLabel && (
-          <Text style={styles.tileDebugLabel} numberOfLines={1}>
-            {`${tile.imageIndex}:${tileName}`}
-          </Text>
         )}
         {showOverlays && isCloneTargetOrigin && (
           <View pointerEvents="none" style={styles.cloneTargetOrigin} />
@@ -714,7 +651,6 @@ export default function TestScreen() {
   const [loadedToken, setLoadedToken] = useState(0);
   const [sourcesStable, setSourcesStable] = useState(false);
   const [tilesStable, setTilesStable] = useState(false);
-  const loadTraceRef = useRef<string>('');
   const [loadPreviewUri, setLoadPreviewUri] = useState<string | null>(null);
   const [isCapturingPreview, setIsCapturingPreview] = useState(false);
   const [isClearing, setIsClearing] = useState(false);
@@ -741,11 +677,6 @@ export default function TestScreen() {
   const fixedBrushSourceNameRef = useRef<string | null>(null);
   useEffect(() => {
     if (brush.mode !== 'fixed') {
-      if (Platform.OS !== 'web' && fixedBrushSourceNameRef.current != null) {
-        console.log('[ugc-debug] ref cleared (brush not fixed)', {
-          was: fixedBrushSourceNameRef.current,
-        });
-      }
       fixedBrushSourceNameRef.current = null;
     } else if (brush.sourceName != null) {
       fixedBrushSourceNameRef.current = brush.sourceName;
@@ -1040,7 +971,6 @@ export default function TestScreen() {
     resolveSourceName,
     getSourcesForFile,
   ]);
-  const lastDebugLogRef = useRef<string | null>(null);
   const fileSourceNamesForMapping =
     activeFileSourceNames.length > 0 ? activeFileSourceNames : fileSourceNames;
   const fileIndexByName = useMemo(() => {
@@ -1061,54 +991,6 @@ export default function TestScreen() {
     });
     return indexByName;
   }, [tileSources]);
-  useEffect(() => {
-    if (!DEBUG_UGC_MAPPING || Platform.OS === 'web') {
-      return;
-    }
-    const file = activeFile ?? activeFileRef.current ?? null;
-    if (!file) {
-      return;
-    }
-    const sourceNames = Array.isArray(file.sourceNames) ? file.sourceNames : [];
-    const tileSetIds = Array.isArray(file.tileSetIds) ? file.tileSetIds : [];
-    const tileSourcesNames = tileSources.map((source) => source.name);
-    const paletteNames = paletteSources.map((source) => source.name);
-    const key = `${file.id}|${tileSetIds.join('|')}|${sourceNames.join('|')}|${tileSourcesNames.join('|')}|${paletteNames.join('|')}`;
-    if (lastDebugLogRef.current === key) {
-      return;
-    }
-    lastDebugLogRef.current = key;
-    const firstTileMappings = file.tiles.slice(0, 8).map((tile) => {
-      if (!tile || tile.imageIndex < 0) {
-        return { imageIndex: tile?.imageIndex ?? -1, name: null };
-      }
-      const entry = tileSources[tile.imageIndex];
-      return { imageIndex: tile.imageIndex, name: entry?.name ?? null };
-    });
-    const firstPaletteMap = paletteSources.slice(0, 12).map((source, index) => ({
-      index,
-      name: source.name,
-      tileIndex: tileIndexByName.get(source.name) ?? -1,
-      fileIndex: fileIndexByName.get(source.name) ?? -1,
-    }));
-    console.log('[ugc-debug] sources', {
-      id: file.id,
-      tileSetIds,
-      sourceNames: sourceNames.slice(0, 12),
-      tileSources: tileSourcesNames.slice(0, 12),
-      paletteSources: paletteNames.slice(0, 12),
-      firstPaletteMap,
-      firstTileMappings,
-      bakedSetIds: Object.keys(bakedSourcesBySetId),
-    });
-  }, [
-    activeFile,
-    tileSources,
-    paletteSources,
-    fileIndexByName,
-    tileIndexByName,
-    bakedSourcesBySetId,
-  ]);
   const tileSourcesSignature = useMemo(
     () =>
       tileSources
@@ -1290,20 +1172,6 @@ export default function TestScreen() {
       : null,
     patternAnchorKey: selectedPattern?.id ?? null,
     getFixedBrushSourceName: () => fixedBrushSourceNameRef.current,
-    onFixedPlacementDebug: DEBUG_UGC_MAPPING
-      ? ({ fixedIndex, tileName, tileSourcesLength, getterResult, brushSourceName }) => {
-          if (Platform.OS !== 'web') {
-            console.log('[ugc-debug] place', {
-              fixedIndex,
-              tileName,
-              tileSourcesLength,
-              getterResult: getterResult ?? null,
-              brushSourceName: brushSourceName ?? null,
-              fileId: activeFileId ?? null,
-            });
-          }
-        }
-      : undefined,
   });
   const tilesSignature = useMemo(
     () =>
@@ -1332,14 +1200,6 @@ export default function TestScreen() {
       preservedName != null
         ? tileSources.findIndex((s) => s.name === preservedName)
         : -1;
-    if (Platform.OS !== 'web') {
-      console.log('[ugc-debug] tileSourcesKey changed', {
-        preservedName: preservedName ?? null,
-        newIndex,
-        brushMode: brush.mode,
-        preserving: newIndex >= 0,
-      });
-    }
     if (newIndex >= 0) {
       setBrush({
         mode: 'fixed',
@@ -1514,11 +1374,6 @@ export default function TestScreen() {
     }
     const payload = `${candidate} -> ${uri} (${exists ? 'exists' : 'missing'})`;
     setLastFileCheck(payload);
-    console.log('[ugc-debug] file-check', {
-      name: candidate,
-      uri,
-      exists,
-    });
     Alert.alert('UGC File Check', payload);
   }, [activeFileSourceNames, fileSourceNames]);
   const resolveTileAssetForFile = useCallback(
@@ -1701,7 +1556,6 @@ export default function TestScreen() {
   }, [downloadTargetFile]);
   const filesRef = useRef(files);
   const activeFileRef = useRef<TileFile | null>(activeFile ?? null);
-  const debugHydrationRef = useRef(0);
   const fileSourcesReadyRef = useRef(false);
   const fileSourcesInitIdRef = useRef<string | null>(null);
 
@@ -2122,7 +1976,6 @@ export default function TestScreen() {
     if (!ready || !activeFileId || viewMode !== 'modify') {
       return;
     }
-    debugHydrationRef.current += 1;
     const file =
       activeFileRef.current ??
       filesRef.current.find((entry) => entry.id === activeFileId) ??
@@ -2188,11 +2041,6 @@ export default function TestScreen() {
   }, [activeFileId, loadRequestId, ready, viewMode, clearCloneSource]);
 
   useEffect(() => {
-    if (DEBUG_LOAD_TRACE) {
-      console.log('[load-trace] mounted');
-    }
-  }, []);
-  useEffect(() => {
     setGridStabilized(false);
   }, [activeFileId, loadToken, viewMode]);
   useEffect(() => {
@@ -2251,71 +2099,6 @@ export default function TestScreen() {
       }
     };
   }, [viewMode, showGrid]);
-  useEffect(() => {
-    if (!DEBUG_LOAD_TRACE) {
-      return;
-    }
-    const snapshot = JSON.stringify({
-      activeFileId,
-      viewMode,
-      loadPhase,
-      isHydratingFile,
-      isPrefetchingTiles,
-      isPrefetchingTileSources,
-      loadToken,
-      loadedToken,
-      showPreview,
-      showGrid,
-      gridVisible,
-      gridStabilized,
-      isActiveFileRenderReady,
-      isTileSetSourcesReadyForActiveFile,
-      areActiveFileSourcesResolved,
-      hasMissingTileSources,
-      tileSourcesPrefetched,
-      sourcesStable,
-      tilesStable,
-      paletteSources: paletteSources.length,
-      tileSources: tileSources.length,
-      fileSourceNames: fileSourceNames.length,
-      activeFileSourceNames:
-        activeFile && Array.isArray(activeFile.sourceNames)
-          ? activeFile.sourceNames.length
-          : 0,
-      pendingRestore: Boolean(pendingRestoreRef.current),
-    });
-    if (loadTraceRef.current !== snapshot) {
-      loadTraceRef.current = snapshot;
-      console.log('[load-trace]', snapshot);
-    }
-  }, [
-    activeFileId,
-    viewMode,
-    loadPhase,
-    isHydratingFile,
-    isPrefetchingTiles,
-    isPrefetchingTileSources,
-    loadToken,
-    loadedToken,
-    showPreview,
-    showGrid,
-    gridVisible,
-    gridStabilized,
-    isActiveFileRenderReady,
-    isTileSetSourcesReadyForActiveFile,
-    areActiveFileSourcesResolved,
-    hasMissingTileSources,
-    tileSourcesPrefetched,
-    sourcesStable,
-    tilesStable,
-    paletteSources.length,
-    tileSources.length,
-    fileSourceNames.length,
-    activeFile,
-  ]);
-
-
-
 
   useEffect(() => {
     if (viewMode !== 'modify' || !activeFile || isInteractingRef.current) {
@@ -4499,16 +4282,6 @@ export default function TestScreen() {
                 const updatedIndex = updated.indexOf(source.name);
                 fileIndex = updatedIndex;
               }
-              if (DEBUG_UGC_MAPPING) {
-                console.log('[ugc-debug] select', {
-                  paletteIndex: next.index,
-                  paletteName: source.name,
-                  tileIndex: tileIndexByName.get(source.name) ?? -1,
-                  fileIndexByName: fileIndexByName.get(source.name) ?? -1,
-                  resolvedFileIndex: fileIndex,
-                  tileSourcesAtIndex: tileSources[fileIndex]?.name ?? null,
-                });
-              }
               if (fileIndex >= 0) {
                 fixedBrushSourceNameRef.current = source.name;
                 setBrush({
@@ -5856,17 +5629,6 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
     borderRadius: 0,
-  },
-  tileDebugLabel: {
-    position: 'absolute',
-    left: 2,
-    right: 2,
-    bottom: 2,
-    fontSize: 8,
-    color: '#facc15',
-    backgroundColor: 'rgba(0,0,0,0.55)',
-    paddingHorizontal: 2,
-    borderRadius: 2,
   },
   mirrorLines: {
     ...StyleSheet.absoluteFillObject,
