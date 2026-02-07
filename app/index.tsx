@@ -3255,12 +3255,80 @@ export default function TestScreen() {
                   ]}
                 >
                   {file.thumbnailUri || file.previewUri ? (
+                    Platform.OS === 'ios' &&
+                    file.tiles?.length > 0 &&
+                    (file.grid?.rows ?? 0) > 0 &&
+                    (file.grid?.columns ?? 0) > 0 ? (
+                    // On iOS, prefer rendering the grid with adjusted line width so UGC
+                    // tiles match built-in; saved thumbnail PNG can show un-adjusted strokes.
+                    <ThemedView style={styles.fileThumbGrid}>
+                      {Array.from({ length: file.grid!.rows }, (_, rowIndex) => (
+                        <ThemedView
+                          key={`row-${file.id}-${rowIndex}`}
+                          style={styles.fileThumbRow}
+                        >
+                          {Array.from(
+                            { length: file.grid!.columns },
+                            (_, colIndex) => {
+                              const index =
+                                rowIndex * file.grid!.columns + colIndex;
+                              const tile = file.tiles[index];
+                              const resolved = resolveTileAssetForFile(
+                                tile,
+                                sources,
+                                file.tileSetIds ?? []
+                              );
+                              return (
+                                <ThemedView
+                                  key={`cell-${file.id}-${index}`}
+                                  style={styles.fileThumbCell}
+                                >
+                                  {resolved.source && (
+                                    <TileAsset
+                                      source={resolved.source}
+                                      name={resolved.name}
+                                      strokeColor={file.lineColor}
+                                      strokeWidth={
+                                        file.lineWidth *
+                                        (strokeScaleByName?.get(resolved.name) ??
+                                          1)
+                                      }
+                                      style={[
+                                        styles.fileThumbImage,
+                                        {
+                                          transform: [
+                                            {
+                                              scaleX: tile?.mirrorX ? -1 : 1,
+                                            },
+                                            {
+                                              scaleY: tile?.mirrorY ? -1 : 1,
+                                            },
+                                            {
+                                              rotate: `${tile?.rotation ?? 0}deg`,
+                                            },
+                                          ],
+                                        },
+                                      ]}
+                                      resizeMode="cover"
+                                    />
+                                  )}
+                                </ThemedView>
+                              );
+                            }
+                          )}
+                        </ThemedView>
+                      ))}
+                    </ThemedView>
+                  ) : (
                     <TileAsset
-                      source={{ uri: file.thumbnailUri ?? file.previewUri ?? undefined }}
+                      source={{
+                        uri: file.thumbnailUri ?? file.previewUri ?? undefined,
+                      }}
                       name="thumbnail.png"
                       style={styles.fileThumbImage}
                       resizeMode="cover"
                     />
+                  )
                   ) : Platform.OS !== 'web' ? (
                     <ThemedView style={styles.fileThumbGrid}>
                       {Array.from({ length: file.grid.rows }, (_, rowIndex) => (
@@ -3286,7 +3354,10 @@ export default function TestScreen() {
                                     source={resolved.source}
                                     name={resolved.name}
                                     strokeColor={file.lineColor}
-                                    strokeWidth={file.lineWidth}
+                                    strokeWidth={
+                                      file.lineWidth *
+                                      (strokeScaleByName?.get(resolved.name) ?? 1)
+                                    }
                                     style={[
                                       styles.fileThumbImage,
                                       {
@@ -3387,7 +3458,10 @@ export default function TestScreen() {
                                       source={resolved.source}
                                       name={resolved.name}
                                       strokeColor={downloadTargetFile.lineColor}
-                                      strokeWidth={downloadTargetFile.lineWidth}
+                                      strokeWidth={
+                                        downloadTargetFile.lineWidth *
+                                        (strokeScaleByName?.get(resolved.name) ?? 1)
+                                      }
                                       style={[
                                         styles.captureImage,
                                         {
