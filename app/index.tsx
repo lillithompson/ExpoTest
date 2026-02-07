@@ -19,6 +19,7 @@ import ViewShot from 'react-native-view-shot';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import Constants from 'expo-constants';
+import { Image as ExpoImage } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import {
@@ -642,6 +643,7 @@ export default function TestScreen() {
   const selectBarAnim = useRef(new Animated.Value(0)).current;
   const [isHydratingFile, setIsHydratingFile] = useState(false);
   const [gridStabilized, setGridStabilized] = useState(false);
+  const [nativeCanvasPaintReady, setNativeCanvasPaintReady] = useState(false);
   const [isPrefetchingTiles, setIsPrefetchingTiles] = useState(false);
   const [isPrefetchingTileSources, setIsPrefetchingTileSources] = useState(false);
   const [tileSourcesPrefetched, setTileSourcesPrefetched] = useState(false);
@@ -2042,6 +2044,9 @@ export default function TestScreen() {
 
   useEffect(() => {
     setGridStabilized(false);
+    if (Platform.OS !== 'web') {
+      setNativeCanvasPaintReady(false);
+    }
   }, [activeFileId, loadToken, viewMode]);
   useEffect(() => {
     if (viewMode !== 'modify') {
@@ -2083,6 +2088,15 @@ export default function TestScreen() {
       setGridStabilized(false);
       return;
     }
+    const isNativeWithPreview =
+      Platform.OS !== 'web' && Boolean(loadPreviewUri || clearPreviewUri);
+    if (isNativeWithPreview && !nativeCanvasPaintReady) {
+      const delayMs = isExpoGo ? 1800 : 2500;
+      const timeout = setTimeout(() => {
+        setNativeCanvasPaintReady(true);
+      }, delayMs);
+      return () => clearTimeout(timeout);
+    }
     let raf1: number | null = null;
     let raf2: number | null = null;
     raf1 = requestAnimationFrame(() => {
@@ -2098,7 +2112,13 @@ export default function TestScreen() {
         cancelAnimationFrame(raf2);
       }
     };
-  }, [viewMode, showGrid]);
+  }, [
+    viewMode,
+    showGrid,
+    loadPreviewUri,
+    clearPreviewUri,
+    nativeCanvasPaintReady,
+  ]);
 
   useEffect(() => {
     if (viewMode !== 'modify' || !activeFile || isInteractingRef.current) {
@@ -2386,9 +2406,12 @@ export default function TestScreen() {
               height: fullHeight,
             });
             if (uri) {
-              const target = `${PREVIEW_DIR}${activeFileId}-full.png`;
+              const ts = Date.now();
+              const target = `${PREVIEW_DIR}${activeFileId}-${ts}-full.png`;
               try {
-                await FileSystem.deleteAsync(target, { idempotent: true });
+                if (activeFile?.previewUri && activeFile.previewUri.startsWith(PREVIEW_DIR)) {
+                  await FileSystem.deleteAsync(activeFile.previewUri, { idempotent: true });
+                }
               } catch {
                 // ignore
               }
@@ -2403,9 +2426,12 @@ export default function TestScreen() {
               height: THUMB_SIZE,
             });
             if (thumbUri) {
-              const thumbTarget = `${PREVIEW_DIR}${activeFileId}-thumb.png`;
+              const ts = Date.now();
+              const thumbTarget = `${PREVIEW_DIR}${activeFileId}-${ts}-thumb.png`;
               try {
-                await FileSystem.deleteAsync(thumbTarget, { idempotent: true });
+                if (activeFile?.thumbnailUri && activeFile.thumbnailUri.startsWith(PREVIEW_DIR)) {
+                  await FileSystem.deleteAsync(activeFile.thumbnailUri, { idempotent: true });
+                }
               } catch {
                 // ignore
               }
@@ -2468,6 +2494,8 @@ export default function TestScreen() {
     activeLineWidth,
     ready,
     activeFileId,
+    activeFile?.previewUri,
+    activeFile?.thumbnailUri,
     upsertActiveFile,
     isHydratingFile,
     gridVisible,
@@ -2831,9 +2859,12 @@ export default function TestScreen() {
           height: fullHeight,
         });
         if (uri) {
-          const target = `${PREVIEW_DIR}${activeFileId}-full.png`;
+          const ts = Date.now();
+          const target = `${PREVIEW_DIR}${activeFileId}-${ts}-full.png`;
           try {
-            await FileSystem.deleteAsync(target, { idempotent: true });
+            if (activeFile?.previewUri && activeFile.previewUri.startsWith(PREVIEW_DIR)) {
+              await FileSystem.deleteAsync(activeFile.previewUri, { idempotent: true });
+            }
           } catch {
             // ignore
           }
@@ -2848,9 +2879,12 @@ export default function TestScreen() {
           height: THUMB_SIZE,
         });
         if (thumbUri) {
-          const thumbTarget = `${PREVIEW_DIR}${activeFileId}-thumb.png`;
+          const ts = Date.now();
+          const thumbTarget = `${PREVIEW_DIR}${activeFileId}-${ts}-thumb.png`;
           try {
-            await FileSystem.deleteAsync(thumbTarget, { idempotent: true });
+            if (activeFile?.thumbnailUri && activeFile.thumbnailUri.startsWith(PREVIEW_DIR)) {
+              await FileSystem.deleteAsync(activeFile.thumbnailUri, { idempotent: true });
+            }
           } catch {
             // ignore
           }
@@ -3846,8 +3880,8 @@ export default function TestScreen() {
           <ThemedView style={styles.headerRow}>
             <NavButton
               label="< Modify"
-              onPress={() => {
-                void persistActiveFileNow();
+              onPress={async () => {
+                await persistActiveFileNow();
                 setViewMode('file');
               }}
             />
@@ -3956,12 +3990,21 @@ export default function TestScreen() {
                   ]}
                 />
               )}
-              <Image
-                source={{ uri: clearPreviewUri ?? loadPreviewUri ?? undefined }}
-                style={styles.gridPreview}
-                resizeMode="cover"
-                pointerEvents="none"
-              />
+              {Platform.OS === 'web' ? (
+                <Image
+                  source={{ uri: clearPreviewUri ?? loadPreviewUri ?? undefined }}
+                  style={styles.gridPreview}
+                  resizeMode="cover"
+                  pointerEvents="none"
+                />
+              ) : (
+                <ExpoImage
+                  source={{ uri: clearPreviewUri ?? loadPreviewUri ?? '' }}
+                  style={styles.gridPreview}
+                  contentFit="cover"
+                  pointerEvents="none"
+                />
+              )}
             </>
           )}
           {(settings.mirrorHorizontal || settings.mirrorVertical) &&
@@ -4144,6 +4187,11 @@ export default function TestScreen() {
                   cloneSampleIndex={brush.mode === 'clone' ? cloneSampleIndex : null}
                   cloneAnchorIndex={brush.mode === 'clone' ? cloneAnchorIndex : null}
                   cloneCursorIndex={brush.mode === 'clone' ? cloneCursorIndex : null}
+                  onPaintReady={
+                    Platform.OS !== 'web'
+                      ? () => setNativeCanvasPaintReady(true)
+                      : undefined
+                  }
                 />
               ) : (
                 rowIndices.map((rowIndex) => (

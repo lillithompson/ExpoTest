@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Canvas, Circle, Group, ImageSVG, Rect, Skia } from '@shopify/react-native-skia';
 
 import { getSvgXmlWithOverrides } from '@/components/tile-asset';
@@ -24,6 +24,8 @@ type Props = {
   cloneSampleIndex: number | null;
   cloneAnchorIndex: number | null;
   cloneCursorIndex: number | null;
+  /** Called when the canvas has loaded SVGs and painted (so a cached preview can be hidden). */
+  onPaintReady?: () => void;
 };
 
 type SvgEntry = {
@@ -51,7 +53,9 @@ export function TileGridCanvas({
   cloneSampleIndex,
   cloneAnchorIndex,
   cloneCursorIndex,
+  onPaintReady,
 }: Props) {
+  const paintReadyCalledRef = useRef(false);
   const sources = useMemo(() => {
     const entries: Array<{ key: string; name: string; source: unknown; strokeWidth: number }> = [];
     tileSources.forEach((source) => {
@@ -108,6 +112,39 @@ export function TileGridCanvas({
       cancelled = true;
     };
   }, [sources, strokeColor]);
+
+  useEffect(() => {
+    if (sources.length === 0) {
+      paintReadyCalledRef.current = false;
+      return;
+    }
+    return () => {
+      paintReadyCalledRef.current = false;
+    };
+  }, [sources.length]);
+
+  useEffect(() => {
+    if (!onPaintReady || svgMap.size === 0) {
+      return;
+    }
+    if (paintReadyCalledRef.current) {
+      return;
+    }
+    let raf1: number | null = null;
+    let raf2: number | null = null;
+    raf1 = requestAnimationFrame(() => {
+      raf2 = requestAnimationFrame(() => {
+        if (!paintReadyCalledRef.current) {
+          paintReadyCalledRef.current = true;
+          onPaintReady();
+        }
+      });
+    });
+    return () => {
+      if (raf1 !== null) cancelAnimationFrame(raf1);
+      if (raf2 !== null) cancelAnimationFrame(raf2);
+    };
+  }, [svgMap.size, onPaintReady]);
 
   const debugConnections = useMemo(() => {
     if (!showDebug) {

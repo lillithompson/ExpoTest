@@ -21,6 +21,7 @@ export function TileGridCanvas(_props: {
   cloneSampleIndex: number | null;
   cloneAnchorIndex: number | null;
   cloneCursorIndex: number | null;
+  onPaintReady?: () => void;
 }) {
   return null;
 }
