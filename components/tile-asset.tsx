@@ -4,6 +4,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Image, Platform, type ImageProps } from 'react-native';
 import { SvgUri, SvgXml } from 'react-native-svg';
 
+import { isUgcTileFileUri } from '@/utils/tile-uri';
+
 type Props = {
   source: unknown;
   name?: string;
@@ -325,12 +327,7 @@ export function TileAsset({
     sourceRef.current = source;
   }, [source]);
 
-  // On native, never use cache for UGC file URIs so we always load from disk and avoid wrong cache hits.
-  const isUgcFileUri =
-    Platform.OS !== 'web' &&
-    typeof uri === 'string' &&
-    uri.startsWith('file:') &&
-    uri.includes('/tile-sets/');
+  const isUgcFileUri = isUgcTileFileUri(uri, Platform.OS);
 
   useEffect(() => {
     if (!isSvg) {

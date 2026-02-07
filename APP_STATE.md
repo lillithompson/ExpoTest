@@ -139,6 +139,8 @@ Tile Set Baking and Caching
 SVG Loading and Caching (TileAsset)
 - SVG XML is cached in-memory (`svgXmlCache`) by URI. SVG overrides are cached in `svgOverrideCache`.
 - SVGs are loaded via `FileSystem.readAsStringAsync` on native and `fetch` on web.
+- On native, UGC tile file URIs (file:// and path contains `/tile-sets/`) never use the shared cache: `isUgcTileFileUri` (utils/tile-uri.ts) identifies them; TileAsset skips svgOverrideCache/svgXmlCache read and does not write loaded XML to the cache for these URIs. This prevents wrong-tile display when a cached built-in tile would otherwise be returned for a UGC placement (e.g. on Expo Go).
+- TileAtlasSprite keys TileAsset by source URI (`key={sourceUri ?? name}`) so each distinct source gets a fresh instance and no stale cached content is reused when the source changes.
 - `prefetchTileAssets` warms the cache for palette and file sources during Modify view.
 - In-flight SVG reads are de-duplicated, and XML is cached under both original and resolved URIs.
 
@@ -167,3 +169,4 @@ Performance and Interaction
 
 Testing
 - Unit tests for tile resolution and hydration live in `utils/__tests__/tile-grid.test.ts`. They assert: `hydrateTilesWithSourceNames` assigns `tile.name` from the file's sourceNames so UGC index 0 gets the UGC name; `resolveDisplaySource` uses only name-based resolution when `tile.name` is set (never index, so wrong tile cannot show); `getTileSourceIndexByName` resolves by name; `normalizeTiles` preserves `tile.name`. Run with `npm test` (or `npm run test:watch`). Run tests when changing tile-grid utils or UGC/placement/hydration logic.
+- Unit tests for UGC URI detection live in `utils/__tests__/tile-uri.test.ts`. They assert: `isUgcTileFileUri` returns false on web; on native it returns true only for file:// URIs whose path contains `/tile-sets/`, so the TileAsset cache-bypass rule is well-defined and regression-safe. Run tests when changing utils/tile-uri.ts or TileAsset cache behavior.
