@@ -47,6 +47,13 @@ import {
   renderTileCanvasToSvg,
 } from '@/utils/tile-export';
 import { getTransformedConnectionsForName, parseTileConnections, transformConnections } from '@/utils/tile-compat';
+import {
+  buildPreviewPath,
+  getFilePreviewUri,
+  hasPreview as hasPreviewState,
+  isOwnPreviewUri,
+  showPreview as showPreviewState,
+} from '@/utils/preview-state';
 import { hydrateTilesWithSourceNames, normalizeTiles, type Tile } from '@/utils/tile-grid';
 
 const GRID_GAP = 0;
@@ -1544,9 +1551,9 @@ export default function TestScreen() {
   ]);
   const isReadyLatched = readyLatchToken === loadToken && loadToken !== 0;
   const showGrid = isReadyLatched;
-  const hasPreview = Boolean(loadPreviewUri || clearPreviewUri);
+  const hasPreview = hasPreviewState(loadPreviewUri, clearPreviewUri);
   const gridVisible = showGrid && gridStabilized;
-  const showPreview = hasPreview && (isClearing || !gridVisible);
+  const showPreview = showPreviewState(hasPreview, gridVisible, isClearing);
   const showOverlays = !isCapturingPreview && !suspendTiles && gridVisible;
   const downloadPreviewUri = useMemo(() => {
     if (!downloadTargetFile) {
@@ -2017,7 +2024,7 @@ export default function TestScreen() {
     loadTokenRef.current = nextToken;
     setLoadToken(nextToken);
     setLoadedToken(0);
-    const previewUri = file.previewUri ?? file.thumbnailUri ?? null;
+    const previewUri = getFilePreviewUri(file);
     setLoadPreviewUri(previewUri);
     setHydrating(true);
     setSuspendTiles(true);
@@ -2407,9 +2414,9 @@ export default function TestScreen() {
             });
             if (uri) {
               const ts = Date.now();
-              const target = `${PREVIEW_DIR}${activeFileId}-${ts}-full.png`;
+              const target = buildPreviewPath(PREVIEW_DIR, activeFileId, 'full', ts);
               try {
-                if (activeFile?.previewUri && activeFile.previewUri.startsWith(PREVIEW_DIR)) {
+                if (activeFile?.previewUri && isOwnPreviewUri(activeFile.previewUri, PREVIEW_DIR)) {
                   await FileSystem.deleteAsync(activeFile.previewUri, { idempotent: true });
                 }
               } catch {
@@ -2427,9 +2434,9 @@ export default function TestScreen() {
             });
             if (thumbUri) {
               const ts = Date.now();
-              const thumbTarget = `${PREVIEW_DIR}${activeFileId}-${ts}-thumb.png`;
+              const thumbTarget = buildPreviewPath(PREVIEW_DIR, activeFileId, 'thumb', ts);
               try {
-                if (activeFile?.thumbnailUri && activeFile.thumbnailUri.startsWith(PREVIEW_DIR)) {
+                if (activeFile?.thumbnailUri && isOwnPreviewUri(activeFile.thumbnailUri, PREVIEW_DIR)) {
                   await FileSystem.deleteAsync(activeFile.thumbnailUri, { idempotent: true });
                 }
               } catch {
@@ -2860,9 +2867,9 @@ export default function TestScreen() {
         });
         if (uri) {
           const ts = Date.now();
-          const target = `${PREVIEW_DIR}${activeFileId}-${ts}-full.png`;
+          const target = buildPreviewPath(PREVIEW_DIR, activeFileId, 'full', ts);
           try {
-            if (activeFile?.previewUri && activeFile.previewUri.startsWith(PREVIEW_DIR)) {
+            if (activeFile?.previewUri && isOwnPreviewUri(activeFile.previewUri, PREVIEW_DIR)) {
               await FileSystem.deleteAsync(activeFile.previewUri, { idempotent: true });
             }
           } catch {
@@ -2880,9 +2887,9 @@ export default function TestScreen() {
         });
         if (thumbUri) {
           const ts = Date.now();
-          const thumbTarget = `${PREVIEW_DIR}${activeFileId}-${ts}-thumb.png`;
+          const thumbTarget = buildPreviewPath(PREVIEW_DIR, activeFileId, 'thumb', ts);
           try {
-            if (activeFile?.thumbnailUri && activeFile.thumbnailUri.startsWith(PREVIEW_DIR)) {
+            if (activeFile?.thumbnailUri && isOwnPreviewUri(activeFile.thumbnailUri, PREVIEW_DIR)) {
               await FileSystem.deleteAsync(activeFile.thumbnailUri, { idempotent: true });
             }
           } catch {
@@ -3003,9 +3010,8 @@ export default function TestScreen() {
     if (!file) {
       return;
     }
-    const previewUri = file.previewUri ?? file.thumbnailUri ?? null;
     setLoadRequestId((prev) => prev + 1);
-    setLoadPreviewUri(previewUri);
+    setLoadPreviewUri(getFilePreviewUri(file));
     setSuspendTiles(true);
     setHydrating(true);
     setActive(file.id);
