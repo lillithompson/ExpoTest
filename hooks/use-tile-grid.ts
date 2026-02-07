@@ -36,6 +36,11 @@ type Params = {
     | { tiles: Tile[]; width: number; height: number; rotation: number; mirrorX: boolean }
     | null;
   patternAnchorKey?: string | null;
+  onFixedPlacementDebug?: (payload: {
+    fixedIndex: number;
+    tileName: string | null;
+    tileSourcesLength: number;
+  }) => void;
 };
 
 type Result = {
@@ -78,6 +83,7 @@ export const useTileGrid = ({
   mirrorVertical,
   pattern,
   patternAnchorKey,
+  onFixedPlacementDebug,
 }: Params): Result => {
   const clearLogRef = useRef<{ clearId: number } | null>(null);
   const previousTileSourcesRef = useRef<TileSource[] | null>(null);
@@ -749,6 +755,13 @@ export const useTileGrid = ({
     if (brush.mode === 'fixed') {
       const fixedIndex = brush.index;
       if (fixedIndex >= 0 && fixedIndex < tileSourcesLength) {
+        if (onFixedPlacementDebug) {
+          onFixedPlacementDebug({
+            fixedIndex,
+            tileName: tileSources[fixedIndex]?.name ?? null,
+            tileSourcesLength,
+          });
+        }
         applyPlacement(cellIndex, {
           imageIndex: fixedIndex,
           rotation: brush.rotation,

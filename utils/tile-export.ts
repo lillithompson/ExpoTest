@@ -1,5 +1,6 @@
 import { Asset } from 'expo-asset';
 import { Image as RNImage, Platform } from 'react-native';
+import * as FileSystem from 'expo-file-system';
 
 import { type TileSource } from '@/assets/images/tiles/manifest';
 import { type GridLayout, type Tile } from '@/utils/tile-grid';
@@ -254,13 +255,40 @@ export const renderTileCanvasToSvg = async ({
   const rawSvgCache = sourceXmlCache ?? new Map<string, string>();
   const svgCache = new Map<string, { content: string; viewBox: string | null }>();
   const dataUriCache = new Map<string, string>();
+  const decodeDataSvg = (uri: string) => {
+    const commaIndex = uri.indexOf(',');
+    if (commaIndex < 0) {
+      return null;
+    }
+    const meta = uri.slice(0, commaIndex).toLowerCase();
+    const data = uri.slice(commaIndex + 1);
+    try {
+      if (meta.includes(';base64')) {
+        return atob(data);
+      }
+      return decodeURIComponent(data);
+    } catch {
+      return null;
+    }
+  };
   const getRawSvg = async (uri: string) => {
     const cached = rawSvgCache.get(uri);
     if (cached) {
       return cached;
     }
-    const response = await fetch(uri);
-    const xml = await response.text();
+    let xml = '';
+    if (uri.startsWith('data:image/svg+xml')) {
+      xml = decodeDataSvg(uri) ?? '';
+    } else if (Platform.OS === 'web') {
+      const response = await fetch(uri);
+      xml = await response.text();
+    } else {
+      try {
+        xml = await FileSystem.readAsStringAsync(uri);
+      } catch {
+        xml = '';
+      }
+    }
     rawSvgCache.set(uri, xml);
     return xml;
   };

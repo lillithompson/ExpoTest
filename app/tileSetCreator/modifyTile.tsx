@@ -299,7 +299,7 @@ export default function ModifyTileScreen() {
   const setId = params.setId ?? '';
   const tileId = params.tileId ?? '';
   const { settings, setSettings } = usePersistedSettings();
-  const { tileSets, updateTileInSet } = useTileSets();
+  const { tileSets, updateTileInSet, updateTileSet } = useTileSets();
   const { patternsByCategory } = useTilePatterns();
   const [showTileSetChooser, setShowTileSetChooser] = useState(false);
   const [tileSetSelectionError, setTileSetSelectionError] = useState<string | null>(
@@ -318,9 +318,11 @@ export default function ModifyTileScreen() {
     return valid.length > 0 ? valid : [TILE_CATEGORIES[0]];
   };
   const selectedCategories = normalizeCategories(
-    Array.isArray(settings.tileModifyCategories)
-      ? (settings.tileModifyCategories as TileCategory[])
-      : []
+    tileSet?.categories && tileSet.categories.length > 0
+      ? tileSet.categories
+      : Array.isArray(settings.tileModifyCategories)
+        ? (settings.tileModifyCategories as TileCategory[])
+        : []
   );
   const tileSources = useMemo(() => {
     const categorySources = selectedCategories.flatMap(

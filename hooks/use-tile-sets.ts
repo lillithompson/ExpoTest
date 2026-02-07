@@ -344,22 +344,26 @@ export const useTileSets = () => {
             const fileName = `${tile.id}_${tile.updatedAt}_${bits}.svg`;
             const qualifiedName = qualifyBakedName(set.id, fileName);
             currentNames.push(qualifiedName);
-          const svg = await renderTileCanvasToSvg({
-            tiles: tile.tiles,
-            gridLayout: {
-              rows: tile.grid.rows,
-              columns: tile.grid.columns,
-              tileSize: tile.preferredTileSize,
-            },
-            tileSources: sources,
-            gridGap: 0,
-            errorSource: null,
-            lineColor: undefined,
-            lineWidth: undefined,
-            backgroundColor: null,
-            sourceXmlCache: svgSourceCacheRef.current,
-            outputSize: set.resolution * 256,
-          });
+            const fallbackRows =
+              tile.grid.rows > 0 ? tile.grid.rows : set.resolution;
+            const fallbackColumns =
+              tile.grid.columns > 0 ? tile.grid.columns : set.resolution;
+            const svg = await renderTileCanvasToSvg({
+              tiles: tile.tiles,
+              gridLayout: {
+                rows: fallbackRows,
+                columns: fallbackColumns,
+                tileSize: tile.preferredTileSize,
+              },
+              tileSources: sources,
+              gridGap: 0,
+              errorSource: null,
+              lineColor: undefined,
+              lineWidth: undefined,
+              backgroundColor: null,
+              sourceXmlCache: svgSourceCacheRef.current,
+              outputSize: set.resolution * 256,
+            });
           if (!svg) {
             if (prevSource) {
               bakedSources.push({ ...prevSource, name: qualifiedName });

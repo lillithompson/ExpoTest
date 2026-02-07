@@ -33,6 +33,7 @@ type SvgEntry = {
 };
 
 const DOT_SIZE = 6;
+const loggedRenderMismatch = new Set<string>();
 
 export function TileGridCanvas({
   width,
@@ -72,6 +73,15 @@ export function TileGridCanvas({
     });
     return entries;
   }, [tileSources, strokeScaleByName, strokeWidth, errorSource]);
+  const sourceByName = useMemo(() => {
+    const map = new Map<string, TileSource>();
+    tileSources.forEach((source) => {
+      if (!map.has(source.name)) {
+        map.set(source.name, source);
+      }
+    });
+    return map;
+  }, [tileSources]);
 
   const [svgMap, setSvgMap] = useState<Map<string, ReturnType<typeof Skia.SVG.MakeFromString>>>(
     new Map()
@@ -111,9 +121,24 @@ export function TileGridCanvas({
       if (!tile || tile.imageIndex < 0) {
         continue;
       }
-      const tileName = tileSources[tile.imageIndex]?.name ?? '';
+      const tileName = tile.name ?? tileSources[tile.imageIndex]?.name ?? '';
       if (!tileName) {
         continue;
+      }
+      if (
+        tile.name &&
+        tileSources[tile.imageIndex] &&
+        tileSources[tile.imageIndex]?.name !== tile.name
+      ) {
+        const key = `mismatch:${tile.name}:${tileSources[tile.imageIndex]?.name ?? ''}`;
+        if (!loggedRenderMismatch.has(key)) {
+          loggedRenderMismatch.add(key);
+          console.log('[ugc-debug] render-mismatch', {
+            tileName: tile.name,
+            imageIndex: tile.imageIndex,
+            indexName: tileSources[tile.imageIndex]?.name ?? null,
+          });
+        }
       }
       const connections = getTransformedConnectionsForName(
         tileName,
@@ -174,8 +199,21 @@ export function TileGridCanvas({
         }
         continue;
       }
-      const source = tileSources[tile.imageIndex];
-      const svg = source ? svgMap.get(source.name) : null;
+      const tileName = tile.name ?? tileSources[tile.imageIndex]?.name ?? '';
+      const sourceEntry =
+        (tileName ? sourceByName.get(tileName) : null) ?? tileSources[tile.imageIndex];
+      if (tileName && !sourceEntry) {
+        const key = `missing:${tileName}`;
+        if (!loggedRenderMismatch.has(key)) {
+          loggedRenderMismatch.add(key);
+          console.log('[ugc-debug] render-missing', {
+            tileName,
+            imageIndex: tile.imageIndex,
+            tileSourcesLength: tileSources.length,
+          });
+        }
+      }
+      const svg = sourceEntry ? svgMap.get(sourceEntry.name) : null;
       if (!svg) {
         continue;
       }

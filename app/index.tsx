@@ -66,7 +66,48 @@ const DEFAULT_CATEGORY = (TILE_CATEGORIES as string[]).includes('angular')
 const ERROR_TILE = require('@/assets/images/tiles/tile_error.svg');
 const PREVIEW_DIR = `${FileSystem.cacheDirectory ?? ''}tile-previews/`;
 const THUMB_SIZE = 256;
-const DEBUG_LOAD_TRACE = true;
+const DEBUG_LOAD_TRACE = false;
+const DEBUG_UGC_MAPPING = true;
+const DEBUG_TILE_RENDER = true;
+const loggedTileRenders = new Set<string>();
+const DEBUG_FILE_CHECK = true;
+const buildUserTileSourceFromName = (name: string): TileSource | null => {
+  if (!name.includes(':')) {
+    return null;
+  }
+  const [setId, fileName] = name.split(':');
+  if (!setId || !fileName) {
+    return null;
+  }
+  const baseDir = FileSystem.documentDirectory ?? FileSystem.cacheDirectory ?? '';
+  if (!baseDir) {
+    return null;
+  }
+  return {
+    name,
+    source: { uri: `${baseDir}tile-sets/${setId}/${fileName}` },
+  };
+};
+const normalizeUserTileSource = (source: TileSource | null, name: string) => {
+  if (!name.includes(':')) {
+    return source;
+  }
+  const direct = buildUserTileSourceFromName(name);
+  if (Platform.OS === 'web') {
+    return source ?? direct;
+  }
+  if (!source) {
+    return direct;
+  }
+  if (source.source === ERROR_TILE) {
+    return direct ?? source;
+  }
+  const uri = (source.source as { uri?: string } | null)?.uri ?? '';
+  if (uri.includes('/tile-sets/')) {
+    return source;
+  }
+  return direct ?? source;
+};
 const clamp = (value: number, min: number, max: number) =>
   Math.min(max, Math.max(min, value));
 const hexToRgb = (value: string) => {
@@ -461,6 +502,45 @@ const TileCell = memo(
       tile.imageIndex >= 0 ? tileSources[tile.imageIndex] ?? null : null;
     const resolved = resolvedByName ?? resolvedByIndex;
     const tileName = tile.name ?? resolvedByIndex?.name ?? '';
+    const showRenderLabel =
+      DEBUG_TILE_RENDER &&
+      (tileName.includes('tileset-') ||
+        (resolvedByIndex?.name ?? '').includes('tileset-'));
+    if (DEBUG_TILE_RENDER && tile.imageIndex >= 0) {
+      const hasUgc =
+        (tile.name && tile.name.includes('tileset-')) ||
+        (resolvedByIndex?.name ?? '').includes('tileset-') ||
+        (resolvedByName?.name ?? '').includes('tileset-');
+      if (hasUgc) {
+        const key = `${cellIndex}:${tile.imageIndex}:${tile.name ?? ''}:${
+          resolvedByIndex?.name ?? ''
+        }`;
+        if (!loggedTileRenders.has(key)) {
+          loggedTileRenders.add(key);
+          const toUri = (value: unknown) => {
+            if (!value) {
+              return null;
+            }
+            if (typeof value === 'string') {
+              return value;
+            }
+            if (typeof value === 'number') {
+              return `module:${value}`;
+            }
+            const uri = (value as { uri?: string } | null)?.uri;
+            return uri ?? null;
+          };
+          console.log('[ugc-debug] render', {
+            cellIndex,
+            imageIndex: tile.imageIndex,
+            tileName: tile.name ?? null,
+            resolvedByName: resolvedByName?.name ?? null,
+            resolvedByIndex: resolvedByIndex?.name ?? null,
+            resolvedUri: toUri(resolved?.source ?? null),
+          });
+        }
+      }
+    }
     const connections = useMemo(
       () =>
         showDebug && tile.imageIndex >= 0
@@ -518,6 +598,11 @@ const TileCell = memo(
             resizeMode="cover"
           />
         )}
+        {showRenderLabel && (
+          <Text style={styles.tileDebugLabel} numberOfLines={1}>
+            {`${tile.imageIndex}:${tileName}`}
+          </Text>
+        )}
         {showOverlays && isCloneTargetOrigin && (
           <View pointerEvents="none" style={styles.cloneTargetOrigin} />
         )}
@@ -536,6 +621,7 @@ const TileCell = memo(
     prev.tile.rotation === next.tile.rotation &&
     prev.tile.mirrorX === next.tile.mirrorX &&
     prev.tile.mirrorY === next.tile.mirrorY &&
+    prev.tile.name === next.tile.name &&
     prev.tileSize === next.tileSize &&
     prev.showDebug === next.showDebug &&
     prev.strokeColor === next.strokeColor &&
@@ -564,6 +650,7 @@ export default function TestScreen() {
   );
   const [selectedTileSetIds, setSelectedTileSetIds] = useState<string[]>([]);
   const [fileSourceNames, setFileSourceNames] = useState<string[]>([]);
+  const [lastFileCheck, setLastFileCheck] = useState<string>('');
   const [tileSetSelectionError, setTileSetSelectionError] = useState<string | null>(
     null
   );
@@ -773,9 +860,9 @@ export default function TestScreen() {
       }
       const direct = allSourceLookup.get(name);
       if (direct) {
-        return direct;
+        return normalizeUserTileSource(direct, name);
       }
-      return null;
+      return normalizeUserTileSource(null, name);
     },
     [allSourceLookup, bakedLegacyLookup]
   );
@@ -846,12 +933,34 @@ export default function TestScreen() {
     },
     [resolveSourceName, getSourcesForSelection, selectedCategories, selectedTileSetIds]
   );
+  const rawActiveFileSourceNames = useMemo(() => {
+    if (activeFile && Array.isArray(activeFile.sourceNames) && activeFile.sourceNames.length > 0) {
+      return activeFile.sourceNames;
+    }
+    if (fileSourceNames.length > 0) {
+      return fileSourceNames;
+    }
+    return [];
+  }, [activeFile, fileSourceNames]);
+  const activeFileSourceNames = useMemo(() => {
+    if (rawActiveFileSourceNames.length === 0) {
+      return fileSourceNames;
+    }
+    if (fileSourceNames.length === 0) {
+      return rawActiveFileSourceNames;
+    }
+    const hasNew = fileSourceNames.some((name) => !rawActiveFileSourceNames.includes(name));
+    return hasNew ? fileSourceNames : rawActiveFileSourceNames;
+  }, [rawActiveFileSourceNames, fileSourceNames]);
   const tileSources = useMemo(() => {
-    const stored =
-      activeFile && Array.isArray(activeFile.sourceNames) && activeFile.sourceNames.length > 0
-        ? activeFile.sourceNames
-        : fileSourceNames;
+    const stored = activeFileSourceNames;
     const tileSetIds = Array.isArray(activeFile?.tileSetIds) ? activeFile.tileSetIds : [];
+    const paletteLookup = new Map<string, TileSource>();
+    paletteSources.forEach((source) => {
+      if (!paletteLookup.has(source.name)) {
+        paletteLookup.set(source.name, source);
+      }
+    });
     if (stored.length === 0) {
       if (activeFile && Array.isArray(activeFile.tiles) && activeFile.tiles.length > 0) {
         return getSourcesForFile(activeFile);
@@ -859,18 +968,45 @@ export default function TestScreen() {
       return paletteSources;
     }
     return stored.map((name) => {
-      const resolved = resolveSourceName(name, tileSetIds);
+      const resolved = paletteLookup.get(name) ?? resolveSourceName(name, tileSetIds);
+      const normalized = normalizeUserTileSource(resolved ?? null, name);
       return (
-        resolved ?? {
+        normalized ?? {
           name,
           source: ERROR_TILE,
         }
       );
     });
-  }, [activeFile, fileSourceNames, paletteSources, resolveSourceName, getSourcesForFile]);
+  }, [
+    activeFile,
+    fileSourceNames,
+    paletteSources,
+    resolveSourceName,
+    getSourcesForFile,
+  ]);
   const lastDebugLogRef = useRef<string | null>(null);
+  const fileSourceNamesForMapping =
+    activeFileSourceNames.length > 0 ? activeFileSourceNames : fileSourceNames;
+  const fileIndexByName = useMemo(() => {
+    const indexByName = new Map<string, number>();
+    fileSourceNamesForMapping.forEach((name, index) => {
+      if (!indexByName.has(name)) {
+        indexByName.set(name, index);
+      }
+    });
+    return indexByName;
+  }, [fileSourceNamesForMapping]);
+  const tileIndexByName = useMemo(() => {
+    const indexByName = new Map<string, number>();
+    tileSources.forEach((source, index) => {
+      if (!indexByName.has(source.name)) {
+        indexByName.set(source.name, index);
+      }
+    });
+    return indexByName;
+  }, [tileSources]);
   useEffect(() => {
-    if (Platform.OS === 'web') {
+    if (!DEBUG_UGC_MAPPING || Platform.OS === 'web') {
       return;
     }
     const file = activeFile ?? activeFileRef.current ?? null;
@@ -880,7 +1016,8 @@ export default function TestScreen() {
     const sourceNames = Array.isArray(file.sourceNames) ? file.sourceNames : [];
     const tileSetIds = Array.isArray(file.tileSetIds) ? file.tileSetIds : [];
     const tileSourcesNames = tileSources.map((source) => source.name);
-    const key = `${file.id}|${tileSetIds.join('|')}|${sourceNames.join('|')}|${tileSourcesNames.join('|')}`;
+    const paletteNames = paletteSources.map((source) => source.name);
+    const key = `${file.id}|${tileSetIds.join('|')}|${sourceNames.join('|')}|${tileSourcesNames.join('|')}|${paletteNames.join('|')}`;
     if (lastDebugLogRef.current === key) {
       return;
     }
@@ -892,15 +1029,30 @@ export default function TestScreen() {
       const entry = tileSources[tile.imageIndex];
       return { imageIndex: tile.imageIndex, name: entry?.name ?? null };
     });
-    console.log('[ugc-debug] file', {
+    const firstPaletteMap = paletteSources.slice(0, 12).map((source, index) => ({
+      index,
+      name: source.name,
+      tileIndex: tileIndexByName.get(source.name) ?? -1,
+      fileIndex: fileIndexByName.get(source.name) ?? -1,
+    }));
+    console.log('[ugc-debug] sources', {
       id: file.id,
       tileSetIds,
-      sourceNames: sourceNames.slice(0, 8),
-      tileSources: tileSourcesNames.slice(0, 8),
+      sourceNames: sourceNames.slice(0, 12),
+      tileSources: tileSourcesNames.slice(0, 12),
+      paletteSources: paletteNames.slice(0, 12),
+      firstPaletteMap,
       firstTileMappings,
       bakedSetIds: Object.keys(bakedSourcesBySetId),
     });
-  }, [activeFile, tileSources, bakedSourcesBySetId]);
+  }, [
+    activeFile,
+    tileSources,
+    paletteSources,
+    fileIndexByName,
+    tileIndexByName,
+    bakedSourcesBySetId,
+  ]);
   const tileSourcesSignature = useMemo(
     () =>
       tileSources
@@ -913,34 +1065,11 @@ export default function TestScreen() {
         .join('|'),
     [tileSources]
   );
-  const tileSourcesPrefetchKey = useMemo(() => {
-    const stored =
-      activeFile && Array.isArray(activeFile.sourceNames) && activeFile.sourceNames.length > 0
-        ? activeFile.sourceNames
-        : fileSourceNames;
-    return `${activeFileId ?? 'none'}|${loadToken}|${stored.join('|')}`;
-  }, [activeFileId, loadToken, activeFile, fileSourceNames]);
-  const activeFileSourceNames = useMemo(() => {
-    if (activeFile && Array.isArray(activeFile.sourceNames) && activeFile.sourceNames.length > 0) {
-      return activeFile.sourceNames;
-    }
-    if (fileSourceNames.length > 0) {
-      return fileSourceNames;
-    }
-    return [];
-  }, [activeFile, fileSourceNames]);
+  const tileSourcesPrefetchKey = useMemo(
+    () => `${activeFileId ?? 'none'}|${loadToken}|${activeFileSourceNames.join('|')}`,
+    [activeFileId, loadToken, activeFileSourceNames]
+  );
   const renderTileSources = useMemo(() => tileSources, [tileSourcesSignature]);
-  const fileSourceNamesForMapping =
-    activeFileSourceNames.length > 0 ? activeFileSourceNames : fileSourceNames;
-  const fileIndexByName = useMemo(() => {
-    const indexByName = new Map<string, number>();
-    fileSourceNamesForMapping.forEach((name, index) => {
-      if (!indexByName.has(name)) {
-        indexByName.set(name, index);
-      }
-    });
-    return indexByName;
-  }, [fileSourceNamesForMapping]);
   const paletteIndexByName = useMemo(() => {
     const map = new Map<string, number>();
     paletteSources.forEach((source, index) => {
@@ -951,8 +1080,8 @@ export default function TestScreen() {
     return map;
   }, [paletteSources]);
   const paletteIndexToFileIndex = useMemo(
-    () => paletteSources.map((source) => fileIndexByName.get(source.name) ?? -1),
-    [fileIndexByName, paletteSources]
+    () => paletteSources.map((source) => tileIndexByName.get(source.name) ?? -1),
+    [tileIndexByName, paletteSources]
   );
   const strokeScaleByName = useMemo(() => {
     const map = new Map<string, number>();
@@ -969,13 +1098,13 @@ export default function TestScreen() {
     if (brush.mode !== 'fixed') {
       return brush;
     }
-    const name = fileSourceNamesForMapping[brush.index];
+    const name = tileSources[brush.index]?.name ?? fileSourceNamesForMapping[brush.index];
     const paletteIndex = name ? paletteIndexByName.get(name) ?? -1 : -1;
     if (paletteIndex < 0) {
       return { ...brush, index: -1 };
     }
     return { ...brush, index: paletteIndex };
-  }, [brush, fileSourceNamesForMapping, paletteIndexByName]);
+  }, [brush, tileSources, fileSourceNamesForMapping, paletteIndexByName]);
   const randomSourceIndices = useMemo(
     () => paletteIndexToFileIndex.filter((index) => index >= 0),
     [paletteIndexToFileIndex]
@@ -1101,6 +1230,16 @@ export default function TestScreen() {
         }
       : null,
     patternAnchorKey: selectedPattern?.id ?? null,
+    onFixedPlacementDebug: DEBUG_UGC_MAPPING
+      ? ({ fixedIndex, tileName, tileSourcesLength }) => {
+          console.log('[ugc-debug] place', {
+            fixedIndex,
+            tileName,
+            tileSourcesLength,
+            fileId: activeFileId ?? null,
+          });
+        }
+      : undefined,
   });
   const tilesSignature = useMemo(
     () =>
@@ -1235,10 +1374,58 @@ export default function TestScreen() {
     () => (Array.isArray(activeFile?.tileSetIds) ? activeFile.tileSetIds : []),
     [activeFile]
   );
+  const tileSourcesByName = useMemo(() => {
+    const map = new Map<string, TileSource>();
+    tileSources.forEach((source) => {
+      if (!map.has(source.name)) {
+        map.set(source.name, source);
+      }
+    });
+    return map;
+  }, [tileSources]);
   const resolveSourceForName = useCallback(
-    (name: string) => resolveSourceName(name, activeFileTileSetIds),
-    [resolveSourceName, activeFileTileSetIds]
+    (name: string) => {
+      const direct = tileSourcesByName.get(name);
+      if (direct) {
+        return normalizeUserTileSource(direct, name);
+      }
+      return normalizeUserTileSource(
+        resolveSourceName(name, activeFileTileSetIds),
+        name
+      );
+    },
+    [resolveSourceName, activeFileTileSetIds, tileSourcesByName]
   );
+  const handleCheckUgcFile = useCallback(async () => {
+    const candidate =
+      (activeFileSourceNames.find((name) => name.includes(':')) ??
+        fileSourceNames.find((name) => name.includes(':')) ??
+        '') as string;
+    if (!candidate) {
+      Alert.alert('UGC File Check', 'No UGC tile name found in source names.');
+      return;
+    }
+    const direct = buildUserTileSourceFromName(candidate);
+    const uri = (direct?.source as { uri?: string } | null)?.uri ?? '';
+    if (!uri) {
+      Alert.alert('UGC File Check', 'Could not build a file path for this tile.');
+      return;
+    }
+    let exists = false;
+    try {
+      exists = await FileSystem.getInfoAsync(uri).then((info) => info.exists);
+    } catch {
+      exists = false;
+    }
+    const payload = `${candidate} -> ${uri} (${exists ? 'exists' : 'missing'})`;
+    setLastFileCheck(payload);
+    console.log('[ugc-debug] file-check', {
+      name: candidate,
+      uri,
+      exists,
+    });
+    Alert.alert('UGC File Check', payload);
+  }, [activeFileSourceNames, fileSourceNames]);
   const resolveTileAssetForFile = useCallback(
     (
       tile: Tile | undefined,
@@ -1379,6 +1566,30 @@ export default function TestScreen() {
       setReadyLatchToken(loadToken);
     }
   }, [isActiveFileRenderReady, loadToken]);
+  useEffect(() => {
+    if (loadToken === 0) {
+      return;
+    }
+    if (readyLatchToken !== loadToken) {
+      return;
+    }
+    if (
+      isActiveFileRenderReady ||
+      (!hasMissingTileSources &&
+        isTileSetSourcesReadyForActiveFile &&
+        areActiveFileSourcesResolved)
+    ) {
+      return;
+    }
+    setReadyLatchToken(0);
+  }, [
+    loadToken,
+    readyLatchToken,
+    isActiveFileRenderReady,
+    hasMissingTileSources,
+    isTileSetSourcesReadyForActiveFile,
+    areActiveFileSourcesResolved,
+  ]);
   const isReadyLatched = readyLatchToken === loadToken && loadToken !== 0;
   const showGrid = isReadyLatched;
   const hasPreview = Boolean(loadPreviewUri || clearPreviewUri);
@@ -3592,6 +3803,19 @@ export default function TestScreen() {
                   accessibilityLabel="Toggle debug overlay"
                 />
               </ThemedView>
+              {DEBUG_FILE_CHECK && (
+                <Pressable
+                  style={styles.settingsAction}
+                  onPress={handleCheckUgcFile}
+                  accessibilityRole="button"
+                  accessibilityLabel="Check UGC file path"
+                >
+                  <ThemedText type="defaultSemiBold">Check UGC File</ThemedText>
+                </Pressable>
+              )}
+              {DEBUG_FILE_CHECK && lastFileCheck ? (
+                <ThemedText type="defaultSemiBold">{lastFileCheck}</ThemedText>
+              ) : null}
               <HsvColorPicker
                 label="Background Color"
                 color={settings.backgroundColor}
@@ -4172,11 +4396,21 @@ export default function TestScreen() {
               if (!source) {
                 return;
               }
-              let fileIndex = fileIndexByName.get(source.name) ?? -1;
+              let fileIndex = tileIndexByName.get(source.name) ?? -1;
               if (fileIndex < 0) {
                 const updated = ensureFileSourceNames([source]);
                 const updatedIndex = updated.indexOf(source.name);
                 fileIndex = updatedIndex;
+              }
+              if (DEBUG_UGC_MAPPING) {
+                console.log('[ugc-debug] select', {
+                  paletteIndex: next.index,
+                  paletteName: source.name,
+                  tileIndex: tileIndexByName.get(source.name) ?? -1,
+                  fileIndexByName: fileIndexByName.get(source.name) ?? -1,
+                  resolvedFileIndex: fileIndex,
+                  tileSourcesAtIndex: tileSources[fileIndex]?.name ?? null,
+                });
               }
               if (fileIndex >= 0) {
                 setBrush({
@@ -4195,7 +4429,7 @@ export default function TestScreen() {
             setPaletteRotations((prev) => {
               const nextRotation = ((prev[index] ?? 0) + 90) % 360;
               const source = paletteSources[index];
-              const fileIndex = source ? fileIndexByName.get(source.name) ?? -1 : -1;
+              const fileIndex = source ? tileIndexByName.get(source.name) ?? -1 : -1;
               if (brush.mode === 'fixed' && fileIndex >= 0 && brush.index === fileIndex) {
                 setBrush({
                   mode: 'fixed',
@@ -4215,7 +4449,7 @@ export default function TestScreen() {
             setPaletteMirrors((prev) => {
               const nextMirror = !(prev[index] ?? false);
               const source = paletteSources[index];
-              const fileIndex = source ? fileIndexByName.get(source.name) ?? -1 : -1;
+              const fileIndex = source ? tileIndexByName.get(source.name) ?? -1 : -1;
               if (brush.mode === 'fixed' && fileIndex >= 0 && brush.index === fileIndex) {
                 setBrush({
                   mode: 'fixed',
@@ -4235,7 +4469,7 @@ export default function TestScreen() {
             setPaletteMirrorsY((prev) => {
               const nextMirror = !(prev[index] ?? false);
               const source = paletteSources[index];
-              const fileIndex = source ? fileIndexByName.get(source.name) ?? -1 : -1;
+              const fileIndex = source ? tileIndexByName.get(source.name) ?? -1 : -1;
               if (brush.mode === 'fixed' && fileIndex >= 0 && brush.index === fileIndex) {
                 setBrush({
                   mode: 'fixed',
@@ -5508,6 +5742,17 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
     borderRadius: 0,
+  },
+  tileDebugLabel: {
+    position: 'absolute',
+    left: 2,
+    right: 2,
+    bottom: 2,
+    fontSize: 8,
+    color: '#facc15',
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    paddingHorizontal: 2,
+    borderRadius: 2,
   },
   mirrorLines: {
     ...StyleSheet.absoluteFillObject,

@@ -17,6 +17,12 @@ type Props = {
 const svgXmlCache = new Map<string, string>();
 const svgOverrideCache = new Map<string, string>();
 const svgXmlInflight = new Map<string, Promise<string | null>>();
+const DEBUG_SVG_LOAD = false;
+const logSvgLoad = (_payload: { uri: string; ms: number; cache: boolean }) => {
+  if (!DEBUG_SVG_LOAD) {
+    return;
+  }
+};
 
 export const clearTileAssetCache = () => {
   svgXmlCache.clear();
@@ -267,7 +273,7 @@ export const getSvgXmlWithOverrides = async (
     const normalized = normalizeSvgRoot(stripped);
     const overridden = applySvgOverrides(normalized, strokeColor, strokeWidth);
     svgOverrideCache.set(overrideKey, overridden);
-    console.log('[perf:svg-load]', { uri, ms: Date.now() - start, cache: cached ? true : false });
+    logSvgLoad({ uri, ms: Date.now() - start, cache: cached ? true : false });
     return overridden;
   }
 
@@ -354,7 +360,7 @@ export function TileAsset({
             const cached = svgXmlCache.get(uri);
             if (cached) {
               setSvgXml((prev) => (prev === cached ? prev : cached));
-              console.log('[perf:svg-load]', { uri, ms: Date.now() - start, cache: true });
+              logSvgLoad({ uri, ms: Date.now() - start, cache: true });
               return;
             }
             const parts = uri.split(',');
@@ -379,14 +385,14 @@ export function TileAsset({
             if (!cancelled && xml) {
               cacheSvgXml(uri, xml);
               setSvgXml((prev) => (prev === xml ? prev : xml));
-              console.log('[perf:svg-load]', { uri, ms: Date.now() - start, cache: false });
+              logSvgLoad({ uri, ms: Date.now() - start, cache: false });
               return;
             }
           }
           const cached = svgXmlCache.get(uri);
           if (cached) {
             setSvgXml((prev) => (prev === cached ? prev : cached));
-            console.log('[perf:svg-load]', { uri, ms: Date.now() - start, cache: true });
+            logSvgLoad({ uri, ms: Date.now() - start, cache: true });
             return;
           }
           if (Platform.OS === 'web') {
@@ -396,7 +402,7 @@ export function TileAsset({
               if (!cancelled) {
                 cacheSvgXml(uri, xml);
                 setSvgXml((prev) => (prev === xml ? prev : xml));
-                console.log('[perf:svg-load]', { uri, ms: Date.now() - start, cache: false });
+                logSvgLoad({ uri, ms: Date.now() - start, cache: false });
               }
             } catch {
               // ignore, fall back to uri rendering
@@ -407,7 +413,7 @@ export function TileAsset({
               if (!cancelled) {
                 cacheSvgXml(uri, xml);
                 setSvgXml((prev) => (prev === xml ? prev : xml));
-                console.log('[perf:svg-load]', { uri, ms: Date.now() - start, cache: false });
+                logSvgLoad({ uri, ms: Date.now() - start, cache: false });
               }
             } catch {
               if (typeof source === 'number') {
@@ -423,25 +429,25 @@ export function TileAsset({
                       setSvgXml((prev) =>
                         prev === cachedResolved ? prev : cachedResolved
                       );
-                      console.log('[perf:svg-load]', {
+                      logSvgLoad({
                         uri: resolved,
                         ms: Date.now() - start,
                         cache: true,
                       });
-                      return;
+                    return;
                     }
                     const xml = await FileSystem.readAsStringAsync(resolved);
                     if (!cancelled) {
                       cacheSvgXml(resolved, xml, uri);
                       setSvgXml((prev) => (prev === xml ? prev : xml));
-                      console.log('[perf:svg-load]', {
+                      logSvgLoad({
                         uri: resolved,
                         ms: Date.now() - start,
                         cache: false,
                       });
-                    }
                   }
-                } catch {
+                }
+              } catch {
                   // ignore, fall back to uri rendering
                 }
               }
@@ -467,11 +473,7 @@ export function TileAsset({
                   setSvgXml((prev) =>
                     prev === cachedResolved ? prev : cachedResolved
                   );
-                  console.log('[perf:svg-load]', {
-                    uri: resolved,
-                    ms: Date.now() - start,
-                    cache: true,
-                  });
+                  logSvgLoad({ uri: resolved, ms: Date.now() - start, cache: true });
                   return;
                 }
                 const response = await fetch(resolved);
@@ -479,11 +481,7 @@ export function TileAsset({
                 if (!cancelled) {
                   cacheSvgXml(resolved, xml, uri);
                   setSvgXml((prev) => (prev === xml ? prev : xml));
-                  console.log('[perf:svg-load]', {
-                    uri: resolved,
-                    ms: Date.now() - start,
-                    cache: false,
-                  });
+                  logSvgLoad({ uri: resolved, ms: Date.now() - start, cache: false });
                 }
               } catch {
                 // ignore, fall back to uri rendering
@@ -495,22 +493,14 @@ export function TileAsset({
                   setSvgXml((prev) =>
                     prev === cachedResolved ? prev : cachedResolved
                   );
-                  console.log('[perf:svg-load]', {
-                    uri: resolved,
-                    ms: Date.now() - start,
-                    cache: true,
-                  });
+                  logSvgLoad({ uri: resolved, ms: Date.now() - start, cache: true });
                   return;
                 }
                 const xml = await FileSystem.readAsStringAsync(resolved);
                 if (!cancelled) {
                   svgXmlCache.set(resolved, xml);
                   setSvgXml((prev) => (prev === xml ? prev : xml));
-                  console.log('[perf:svg-load]', {
-                    uri: resolved,
-                    ms: Date.now() - start,
-                    cache: false,
-                  });
+                  logSvgLoad({ uri: resolved, ms: Date.now() - start, cache: false });
                 }
               } catch {
                 // ignore, fall back to uri rendering
