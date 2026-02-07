@@ -31,11 +31,11 @@ export const pickNewIndex = (currentIndex: number, sourcesLength: number) => {
   return nextIndex;
 };
 
-export const buildInitialTiles = (count: number) => {
+export const buildInitialTiles = (count: number): Tile[] => {
   if (count <= 0) {
-    return [] as Tile[];
+    return [];
   }
-  return Array.from({ length: count }, () => ({
+  return Array.from({ length: count }, (): Tile => ({
     imageIndex: -1,
     rotation: 0,
     mirrorX: false,
@@ -47,7 +47,7 @@ export const normalizeTiles = (
   currentTiles: Tile[] | null | undefined,
   cellCount: number,
   _sourcesLength: number
-) => {
+): Tile[] => {
   if (cellCount <= 0) {
     return [] as Tile[];
   }
@@ -75,6 +75,55 @@ export const normalizeTiles = (
     return next;
   }
   return currentTiles.slice(0, cellCount);
+};
+
+/**
+ * Picks the source to use for displaying a tile. When tile.name is set, uses only
+ * the name-based resolver so we never show the wrong tile when tileSources order
+ * differs (e.g. Expo Go built-in first vs UGC first). When tile.name is not set,
+ * falls back to index-based lookup.
+ */
+export function resolveDisplaySource<T>(
+  tile: Tile,
+  resolveByName: (name: string) => T | null | undefined,
+  getByIndex: (index: number) => T | null | undefined
+): T | null | undefined {
+  if (tile.name) {
+    return resolveByName(tile.name) ?? null;
+  }
+  if (tile.imageIndex >= 0) {
+    return getByIndex(tile.imageIndex);
+  }
+  return null;
+}
+
+/**
+ * Returns index of the source with the given name, or -1. Used so placement and rendering
+ * resolve by name first and avoid UGC/built-in index mismatch (e.g. on Expo Go).
+ */
+export const getTileSourceIndexByName = (
+  sources: Array<{ name: string }>,
+  sourceName: string
+): number => sources.findIndex((s) => s.name === sourceName);
+
+/**
+ * Assigns tile.name from sourceNames[tile.imageIndex] when missing.
+ * Ensures UGC tiles render by name so index drift (e.g. built-in vs UGC order on Expo Go) does not show wrong tiles.
+ */
+export const hydrateTilesWithSourceNames = (
+  tiles: Tile[],
+  sourceNames: string[]
+): Tile[] => {
+  if (!sourceNames.length) {
+    return tiles;
+  }
+  return tiles.map((tile) => {
+    if (!tile || tile.imageIndex < 0 || tile.name) {
+      return tile;
+    }
+    const name = sourceNames[tile.imageIndex];
+    return name ? { ...tile, name } : tile;
+  });
 };
 
 export const computeGridLayout = (

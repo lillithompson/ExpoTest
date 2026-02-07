@@ -325,6 +325,13 @@ export function TileAsset({
     sourceRef.current = source;
   }, [source]);
 
+  // On native, never use cache for UGC file URIs so we always load from disk and avoid wrong cache hits.
+  const isUgcFileUri =
+    Platform.OS !== 'web' &&
+    typeof uri === 'string' &&
+    uri.startsWith('file:') &&
+    uri.includes('/tile-sets/');
+
   useEffect(() => {
     if (!isSvg) {
       setSvgUri((prev) => (prev === null ? prev : null));
@@ -334,9 +341,10 @@ export function TileAsset({
       return;
     }
     let cancelled = false;
-    const overrideKey = uri
-      ? `${uri}|${strokeColor ?? ''}|${strokeWidth ?? ''}`
-      : null;
+    const overrideKey =
+      !isUgcFileUri && uri
+        ? `${uri}|${strokeColor ?? ''}|${strokeWidth ?? ''}`
+        : null;
     if (overrideKey) {
       const cachedOverride = svgOverrideCache.get(overrideKey);
       if (cachedOverride) {
@@ -389,7 +397,7 @@ export function TileAsset({
               return;
             }
           }
-          const cached = svgXmlCache.get(uri);
+          const cached = isUgcFileUri ? null : svgXmlCache.get(uri);
           if (cached) {
             setSvgXml((prev) => (prev === cached ? prev : cached));
             logSvgLoad({ uri, ms: Date.now() - start, cache: true });
@@ -411,7 +419,9 @@ export function TileAsset({
             try {
               const xml = await FileSystem.readAsStringAsync(uri);
               if (!cancelled) {
-                cacheSvgXml(uri, xml);
+                if (!isUgcFileUri) {
+                  cacheSvgXml(uri, xml);
+                }
                 setSvgXml((prev) => (prev === xml ? prev : xml));
                 logSvgLoad({ uri, ms: Date.now() - start, cache: false });
               }
@@ -514,7 +524,7 @@ export function TileAsset({
     return () => {
       cancelled = true;
     };
-  }, [isSvg, uri]);
+  }, [isSvg, uri, isUgcFileUri]);
 
   useEffect(() => {
     if (!svgXml) {

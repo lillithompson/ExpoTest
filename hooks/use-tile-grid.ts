@@ -6,6 +6,7 @@ import {
   buildInitialTiles,
   computeFixedGridLayout,
   computeGridLayout,
+  getTileSourceIndexByName,
   normalizeTiles,
   pickRotation,
   type GridLayout,
@@ -29,17 +30,27 @@ type Params = {
     | { mode: 'erase' }
     | { mode: 'clone' }
     | { mode: 'pattern' }
-    | { mode: 'fixed'; index: number; rotation: number; mirrorX: boolean; mirrorY: boolean };
+    | {
+        mode: 'fixed';
+        index: number;
+        sourceName?: string;
+        rotation: number;
+        mirrorX: boolean;
+        mirrorY: boolean;
+      };
   mirrorHorizontal: boolean;
   mirrorVertical: boolean;
   pattern:
     | { tiles: Tile[]; width: number; height: number; rotation: number; mirrorX: boolean }
     | null;
   patternAnchorKey?: string | null;
+  getFixedBrushSourceName?: () => string | null;
   onFixedPlacementDebug?: (payload: {
     fixedIndex: number;
     tileName: string | null;
     tileSourcesLength: number;
+    getterResult?: string | null;
+    brushSourceName?: string | null;
   }) => void;
 };
 
@@ -83,6 +94,7 @@ export const useTileGrid = ({
   mirrorVertical,
   pattern,
   patternAnchorKey,
+  getFixedBrushSourceName,
   onFixedPlacementDebug,
 }: Params): Result => {
   const clearLogRef = useRef<{ clearId: number } | null>(null);
@@ -489,6 +501,19 @@ export const useTileGrid = ({
         if (tile.imageIndex < 0) {
           return tile;
         }
+        // When tile has a name, resolve by name so we don't remap UGC → built-in
+        // when tileSources order differs (e.g. on Expo Go).
+        if (tile.name != null && tile.name !== '') {
+          const indexByName = getTileSourceIndexByName(tileSources, tile.name);
+          if (indexByName >= 0) {
+            return {
+              ...tile,
+              imageIndex: indexByName,
+            };
+          }
+          // Name not in new list; keep tile as-is so TileCell can resolve by name (e.g. UGC fallback).
+          return tile;
+        }
         const previousSource = previousSources[tile.imageIndex];
         if (!previousSource) {
           return { imageIndex: -1, rotation: 0, mirrorX: false, mirrorY: false };
@@ -517,7 +542,7 @@ export const useTileGrid = ({
         };
       })
     );
-  }, [tileSourcesKey, suspendRemap, tileSourcesLength, totalCells, compatTables]);
+  }, [tileSourcesKey, suspendRemap, tileSourcesLength, totalCells, compatTables, tileSources]);
 
   const getMirroredPlacements = (cellIndex: number, placement: Tile) => {
     const row = Math.floor(cellIndex / gridLayout.columns);
@@ -753,13 +778,25 @@ export const useTileGrid = ({
       return;
     }
     if (brush.mode === 'fixed') {
-      const fixedIndex = brush.index;
+      const getterResult = getFixedBrushSourceName?.() ?? null;
+      const sourceName =
+        getterResult ?? brush.sourceName ?? null;
+      const indexByName =
+        sourceName != null
+          ? getTileSourceIndexByName(tileSources, sourceName)
+          : -1;
+      const fixedIndex =
+        indexByName >= 0 ? indexByName : brush.index;
+      const tileName =
+        sourceName ?? (fixedIndex >= 0 ? tileSources[fixedIndex]?.name : undefined);
       if (fixedIndex >= 0 && fixedIndex < tileSourcesLength) {
         if (onFixedPlacementDebug) {
           onFixedPlacementDebug({
             fixedIndex,
-            tileName: tileSources[fixedIndex]?.name ?? null,
+            tileName: tileName ?? null,
             tileSourcesLength,
+            getterResult: getterResult ?? undefined,
+            brushSourceName: brush.sourceName ?? undefined,
           });
         }
         applyPlacement(cellIndex, {
@@ -767,7 +804,7 @@ export const useTileGrid = ({
           rotation: brush.rotation,
           mirrorX: brush.mirrorX,
           mirrorY: brush.mirrorY,
-          name: tileSources[fixedIndex]?.name,
+          name: tileName,
         });
       }
       return;
@@ -929,7 +966,14 @@ export const useTileGrid = ({
       randomFill();
       return;
     }
-    const fixedIndex = brush.index;
+    const sourceNameFlood =
+      getFixedBrushSourceName?.() ?? brush.sourceName ?? null;
+    const indexByName =
+      sourceNameFlood != null
+        ? getTileSourceIndexByName(tileSources, sourceNameFlood)
+        : -1;
+    const fixedIndex = indexByName >= 0 ? indexByName : brush.index;
+    const fixedName = sourceNameFlood ?? tileSources[fixedIndex]?.name;
     if (fixedIndex < 0 || fixedIndex >= tileSourcesLength) {
       return;
     }
@@ -943,7 +987,7 @@ export const useTileGrid = ({
             rotation: brush.rotation,
             mirrorX: brush.mirrorX,
             mirrorY: false,
-            name: tileSources[fixedIndex]?.name,
+            name: fixedName,
           })
         );
       }
@@ -1063,8 +1107,15 @@ export const useTileGrid = ({
       });
       return;
     }
-    const fixedIndex = brush.index;
-    if (fixedIndex < 0 || fixedIndex >= tileSourcesLength) {
+    const sourceNameRand =
+      getFixedBrushSourceName?.() ?? brush.sourceName ?? null;
+    const indexByNameRand =
+      sourceNameRand != null
+        ? getTileSourceIndexByName(tileSources, sourceNameRand)
+        : -1;
+    const fixedIndexRand = indexByNameRand >= 0 ? indexByNameRand : brush.index;
+    const fixedNameRand = sourceNameRand ?? tileSources[fixedIndexRand]?.name;
+    if (fixedIndexRand < 0 || fixedIndexRand >= tileSourcesLength) {
       return;
     }
     withBulkUpdate(() => {
@@ -1088,11 +1139,11 @@ export const useTileGrid = ({
         applyPlacementsToArray(
           nextTiles,
           getMirroredPlacements(index, {
-            imageIndex: fixedIndex,
+            imageIndex: fixedIndexRand,
             rotation: brush.rotation,
             mirrorX: false,
             mirrorY: false,
-            name: tileSources[fixedIndex]?.name,
+            name: fixedNameRand,
           }),
           index
         );

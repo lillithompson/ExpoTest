@@ -341,7 +341,14 @@ export default function ModifyTileScreen() {
     | { mode: 'erase' }
     | { mode: 'clone' }
     | { mode: 'pattern' }
-    | { mode: 'fixed'; index: number; rotation: number; mirrorX: boolean; mirrorY: boolean }
+    | {
+        mode: 'fixed';
+        index: number;
+        sourceName?: string;
+        rotation: number;
+        mirrorX: boolean;
+        mirrorY: boolean;
+      }
   >({ mode: 'random' });
   const [paletteRotations, setPaletteRotations] = useState<Record<number, number>>({});
   const [paletteMirrors, setPaletteMirrors] = useState<Record<number, boolean>>({});
@@ -998,7 +1005,15 @@ export default function ModifyTileScreen() {
               const rotation = paletteRotations[next.index] ?? next.rotation ?? 0;
               const mirrorX = paletteMirrors[next.index] ?? next.mirrorX ?? false;
               const mirrorY = paletteMirrorsY[next.index] ?? next.mirrorY ?? false;
-              setBrush({ mode: 'fixed', index: next.index, rotation, mirrorX, mirrorY });
+              const source = tileSources[next.index];
+              setBrush({
+                mode: 'fixed',
+                index: next.index,
+                sourceName: source?.name,
+                rotation,
+                mirrorX,
+                mirrorY,
+              });
             } else {
               setBrush(next);
             }
@@ -1007,11 +1022,14 @@ export default function ModifyTileScreen() {
             setPaletteRotations((prev) => {
               const nextRotation = ((prev[index] ?? 0) + 90) % 360;
               if (brush.mode === 'fixed' && brush.index === index) {
+                const src = tileSources[index];
                 setBrush({
                   mode: 'fixed',
                   index,
+                  sourceName: src?.name,
                   rotation: nextRotation,
                   mirrorX: brush.mirrorX,
+                  mirrorY: brush.mirrorY,
                 });
               }
               return {
@@ -1024,9 +1042,11 @@ export default function ModifyTileScreen() {
             setPaletteMirrors((prev) => {
               const nextMirror = !(prev[index] ?? false);
               if (brush.mode === 'fixed' && brush.index === index) {
+                const src = tileSources[index];
                 setBrush({
                   mode: 'fixed',
                   index,
+                  sourceName: src?.name,
                   rotation: brush.rotation,
                   mirrorX: nextMirror,
                   mirrorY: brush.mirrorY,
@@ -1042,9 +1062,11 @@ export default function ModifyTileScreen() {
             setPaletteMirrorsY((prev) => {
               const nextMirror = !(prev[index] ?? false);
               if (brush.mode === 'fixed' && brush.index === index) {
+                const src = tileSources[index];
                 setBrush({
                   mode: 'fixed',
                   index,
+                  sourceName: src?.name,
                   rotation: brush.rotation,
                   mirrorX: brush.mirrorX,
                   mirrorY: nextMirror,

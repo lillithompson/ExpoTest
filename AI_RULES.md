@@ -12,3 +12,6 @@
 
 ## App State
 - After every change, update `APP_STATE.md` to keep it in sync with the codebase
+
+## Testing
+- When you make a change, run the test suite (`npm test`) and fix any failures before finishing

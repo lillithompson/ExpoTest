@@ -46,7 +46,7 @@ import {
   renderTileCanvasToSvg,
 } from '@/utils/tile-export';
 import { getTransformedConnectionsForName, parseTileConnections, transformConnections } from '@/utils/tile-compat';
-import { normalizeTiles, type Tile } from '@/utils/tile-grid';
+import { hydrateTilesWithSourceNames, normalizeTiles, type Tile } from '@/utils/tile-grid';
 
 const GRID_GAP = 0;
 const CONTENT_PADDING = 0;
@@ -79,13 +79,15 @@ const buildUserTileSourceFromName = (name: string): TileSource | null => {
   if (!setId || !fileName) {
     return null;
   }
-  const baseDir = FileSystem.documentDirectory ?? FileSystem.cacheDirectory ?? '';
+  const baseDir =
+    FileSystem.documentDirectory ?? FileSystem.cacheDirectory ?? '';
   if (!baseDir) {
     return null;
   }
+  const path = `${baseDir}tile-sets/${setId}/${fileName}`;
   return {
     name,
-    source: { uri: `${baseDir}tile-sets/${setId}/${fileName}` },
+    source: { uri: path },
   };
 };
 const normalizeUserTileSource = (source: TileSource | null, name: string) => {
@@ -402,6 +404,7 @@ type TileCellProps = {
   strokeScaleByName?: Map<string, number>;
   atlas?: ReturnType<typeof useTileAtlas> | null;
   resolveSourceForName?: (name: string) => TileSource | null;
+  resolveUgcSourceFromName?: (name: string) => TileSource | null;
   isCloneSource: boolean;
   isCloneSample: boolean;
   isCloneTargetOrigin: boolean;
@@ -490,6 +493,7 @@ const TileCell = memo(
     strokeScaleByName,
     atlas,
     resolveSourceForName,
+    resolveUgcSourceFromName,
     isCloneSource,
     isCloneSample,
     isCloneTargetOrigin,
@@ -498,10 +502,40 @@ const TileCell = memo(
   }: TileCellProps) => {
     const resolvedByName =
       tile.name && resolveSourceForName ? resolveSourceForName(tile.name) : null;
+    const resolvedByUgcFallback =
+      tile.name && tile.name.includes(':') && resolveUgcSourceFromName
+        ? resolveUgcSourceFromName(tile.name)
+        : null;
     const resolvedByIndex =
       tile.imageIndex >= 0 ? tileSources[tile.imageIndex] ?? null : null;
-    const resolved = resolvedByName ?? resolvedByIndex;
+    const resolved =
+      tile.name != null && tile.name !== ''
+        ? resolvedByName ?? resolvedByUgcFallback ?? null
+        : resolvedByIndex;
     const tileName = tile.name ?? resolvedByIndex?.name ?? '';
+    const usedPath =
+      tile.name != null && tile.name !== ''
+        ? resolvedByName
+          ? 'byName'
+          : resolvedByUgcFallback
+            ? 'byUgc'
+            : 'byNameOrUgcNull'
+        : 'byIndex';
+    if (Platform.OS !== 'web' && tile.imageIndex >= 0) {
+      const logKey = `cell-${cellIndex}-${tile.imageIndex}-${tile.name ?? 'no-name'}`;
+      if (!loggedTileRenders.has(logKey)) {
+        loggedTileRenders.add(logKey);
+        console.log('[ugc-debug] TileCell render', {
+          cellIndex,
+          imageIndex: tile.imageIndex,
+          tileName: tile.name ?? null,
+          usedPath,
+          resolvedByName: resolvedByName?.name ?? null,
+          resolvedByUgc: resolvedByUgcFallback?.name ?? null,
+          resolvedByIndex: resolvedByIndex?.name ?? null,
+        });
+      }
+    }
     const showRenderLabel =
       DEBUG_TILE_RENDER &&
       (tileName.includes('tileset-') ||
@@ -574,7 +608,7 @@ const TileCell = memo(
         {source && (
           <TileAtlasSprite
             atlas={atlas}
-            key={`${tileName}:${tile.imageIndex}:${tile.rotation}:${tile.mirrorX ? 1 : 0}:${
+            key={`cell-${cellIndex}-${tileName}:${tile.imageIndex}:${tile.rotation}:${tile.mirrorX ? 1 : 0}:${
               tile.mirrorY ? 1 : 0
             }`}
             source={source}
@@ -630,6 +664,8 @@ const TileCell = memo(
     prev.atlas === next.atlas &&
     prev.showOverlays === next.showOverlays &&
     prev.tileSources === next.tileSources &&
+    prev.resolveSourceForName === next.resolveSourceForName &&
+    prev.resolveUgcSourceFromName === next.resolveUgcSourceFromName &&
     prev.isCloneSource === next.isCloneSource &&
     prev.isCloneSample === next.isCloneSample &&
     prev.isCloneTargetOrigin === next.isCloneTargetOrigin &&
@@ -691,10 +727,30 @@ export default function TestScreen() {
     | { mode: 'erase' }
     | { mode: 'clone' }
     | { mode: 'pattern' }
-    | { mode: 'fixed'; index: number; rotation: number; mirrorX: boolean; mirrorY: boolean }
+    | {
+        mode: 'fixed';
+        index: number;
+        sourceName?: string;
+        rotation: number;
+        mirrorX: boolean;
+        mirrorY: boolean;
+      }
   >({
     mode: 'random',
   });
+  const fixedBrushSourceNameRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (brush.mode !== 'fixed') {
+      if (Platform.OS !== 'web' && fixedBrushSourceNameRef.current != null) {
+        console.log('[ugc-debug] ref cleared (brush not fixed)', {
+          was: fixedBrushSourceNameRef.current,
+        });
+      }
+      fixedBrushSourceNameRef.current = null;
+    } else if (brush.sourceName != null) {
+      fixedBrushSourceNameRef.current = brush.sourceName;
+    }
+  }, [brush.mode, brush.sourceName]);
   const [paletteRotations, setPaletteRotations] = useState<Record<number, number>>(
     {}
   );
@@ -979,7 +1035,7 @@ export default function TestScreen() {
     });
   }, [
     activeFile,
-    fileSourceNames,
+    activeFileSourceNames,
     paletteSources,
     resolveSourceName,
     getSourcesForFile,
@@ -1098,7 +1154,10 @@ export default function TestScreen() {
     if (brush.mode !== 'fixed') {
       return brush;
     }
-    const name = tileSources[brush.index]?.name ?? fileSourceNamesForMapping[brush.index];
+    const name =
+      brush.sourceName ??
+      tileSources[brush.index]?.name ??
+      fileSourceNamesForMapping[brush.index];
     const paletteIndex = name ? paletteIndexByName.get(name) ?? -1 : -1;
     if (paletteIndex < 0) {
       return { ...brush, index: -1 };
@@ -1230,14 +1289,19 @@ export default function TestScreen() {
         }
       : null,
     patternAnchorKey: selectedPattern?.id ?? null,
+    getFixedBrushSourceName: () => fixedBrushSourceNameRef.current,
     onFixedPlacementDebug: DEBUG_UGC_MAPPING
-      ? ({ fixedIndex, tileName, tileSourcesLength }) => {
-          console.log('[ugc-debug] place', {
-            fixedIndex,
-            tileName,
-            tileSourcesLength,
-            fileId: activeFileId ?? null,
-          });
+      ? ({ fixedIndex, tileName, tileSourcesLength, getterResult, brushSourceName }) => {
+          if (Platform.OS !== 'web') {
+            console.log('[ugc-debug] place', {
+              fixedIndex,
+              tileName,
+              tileSourcesLength,
+              getterResult: getterResult ?? null,
+              brushSourceName: brushSourceName ?? null,
+              fileId: activeFileId ?? null,
+            });
+          }
         }
       : undefined,
   });
@@ -1258,13 +1322,43 @@ export default function TestScreen() {
       return;
     }
     prevTileSourcesKeyRef.current = tileSourcesKey;
-    setBrush({ mode: 'random' });
-    clearCloneSource();
-    setIsPatternCreationMode(false);
-    setPatternSelection(null);
-    setShowPatternSaveModal(false);
-    setShowPatternChooser(false);
-  }, [tileSourcesKey, clearCloneSource]);
+    // When source list changes (e.g. after ensureFileSourceNames adds UGC), keep fixed
+    // brush if the selected source is still in the new list so the user can place it.
+    const preservedName =
+      brush.mode === 'fixed'
+        ? fixedBrushSourceNameRef.current ?? brush.sourceName ?? null
+        : null;
+    const newIndex =
+      preservedName != null
+        ? tileSources.findIndex((s) => s.name === preservedName)
+        : -1;
+    if (Platform.OS !== 'web') {
+      console.log('[ugc-debug] tileSourcesKey changed', {
+        preservedName: preservedName ?? null,
+        newIndex,
+        brushMode: brush.mode,
+        preserving: newIndex >= 0,
+      });
+    }
+    if (newIndex >= 0) {
+      setBrush({
+        mode: 'fixed',
+        index: newIndex,
+        sourceName: preservedName,
+        rotation: brush.mode === 'fixed' ? brush.rotation : 0,
+        mirrorX: brush.mode === 'fixed' ? brush.mirrorX : false,
+        mirrorY: brush.mode === 'fixed' ? brush.mirrorY : false,
+      });
+      // ref already holds preservedName; keep it
+    } else {
+      setBrush({ mode: 'random' });
+      clearCloneSource();
+      setIsPatternCreationMode(false);
+      setPatternSelection(null);
+      setShowPatternSaveModal(false);
+      setShowPatternChooser(false);
+    }
+  }, [tileSourcesKey, clearCloneSource, brush, tileSources]);
   const displayTiles = tiles;
   const gridWidth =
     gridLayout.columns * gridLayout.tileSize +
@@ -1331,6 +1425,7 @@ export default function TestScreen() {
     categories: TileCategory[];
     token?: number;
     preview?: boolean;
+    sourceNames?: string[];
   } | null>(null);
   const setHydrating = useCallback((value: boolean) => {
     isHydratingFileRef.current = value;
@@ -2078,6 +2173,7 @@ export default function TestScreen() {
     if (file.tiles.length === 0) {
       resetTiles();
     }
+    const fileSourceNames = Array.isArray(file.sourceNames) ? file.sourceNames : [];
     pendingRestoreRef.current = {
       fileId: file.id,
       tiles: file.tiles,
@@ -2087,6 +2183,7 @@ export default function TestScreen() {
       categories: resolvedCategories,
       token: nextToken,
       preview: Boolean(previewUri),
+      sourceNames: fileSourceNames.length > 0 ? fileSourceNames : undefined,
     };
   }, [activeFileId, loadRequestId, ready, viewMode, clearCloneSource]);
 
@@ -2302,16 +2399,14 @@ export default function TestScreen() {
       pending.columns > 0 &&
       (gridMatches || allowFallback || pending.tiles.length > 0)
     ) {
-      const nameSource = activeFileSourceNames;
-      const hydrated = nameSource.length
-        ? pending.tiles.map((tile) => {
-            if (!tile || tile.imageIndex < 0 || tile.name) {
-              return tile;
-            }
-            const name = nameSource[tile.imageIndex];
-            return name ? { ...tile, name } : tile;
-          })
-        : pending.tiles;
+      const nameSource =
+        pending.sourceNames && pending.sourceNames.length > 0
+          ? pending.sourceNames
+          : activeFileSourceNames;
+      const hydrated =
+        nameSource.length > 0
+          ? hydrateTilesWithSourceNames(pending.tiles, nameSource)
+          : pending.tiles;
       loadTiles(hydrated);
       pendingRestoreRef.current = null;
       setHydrating(false);
@@ -4139,6 +4234,7 @@ export default function TestScreen() {
                         strokeScaleByName={strokeScaleByName}
                         atlas={gridAtlas}
                         resolveSourceForName={resolveSourceForName}
+                        resolveUgcSourceFromName={buildUserTileSourceFromName}
                         showOverlays={showOverlays}
                         isCloneSource={
                           brush.mode === 'clone' && cloneSourceIndex === cellIndex
@@ -4211,6 +4307,7 @@ export default function TestScreen() {
                           strokeScaleByName={strokeScaleByName}
                           atlas={gridAtlas}
                           resolveSourceForName={resolveSourceForName}
+                          resolveUgcSourceFromName={buildUserTileSourceFromName}
                           showOverlays={showOverlays}
                           isCloneSource={
                             brush.mode === 'clone' && cloneSourceIndex === cellIndex
@@ -4413,15 +4510,20 @@ export default function TestScreen() {
                 });
               }
               if (fileIndex >= 0) {
+                fixedBrushSourceNameRef.current = source.name;
                 setBrush({
                   mode: 'fixed',
                   index: fileIndex,
+                  sourceName: source.name,
                   rotation,
                   mirrorX,
                   mirrorY,
                 });
               }
             } else {
+              if (next.mode !== 'fixed') {
+                fixedBrushSourceNameRef.current = null;
+              }
               setBrush(next);
             }
           }}
@@ -4431,9 +4533,13 @@ export default function TestScreen() {
               const source = paletteSources[index];
               const fileIndex = source ? tileIndexByName.get(source.name) ?? -1 : -1;
               if (brush.mode === 'fixed' && fileIndex >= 0 && brush.index === fileIndex) {
+                if (source?.name != null) {
+                  fixedBrushSourceNameRef.current = source.name;
+                }
                 setBrush({
                   mode: 'fixed',
                   index: fileIndex,
+                  sourceName: source?.name,
                   rotation: nextRotation,
                   mirrorX: brush.mirrorX,
                   mirrorY: brush.mirrorY,
@@ -4451,9 +4557,13 @@ export default function TestScreen() {
               const source = paletteSources[index];
               const fileIndex = source ? tileIndexByName.get(source.name) ?? -1 : -1;
               if (brush.mode === 'fixed' && fileIndex >= 0 && brush.index === fileIndex) {
+                if (source?.name != null) {
+                  fixedBrushSourceNameRef.current = source.name;
+                }
                 setBrush({
                   mode: 'fixed',
                   index: fileIndex,
+                  sourceName: source?.name,
                   rotation: brush.rotation,
                   mirrorX: nextMirror,
                   mirrorY: brush.mirrorY,
@@ -4471,9 +4581,13 @@ export default function TestScreen() {
               const source = paletteSources[index];
               const fileIndex = source ? tileIndexByName.get(source.name) ?? -1 : -1;
               if (brush.mode === 'fixed' && fileIndex >= 0 && brush.index === fileIndex) {
+                if (source?.name != null) {
+                  fixedBrushSourceNameRef.current = source.name;
+                }
                 setBrush({
                   mode: 'fixed',
                   index: fileIndex,
+                  sourceName: source?.name,
                   rotation: brush.rotation,
                   mirrorX: brush.mirrorX,
                   mirrorY: nextMirror,
