@@ -36,6 +36,9 @@ const DEFAULT_CATEGORY = TILE_CATEGORIES[0];
 
 type BakedPreview = { uri: string; signature: string };
 
+/** Persist baked previews across navigations so we avoid flashing the live grid. */
+const bakedPreviewCache = new Map<string, BakedPreview>();
+
 type TileSetPreviewProps = {
   setId: string;
   previewTiles: TileSetTile[];
@@ -116,16 +119,30 @@ export default function TileSetCreatorScreen() {
         .join('|');
       return `${set.updatedAt}:${tileTokens}`;
     };
+    const next: Record<string, BakedPreview> = {};
+    const signatures: Record<string, string> = {};
+    for (const set of tileSets) {
+      const signature = buildSignature(set);
+      signatures[set.id] = signature;
+      const fromRef = bakedPreviewRef.current[set.id];
+      const fromModuleCache = bakedPreviewCache.get(set.id);
+      if (fromRef?.signature === signature) {
+        next[set.id] = fromRef;
+        continue;
+      }
+      if (fromModuleCache?.signature === signature) {
+        next[set.id] = fromModuleCache;
+        continue;
+      }
+    }
+    if (Object.keys(next).length > 0) {
+      setBakedPreviews((prev) => ({ ...prev, ...next }));
+    }
     const buildPreviews = async () => {
-      const next: Record<string, BakedPreview> = {};
-      const signatures: Record<string, string> = {};
       for (const set of tileSets) {
         const previewTiles = set.tiles.slice(0, 4);
-        const signature = buildSignature(set);
-        signatures[set.id] = signature;
-        const cached = bakedPreviewRef.current[set.id];
-        if (cached && cached.signature === signature) {
-          next[set.id] = cached;
+        const signature = signatures[set.id];
+        if (next[set.id]) {
           continue;
         }
         if (previewTiles.length === 0) {
@@ -199,7 +216,9 @@ export default function TileSetCreatorScreen() {
         });
 
         if (compositeUri) {
-          next[set.id] = { uri: compositeUri, signature };
+          const baked: BakedPreview = { uri: compositeUri, signature };
+          next[set.id] = baked;
+          bakedPreviewCache.set(set.id, baked);
         }
       }
 
@@ -218,11 +237,18 @@ export default function TileSetCreatorScreen() {
           const signature = signatures[set.id];
           if (signature && merged[set.id]?.signature !== signature) {
             delete merged[set.id];
+            bakedPreviewCache.delete(set.id);
           }
         });
         Object.keys(merged).forEach((id) => {
           if (!tileSets.find((set) => set.id === id)) {
             delete merged[id];
+            bakedPreviewCache.delete(id);
+          }
+        });
+        Object.keys(prev).forEach((id) => {
+          if (!(id in merged)) {
+            bakedPreviewCache.delete(id);
           }
         });
         return merged;
@@ -675,7 +701,10 @@ const TileSetPreview = ({
       <TileAsset
         source={{ uri: bakedPreviewUri }}
         name="tile-set-preview.png"
-        style={styles.fileThumbImage}
+        style={[
+          styles.fileThumbImage,
+          Platform.OS === 'web' && { backgroundColor: '#111' },
+        ]}
         resizeMode="cover"
       />
     );
@@ -688,6 +717,15 @@ const TileSetPreview = ({
         name="tile-set-preview.png"
         style={styles.fileThumbImage}
         resizeMode="cover"
+      />
+    );
+  }
+
+  if (Platform.OS === 'web' && previewTiles.length > 0) {
+    return (
+      <View
+        style={[styles.fileThumbImage, styles.fileThumbPlaceholder]}
+        accessibilityLabel="Loading preview"
       />
     );
   }
@@ -933,6 +971,9 @@ const styles = StyleSheet.create({
   fileThumbImage: {
     width: '100%',
     height: '100%',
+  },
+  fileThumbPlaceholder: {
+    backgroundColor: '#111',
   },
   fileThumbCapture: {
     backgroundColor: '#000',

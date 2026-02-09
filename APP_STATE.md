@@ -39,7 +39,7 @@ Modify View (viewMode = "modify")
 Tile Set Creator List (tileSetCreator/index.tsx)
 - Header row: Title "Tile Sets" (tap returns to File view), actions for Create and Select Mode.
 - Select mode bar: Animated bar with Delete, selected count, Exit.
-- Tile set grid: Cards with 2x2 previews (baked or live). Long press (web only) opens download modal.
+- Tile set grid: Cards with 2x2 previews (baked image or, on native, live grid). On web, a dark placeholder is shown until the baked preview is ready (no live grid) to avoid a white-border flash; baked previews are cached in a module-level map so they persist across navigations and are not regenerated when returning to the list. Long press (web only) opens download modal.
 - Create Tile Set modal: Name input and resolution options 2, 3, 4.
 - Download Tile Set modal (web only): Downloads all tiles in the set as a ZIP of SVGs.
 
