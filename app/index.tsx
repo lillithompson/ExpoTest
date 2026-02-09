@@ -48,6 +48,10 @@ import {
 } from '@/utils/tile-export';
 import { getTransformedConnectionsForName, parseTileConnections, transformConnections } from '@/utils/tile-compat';
 import {
+  canApplyEmptyNewFileRestore,
+  canApplyNonEmptyRestore,
+} from '@/utils/load-state';
+import {
   buildPreviewPath,
   getFilePreviewUri,
   hasCachedThumbnail,
@@ -66,6 +70,8 @@ const BRUSH_PANEL_HEIGHT = 160;
 const PATTERN_THUMB_HEIGHT = 70;
 const PATTERN_THUMB_PADDING = 4;
 const BRUSH_PANEL_ROW_GAP = 1;
+/** Reserve space for horizontal scrollbar so the bottom row is not cut off on web. */
+const WEB_SCROLLBAR_HEIGHT = 17;
 const FILE_GRID_COLUMNS_MOBILE = 3;
 const FILE_GRID_SIDE_PADDING = 12;
 const FILE_GRID_GAP = 12;
@@ -1249,10 +1255,14 @@ export default function TestScreen() {
     (brushPanelHeight - BRUSH_PANEL_ROW_GAP * 2) / 3 >= 75
       ? 3
       : 2;
+  const brushContentHeight =
+    Platform.OS === 'web'
+      ? Math.max(0, brushPanelHeight - WEB_SCROLLBAR_HEIGHT)
+      : brushPanelHeight;
   const brushItemSize = Math.max(
     0,
     Math.floor(
-      (brushPanelHeight - BRUSH_PANEL_ROW_GAP * Math.max(0, brushRows - 1)) /
+      (brushContentHeight - BRUSH_PANEL_ROW_GAP * Math.max(0, brushRows - 1)) /
         brushRows
     )
   );
@@ -2201,15 +2211,29 @@ export default function TestScreen() {
     if (!pending || activeFileId !== pending.fileId) {
       return;
     }
-    const gridMatches =
-      pending.rows === gridLayout.rows && pending.columns === gridLayout.columns;
-    const allowFallback = pending.rows === 0 || pending.columns === 0;
-    if (
-      gridLayout.tileSize > 0 &&
-      pending.rows > 0 &&
-      pending.columns > 0 &&
-      (gridMatches || allowFallback || pending.tiles.length > 0)
-    ) {
+    const pendingShape = {
+      rows: pending.rows,
+      columns: pending.columns,
+      tiles: pending.tiles,
+    };
+    const gridLayoutShape = {
+      rows: gridLayout.rows,
+      columns: gridLayout.columns,
+      tileSize: gridLayout.tileSize,
+    };
+    const tileSizeReady = gridLayout.tileSize > 0;
+    const fallbackGridShape =
+      !tileSizeReady && typeof (pending as { preferredTileSize?: number }).preferredTileSize === 'number'
+        ? {
+            rows: pending.rows,
+            columns: pending.columns,
+            tileSize: (pending as { preferredTileSize: number }).preferredTileSize,
+          }
+        : tileSizeReady
+          ? null
+          : { rows: pending.rows, columns: pending.columns, tileSize: 45 };
+    const shapeForApply = tileSizeReady ? gridLayoutShape : fallbackGridShape;
+    if (shapeForApply && canApplyNonEmptyRestore(pendingShape, shapeForApply)) {
       const nameSource =
         pending.sourceNames && pending.sourceNames.length > 0
           ? pending.sourceNames
@@ -2234,7 +2258,7 @@ export default function TestScreen() {
       }
       return;
     }
-    if (gridLayout.tileSize > 0 && pending.rows === 0 && pending.columns === 0) {
+    if (shapeForApply && canApplyEmptyNewFileRestore(pendingShape, shapeForApply)) {
       resetTiles();
       pendingRestoreRef.current = null;
       setHydrating(false);
@@ -3669,16 +3693,14 @@ export default function TestScreen() {
                         tileSetIds: selectedTileSetIds,
                         sourceNames: initialSources,
                       });
+                      setFileSourceNames(initialSources);
+                      setLoadRequestId((prev) => prev + 1);
+                      setLoadPreviewUri(null);
+                      setSuspendTiles(true);
+                      setLoadedToken(0);
+                      setHydrating(true);
                       setShowNewFileModal(false);
                       setViewMode('modify');
-                      requestAnimationFrame(() => {
-                        setFileSourceNames(initialSources);
-                        setLoadRequestId((prev) => prev + 1);
-                        setLoadPreviewUri(null);
-                        setSuspendTiles(true);
-                        setLoadedToken(0);
-                        setHydrating(true);
-                      });
                     }}
                     style={styles.newFileButton}
                     accessibilityRole="button"

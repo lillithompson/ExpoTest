@@ -37,6 +37,8 @@ const TOOLBAR_BUTTON_SIZE = 40;
 const TITLE_SPACING = 0;
 const BRUSH_PANEL_HEIGHT = 160;
 const BRUSH_PANEL_ROW_GAP = 1;
+/** Reserve space for horizontal scrollbar so the bottom row is not cut off on web. */
+const WEB_SCROLLBAR_HEIGHT = 17;
 const ERROR_TILE = require('@/assets/images/tiles/tile_error.svg');
 
 type ToolbarButtonProps = {
@@ -428,10 +430,14 @@ export default function ModifyTileScreen() {
     contentHeight - HEADER_HEIGHT - CONTENT_PADDING * 2 - TITLE_SPACING - gridHeight
   );
   const brushRows = Platform.OS === 'ios' ? 4 : 3;
+  const brushContentHeight =
+    Platform.OS === 'web'
+      ? Math.max(0, brushPanelHeight - WEB_SCROLLBAR_HEIGHT)
+      : brushPanelHeight;
   const brushItemSize = Math.max(
     0,
     Math.floor(
-      (brushPanelHeight - BRUSH_PANEL_ROW_GAP * Math.max(0, brushRows - 1)) /
+      (brushContentHeight - BRUSH_PANEL_ROW_GAP * Math.max(0, brushRows - 1)) /
         brushRows
     )
   );
