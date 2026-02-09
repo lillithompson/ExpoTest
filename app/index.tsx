@@ -74,7 +74,9 @@ const PATTERN_THUMB_PADDING = 4;
 const BRUSH_PANEL_ROW_GAP = 1;
 /** Reserve space for horizontal scrollbar so the bottom row is not cut off on web. */
 const WEB_SCROLLBAR_HEIGHT = 17;
-const FILE_GRID_COLUMNS_MOBILE = 3;
+const FILE_GRID_MIN_CARD_WIDTH = 100;
+/** On desktop web, use larger min card width so thumbnails display bigger (fewer columns). */
+const FILE_GRID_MIN_CARD_WIDTH_DESKTOP_WEB = 240;
 const FILE_GRID_SIDE_PADDING = 12;
 const FILE_GRID_GAP = 12;
 const DEFAULT_CATEGORY = (TILE_CATEGORIES as string[]).includes('angular')
@@ -82,7 +84,10 @@ const DEFAULT_CATEGORY = (TILE_CATEGORIES as string[]).includes('angular')
   : TILE_CATEGORIES[0];
 const ERROR_TILE = require('@/assets/images/tiles/tile_error.svg');
 const PREVIEW_DIR = `${FileSystem.cacheDirectory ?? ''}tile-previews/`;
-const THUMB_SIZE = 256;
+/** Max file thumbnail display size (web cap) and generated thumbnail resolution. */
+const FILE_THUMB_SIZE = 200;
+/** Min content width to treat as desktop (web); above this, thumbnails use 2× display size. */
+const FILE_VIEW_DESKTOP_BREAKPOINT = 768;
 const DEBUG_FILE_CHECK = true;
 const buildUserTileSourceFromName = (name: string): TileSource | null => {
   if (!name.includes(':')) {
@@ -2339,7 +2344,7 @@ export default function TestScreen() {
                 lineColor: activeLineColor,
                 lineWidth: activeLineWidth,
                 strokeScaleByName,
-                maxDimension: 192,
+                maxDimension: FILE_THUMB_SIZE,
               })
             : undefined;
         const resolvedSourceNames =
@@ -2483,8 +2488,8 @@ export default function TestScreen() {
               format: 'png',
               quality: 1,
               result: 'tmpfile',
-              width: THUMB_SIZE,
-              height: THUMB_SIZE,
+              width: FILE_THUMB_SIZE,
+              height: FILE_THUMB_SIZE,
             });
             if (thumbUri) {
               const ts = Date.now();
@@ -2972,8 +2977,8 @@ export default function TestScreen() {
           format: 'png',
           quality: 1,
           result: 'tmpfile',
-          width: THUMB_SIZE,
-          height: THUMB_SIZE,
+          width: FILE_THUMB_SIZE,
+          height: FILE_THUMB_SIZE,
         });
         if (thumbUri) {
           const ts = Date.now();
@@ -3036,7 +3041,7 @@ export default function TestScreen() {
       lineColor: activeLineColor,
       lineWidth: activeLineWidth,
       strokeScaleByName,
-      maxDimension: 192,
+      maxDimension: FILE_THUMB_SIZE,
     });
     upsertActiveFile({
       tiles,
@@ -3242,12 +3247,30 @@ export default function TestScreen() {
     }
   };
 
-  const fileCardWidth = Math.floor(
-    (contentWidth -
-      FILE_GRID_SIDE_PADDING * 2 -
-      FILE_GRID_GAP * (FILE_GRID_COLUMNS_MOBILE - 1)) /
-      FILE_GRID_COLUMNS_MOBILE
+  const fileGridAvailableWidth = Math.max(
+    0,
+    contentWidth - FILE_GRID_SIDE_PADDING * 2
   );
+  const fileGridMinCardWidth =
+    isWeb && contentWidth >= FILE_VIEW_DESKTOP_BREAKPOINT
+      ? FILE_GRID_MIN_CARD_WIDTH_DESKTOP_WEB
+      : FILE_GRID_MIN_CARD_WIDTH;
+  const fileGridColumnCount = Math.max(
+    1,
+    Math.floor(
+      (fileGridAvailableWidth + FILE_GRID_GAP) /
+        (fileGridMinCardWidth + FILE_GRID_GAP)
+    )
+  );
+  const fileCardWidth = Math.floor(
+    (fileGridAvailableWidth -
+      FILE_GRID_GAP * (fileGridColumnCount - 1)) /
+      fileGridColumnCount
+  );
+  const fileThumbDisplayCap =
+    isWeb && contentWidth >= FILE_VIEW_DESKTOP_BREAKPOINT
+      ? FILE_THUMB_SIZE * 2
+      : FILE_THUMB_SIZE;
   const fileView = (
     <ThemedView
       style={[
@@ -3354,6 +3377,16 @@ export default function TestScreen() {
               file.grid.columns > 0 && file.grid.rows > 0
                 ? file.grid.columns / file.grid.rows
                 : 1;
+            let thumbWidth = fileCardWidth;
+            let thumbHeight = fileCardWidth / thumbAspect;
+            if (isWeb && (thumbWidth > fileThumbDisplayCap || thumbHeight > fileThumbDisplayCap)) {
+              const scale = fileThumbDisplayCap / Math.max(thumbWidth, thumbHeight);
+              thumbWidth = Math.round(thumbWidth * scale);
+              thumbHeight = Math.round(thumbHeight * scale);
+            }
+            const fileThumbSizeStyle = isWeb
+              ? { width: thumbWidth, height: thumbHeight }
+              : { width: fileCardWidth, aspectRatio: thumbAspect };
             return (
               <Pressable
                 key={file.id}
@@ -3380,7 +3413,7 @@ export default function TestScreen() {
                   style={[
                     styles.fileThumb,
                     selectedFileIds.has(file.id) && styles.fileThumbSelected,
-                    { width: fileCardWidth, aspectRatio: thumbAspect },
+                    fileThumbSizeStyle,
                   ]}
                 >
                   {hasCachedThumbnail(file) ? (
@@ -5618,6 +5651,8 @@ const styles = StyleSheet.create({
   fileGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
+    alignContent: 'flex-start',
+    justifyContent: 'flex-start',
     gap: FILE_GRID_GAP,
     paddingHorizontal: FILE_GRID_SIDE_PADDING,
     paddingTop: 8,

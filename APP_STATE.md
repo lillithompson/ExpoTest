@@ -16,7 +16,7 @@ File View (viewMode = "file")
 - Header row: Title "File" (press navigates to Tile Set Creator), actions on the right.
 - Header actions: New File (plus), Select Mode (checkbox), Settings (cog).
 - Select mode bar: Animated bar with Delete button (left), selected count (center), Exit (right).
-- File grid: Scrollable list of file cards, sorted by `updatedAt` descending. Card width is computed from content width to show FILE_GRID_COLUMNS_MOBILE (3) columns on all platforms including mobile web. Cards show previews (thumbnail/preview if available, otherwise live tile grid on native; web uses placeholder).
+- File grid: Scrollable list of file cards, sorted by `updatedAt` descending. Column count is computed from content width so as many columns as fit: on desktop web (width ≥ 768) at least FILE_GRID_MIN_CARD_WIDTH_DESKTOP_WEB (240px) per card for larger thumbnails; otherwise FILE_GRID_MIN_CARD_WIDTH (100px). Cards pack to the upper left with no extra horizontal spread. On web, file thumbnail display size is capped (aspect ratio preserved): 200 px on narrow viewports, 400 px (2×) on desktop (content width ≥ 768). Generated thumbnail resolution is FILE_THUMB_SIZE 200; native ViewShot and web renderTileCanvasToDataUrl use 200. Cards show previews (thumbnail/preview if available, otherwise live tile grid on native; web uses placeholder).
 - File card interactions: Tap opens Modify view; long press opens File Options menu.
 - File Options menu: Download (web direct or native overlay), Download SVG (web only), Duplicate, Delete.
 - New File modal: Tile size selection grid of [25, 50, 75, 100, 150, 200].
