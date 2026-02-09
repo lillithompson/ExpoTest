@@ -4,13 +4,10 @@ import { StatusBar } from 'expo-status-bar';
 import { View } from 'react-native';
 import 'react-native-reanimated';
 
-import { MobileWebBanner } from '@/components/mobile-web-banner';
-
 export default function RootLayout() {
   return (
     <ThemeProvider value={DefaultTheme}>
       <View style={{ flex: 1 }}>
-        <MobileWebBanner />
         <View style={{ flex: 1 }}>
           <Stack>
             <Stack.Screen name="index" options={{ headerShown: false }} />
