@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
 import { getIsMobileWebForWindow } from '@/utils/is-mobile-web';
+import { useEffect, useState } from 'react';
 
 export function useIsMobileWeb(): boolean {
   const [isMobileWeb, setIsMobileWeb] = useState(false);

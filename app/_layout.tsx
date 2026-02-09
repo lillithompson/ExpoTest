@@ -17,6 +17,7 @@ export default function RootLayout() {
             <Stack.Screen name="tileSetCreator/index" options={{ headerShown: false }} />
             <Stack.Screen name="tileSetCreator/editor" options={{ headerShown: false }} />
             <Stack.Screen name="tileSetCreator/modifyTile" options={{ headerShown: false }} />
+            <Stack.Screen name="manual" options={{ title: 'Manual' }} />
             <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
           </Stack>
         </View>

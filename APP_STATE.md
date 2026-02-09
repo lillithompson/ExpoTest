@@ -9,6 +9,7 @@ Root Layout (app/_layout.tsx)
 
 Main Routes
 - `/` (app/index.tsx): File and Modify modes in one screen, controlled by `viewMode`.
+- `/manual` (app/manual.tsx): In-app user manual (views, tools, settings). Linked as the first option in Settings (File and Modify views).
 - `/tileSetCreator` (app/tileSetCreator/index.tsx): Tile Set list and management.
 - `/tileSetCreator/editor` (app/tileSetCreator/editor.tsx): Tile Set details and tile list.
 - `/tileSetCreator/modifyTile` (app/tileSetCreator/modifyTile.tsx): Tile editor for a single tile template.
@@ -23,7 +24,7 @@ File View (viewMode = "file")
 - File card interactions: Tap opens Modify view; long press opens File Options menu.
 - File Options menu: Download (web direct or native overlay), Download SVG (web only), Duplicate, Delete.
 - New File modal: Tile size selection grid of [25, 50, 75, 100, 150, 200].
-- Settings overlay (file view): Allow Border Connections toggle, Show Debug toggle, background color picker, background line color picker, background line width slider. "Delete all local data" button: shows an "are you sure" confirmation (Alert on native, window.confirm on web); on confirm, clears AsyncStorage for files, tile sets, bakes, favorites, and patterns, resets in-memory state via clearAllFiles, reloadTileSets, clearBrushFavorites, and clearAllPatterns, then closes settings and returns to file view.
+- Settings overlay (file view): First option "View manual" opens the in-app manual (app/manual.tsx). Then Allow Border Connections toggle, Show Debug toggle, background color picker, background line color picker, background line width slider. "Delete all local data" button: shows an "are you sure" confirmation (Alert on native, window.confirm on web); on confirm, clears AsyncStorage for files, tile sets, bakes, favorites, and patterns, resets in-memory state via clearAllFiles, reloadTileSets, clearBrushFavorites, and clearAllPatterns, then closes settings and returns to file view.
 
 Modify View (viewMode = "modify")
 - Status bar background strip at the top (white).
@@ -36,7 +37,7 @@ Modify View (viewMode = "modify")
 - Pattern chooser modal: Lists patterns for the active category with actions for create and select mode.
 - Pattern save modal: Preview of the selection with Save/Cancel.
 - Tile Set chooser overlay: Grid of thumbnails (first tile per set) with name below. Built-in categories then user tile sets. Selected items are brighter with green border (#22c55e, 2px); multi-select to define the active palette.
-- Settings overlay (modify view): Allow Border Connections toggle, Download PNG action, Show Debug toggle, background color and line controls.
+- Settings overlay (modify view): First option "View manual" opens the in-app manual. Then Allow Border Connections toggle, Download PNG action, Show Debug toggle, background color and line controls.
 - Download overlay (native): ViewShot capture with background toggle and PNG/SVG actions.
 
 Tile Set Creator List (tileSetCreator/index.tsx)

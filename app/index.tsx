@@ -3845,6 +3845,17 @@ export default function TestScreen() {
               contentContainerStyle={styles.settingsContent}
               showsVerticalScrollIndicator
             >
+              <Pressable
+                style={styles.settingsAction}
+                onPress={() => {
+                  setShowSettingsOverlay(false);
+                  router.push('/manual');
+                }}
+                accessibilityRole="button"
+                accessibilityLabel="View manual"
+              >
+                <ThemedText type="defaultSemiBold">View manual</ThemedText>
+              </Pressable>
               <ThemedView style={styles.toggleRow}>
                 <ThemedText type="defaultSemiBold">Allow Border Connections</ThemedText>
                 <Switch
@@ -5077,6 +5088,17 @@ export default function TestScreen() {
               contentContainerStyle={styles.settingsContent}
               showsVerticalScrollIndicator
             >
+              <Pressable
+                style={styles.settingsAction}
+                onPress={() => {
+                  setShowSettingsOverlay(false);
+                  router.push('/manual');
+                }}
+                accessibilityRole="button"
+                accessibilityLabel="View manual"
+              >
+                <ThemedText type="defaultSemiBold">View manual</ThemedText>
+              </Pressable>
               <ThemedView style={styles.toggleRow}>
                 <ThemedText type="defaultSemiBold">Allow Border Connections</ThemedText>
                 <Switch

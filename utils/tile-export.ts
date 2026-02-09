@@ -1,6 +1,6 @@
 import { Asset } from 'expo-asset';
-import { Image as RNImage, Platform } from 'react-native';
 import * as FileSystem from 'expo-file-system';
+import { Platform, Image as RNImage } from 'react-native';
 
 import { type TileSource } from '@/assets/images/tiles/manifest';
 import { type GridLayout, type Tile } from '@/utils/tile-grid';
