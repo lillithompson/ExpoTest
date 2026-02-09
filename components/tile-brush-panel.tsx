@@ -684,7 +684,7 @@ const styles = StyleSheet.create({
     borderWidth: 4,
   },
   itemDimmed: {
-    opacity: 0.5,
+    opacity: 0.7,
   },
   itemSelected: {
     opacity: 1,

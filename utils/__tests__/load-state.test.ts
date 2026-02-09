@@ -6,9 +6,9 @@
  * - Deferring setLoadedToken or setHydrating leaves isLoadComplete false (documents "stuck preview" cause).
  */
 import {
-  canApplyEmptyNewFileRestore,
-  canApplyNonEmptyRestore,
-  isLoadComplete,
+    canApplyEmptyNewFileRestore,
+    canApplyNonEmptyRestore,
+    isLoadComplete,
 } from '../load-state';
 
 describe('canApplyEmptyNewFileRestore', () => {
