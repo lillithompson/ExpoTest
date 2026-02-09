@@ -685,14 +685,18 @@ export const renderTileCanvasToDataUrl = async ({
   }
 
   if (maxDimension > 0) {
-    const scale = Math.min(1, maxDimension / Math.max(totalWidth, totalHeight));
-    if (scale < 1) {
+    const maxSide = Math.max(totalWidth, totalHeight);
+    const scale = maxDimension / maxSide;
+    if (scale !== 1) {
       const thumbCanvas = document.createElement('canvas');
-      thumbCanvas.width = Math.max(1, Math.floor(totalWidth * scale));
-      thumbCanvas.height = Math.max(1, Math.floor(totalHeight * scale));
+      thumbCanvas.width = Math.max(1, Math.round(totalWidth * scale));
+      thumbCanvas.height = Math.max(1, Math.round(totalHeight * scale));
       const thumbCtx = thumbCanvas.getContext('2d');
       if (thumbCtx) {
-        thumbCtx.imageSmoothingEnabled = false;
+        thumbCtx.imageSmoothingEnabled = true;
+        if (typeof thumbCtx.imageSmoothingQuality === 'string') {
+          thumbCtx.imageSmoothingQuality = 'high';
+        }
         thumbCtx.drawImage(canvas, 0, 0, thumbCanvas.width, thumbCanvas.height);
         return thumbCanvas.toDataURL(format, quality);
       }

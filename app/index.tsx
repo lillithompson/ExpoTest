@@ -84,8 +84,10 @@ const DEFAULT_CATEGORY = (TILE_CATEGORIES as string[]).includes('angular')
   : TILE_CATEGORIES[0];
 const ERROR_TILE = require('@/assets/images/tiles/tile_error.svg');
 const PREVIEW_DIR = `${FileSystem.cacheDirectory ?? ''}tile-previews/`;
-/** Max file thumbnail display size (web cap) and generated thumbnail resolution. */
-const FILE_THUMB_SIZE = 200;
+/** Max file thumbnail display size (web cap): narrow = this, desktop = 2×. */
+const FILE_THUMB_DISPLAY_SIZE = 200;
+/** Generated file thumbnail resolution (2× display for sharp rendering on desktop). */
+const FILE_THUMB_SIZE = 400;
 /** Min content width to treat as desktop (web); above this, thumbnails use 2× display size. */
 const FILE_VIEW_DESKTOP_BREAKPOINT = 768;
 const DEBUG_FILE_CHECK = true;
@@ -3269,8 +3271,8 @@ export default function TestScreen() {
   );
   const fileThumbDisplayCap =
     isWeb && contentWidth >= FILE_VIEW_DESKTOP_BREAKPOINT
-      ? FILE_THUMB_SIZE * 2
-      : FILE_THUMB_SIZE;
+      ? FILE_THUMB_DISPLAY_SIZE * 2
+      : FILE_THUMB_DISPLAY_SIZE;
   const fileView = (
     <ThemedView
       style={[

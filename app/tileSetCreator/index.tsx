@@ -1,29 +1,27 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import {
-  Animated,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  TextInput,
-  useWindowDimensions,
-  View,
-} from 'react-native';
-import * as FileSystem from 'expo-file-system';
-import JSZip from 'jszip';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import ViewShot from 'react-native-view-shot';
+import JSZip from 'jszip';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import {
+    Animated,
+    Platform,
+    Pressable,
+    ScrollView,
+    StyleSheet,
+    TextInput,
+    useWindowDimensions,
+    View,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import ViewShot from 'react-native-view-shot';
 
 import {
-  TILE_CATEGORIES,
-  TILE_MANIFEST,
-  type TileCategory,
+    TILE_CATEGORIES,
+    TILE_MANIFEST
 } from '@/assets/images/tiles/manifest';
-import { TileAsset } from '@/components/tile-asset';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { TileAsset } from '@/components/tile-asset';
 import { type TileSetTile, useTileSets } from '@/hooks/use-tile-sets';
 import { renderTileCanvasToDataUrl } from '@/utils/tile-export';
 import { type Tile } from '@/utils/tile-grid';
