@@ -20,7 +20,7 @@ File View (viewMode = "file")
 - File card interactions: Tap opens Modify view; long press opens File Options menu.
 - File Options menu: Download (web direct or native overlay), Download SVG (web only), Duplicate, Delete.
 - New File modal: Tile size selection grid of [25, 50, 75, 100, 150, 200].
-- Settings overlay (file view): Allow Border Connections toggle, Show Debug toggle, background color picker, background line color picker, background line width slider.
+- Settings overlay (file view): Allow Border Connections toggle, Show Debug toggle, background color picker, background line color picker, background line width slider. "Delete all local data" button: shows an "are you sure" confirmation (Alert); on confirm, clears AsyncStorage for files, tile sets, bakes, and favorites, resets in-memory state via clearAllFiles, reloadTileSets, and clearBrushFavorites, then closes settings and returns to file view.
 
 Modify View (viewMode = "modify")
 - Status bar background strip at the top (white).
@@ -98,6 +98,7 @@ Persistence and Storage
 - Patterns stored in AsyncStorage key `tile-patterns-v1`.
 - Tile sets stored in AsyncStorage key `tile-sets-v1`; baked tile sources cached in `tile-sets-bakes-v1`.
 - Brush favorites stored in AsyncStorage key `tile-brush-favorites-v1`.
+- Delete all local data (File > Settings): `utils/clear-local-data.ts` clears the above storage keys; app then resets files (useTileFiles.clearAllFiles), tile sets (useTileSets.reloadTileSets), and favorites (clearBrushFavorites from tile-brush-panel).
 - File hydration sanitizes stored data: `tiles` is coerced to an array and `grid` requires numeric `rows`/`columns`, otherwise defaults are applied.
 
 File Data Model

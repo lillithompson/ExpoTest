@@ -16,6 +16,7 @@ import {
     StyleSheet,
     Switch,
     Text,
+    TouchableOpacity,
     useWindowDimensions,
     View,
 } from 'react-native';
@@ -32,7 +33,7 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { clearTileAssetCache, prefetchTileAssets, TileAsset } from '@/components/tile-asset';
 import { TileAtlasSprite } from '@/components/tile-atlas-sprite';
-import { TileBrushPanel } from '@/components/tile-brush-panel';
+import { clearBrushFavorites, TileBrushPanel } from '@/components/tile-brush-panel';
 import { TileDebugOverlay } from '@/components/tile-debug-overlay';
 import { TileGridCanvas } from '@/components/tile-grid-canvas';
 import { usePersistedSettings } from '@/hooks/use-persisted-settings';
@@ -41,6 +42,7 @@ import { useTileFiles, type TileFile } from '@/hooks/use-tile-files';
 import { useTileGrid } from '@/hooks/use-tile-grid';
 import { useTilePatterns } from '@/hooks/use-tile-patterns';
 import { useTileSets } from '@/hooks/use-tile-sets';
+import { clearAllLocalData } from '@/utils/clear-local-data';
 import {
     canApplyEmptyNewFileRestore,
     canApplyNonEmptyRestore,
@@ -758,6 +760,7 @@ export default function TestScreen() {
     duplicateFile,
     downloadFile,
     deleteFile,
+    clearAllFiles,
     upsertActiveFile,
     ready,
   } = useTileFiles(DEFAULT_CATEGORY);
@@ -766,6 +769,7 @@ export default function TestScreen() {
     bakedSourcesBySetId,
     currentBakedNamesBySetId,
     isLoaded: tileSetsLoaded,
+    reloadTileSets,
   } = useTileSets();
 
   const activeCategories = useMemo(
@@ -3754,6 +3758,38 @@ export default function TestScreen() {
                   accessibilityLabel="Toggle debug overlay"
                 />
               </ThemedView>
+              <TouchableOpacity
+                style={[styles.settingsAction, styles.settingsActionDanger]}
+                onPress={() => {
+                  const message =
+                    'Delete all local data? This will permanently delete all saved files, tile sets, and favorites. This cannot be undone.';
+                  const doDelete = async () => {
+                    await clearAllLocalData();
+                    await clearAllFiles();
+                    await reloadTileSets();
+                    clearBrushFavorites();
+                    setShowSettingsOverlay(false);
+                    setViewMode('file');
+                  };
+                  if (Platform.OS === 'web') {
+                    if (window.confirm(message)) {
+                      void doDelete();
+                    }
+                  } else {
+                    Alert.alert('Delete all local data?', message, [
+                      { text: 'Cancel', style: 'cancel' },
+                      { text: 'Delete all', style: 'destructive', onPress: () => void doDelete() },
+                    ]);
+                  }
+                }}
+                accessibilityRole="button"
+                accessibilityLabel="Delete all local data"
+                activeOpacity={0.7}
+              >
+                <ThemedText type="defaultSemiBold" style={styles.settingsActionDangerText}>
+                  Delete all local data
+                </ThemedText>
+              </TouchableOpacity>
               {DEBUG_FILE_CHECK && (
                 <Pressable
                   style={styles.settingsAction}
@@ -5232,7 +5268,7 @@ const styles = StyleSheet.create({
   settingsScreen: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: '#fff',
-    zIndex: 20,
+    zIndex: 100,
   },
   settingsHeader: {
     height: HEADER_HEIGHT,
@@ -5261,6 +5297,12 @@ const styles = StyleSheet.create({
     borderColor: '#1f1f1f',
     borderRadius: 6,
     alignItems: 'center',
+  },
+  settingsActionDanger: {
+    borderColor: '#dc2626',
+  },
+  settingsActionDangerText: {
+    color: '#dc2626',
   },
   overlayList: {
     gap: 8,

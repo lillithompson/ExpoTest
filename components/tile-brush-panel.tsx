@@ -109,8 +109,18 @@ const favoritesStore = (() => {
     return () => listeners.delete(listener);
   };
 
-  return { subscribe, setState, ensureLoaded, getState: () => state };
+  const clearFavorites = () => {
+    state = { ...state, favorites: {} };
+    notify();
+    void AsyncStorage.setItem(FAVORITES_STORAGE_KEY, JSON.stringify(state));
+  };
+
+  return { subscribe, setState, ensureLoaded, getState: () => state, clearFavorites };
 })();
+
+export function clearBrushFavorites(): void {
+  favoritesStore.clearFavorites();
+}
 
 export function TileBrushPanel({
   tileSources,

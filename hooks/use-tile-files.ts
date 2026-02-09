@@ -353,6 +353,13 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
     [activeFileId, persistFiles]
   );
 
+  const clearAllFiles = useCallback(async () => {
+    setFiles([]);
+    setActiveFileId(null);
+    await AsyncStorage.setItem(FILES_KEY, JSON.stringify([]));
+    await AsyncStorage.removeItem(ACTIVE_KEY);
+  }, []);
+
   const activeFile = useMemo(
     () => files.find((file) => file.id === activeFileId) ?? null,
     [files, activeFileId]
@@ -367,6 +374,7 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
     duplicateFile,
     downloadFile,
     deleteFile,
+    clearAllFiles,
     upsertActiveFile,
     ready,
   };
