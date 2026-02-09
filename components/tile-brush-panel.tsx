@@ -681,7 +681,7 @@ const styles = StyleSheet.create({
   },
   content: {
     flexGrow: 1,
-    justifyContent: 'center',
+    justifyContent: Platform.OS === 'web' ? 'flex-start' : 'center',
     paddingVertical: 0,
     backgroundColor: '#3f3f3f',
   },
