@@ -24,7 +24,7 @@ File View (viewMode = "file")
 
 Modify View (viewMode = "modify")
 - Status bar background strip at the top (white).
-- Header row: Back button "< Modify" (saves then returns to File view) and toolbar actions.
+- Header row: Back button "< Modify" (returns to File view immediately; save runs in background) and toolbar actions.
 - Toolbar actions: Reset, Flood (tap) / Flood Complete (long press), Reconcile (tap) / Controlled Randomize (long press), Mirror Horizontal toggle, Mirror Vertical toggle.
 - Canvas frame: Grid background, optional mirror guide lines, optional preview image during hydration.
 - Tile grid: Web renders TileCell components. Native renders a single Skia canvas (TileGridCanvas) for all tiles.
@@ -108,7 +108,7 @@ Autosave and Preview Pipeline
 - Autosave is debounced (150ms). Web preview capture is additionally delayed (800ms).
 - On native, saving uses ViewShot capture and writes PNGs to cache `tile-previews/` for full preview and thumbnail.
 - On web, previews and thumbnails are generated via `renderTileCanvasToDataUrl`.
-- Leaving Modify view triggers a full save via `persistActiveFileNow`.
+- Leaving Modify view starts a full save via `persistActiveFileNow` in the background (navigation is immediate).
 
 Hydration and Rendering
 - File changes run through a hydrate pipeline that suspends rendering and uses `loadToken`/`loadedToken` gating.
