@@ -16,7 +16,7 @@ File View (viewMode = "file")
 - Header row: Title "File" (press navigates to Tile Set Creator), actions on the right.
 - Header actions: New File (plus), Select Mode (checkbox), Settings (cog).
 - Select mode bar: Animated bar with Delete button (left), selected count (center), Exit (right).
-- File grid: Scrollable list of file cards, sorted by `updatedAt` descending. Cards show previews (thumbnail/preview if available, otherwise live tile grid on native; web uses placeholder).
+- File grid: Scrollable list of file cards, sorted by `updatedAt` descending. Card width is computed from content width to show FILE_GRID_COLUMNS_MOBILE (3) columns on all platforms including mobile web. Cards show previews (thumbnail/preview if available, otherwise live tile grid on native; web uses placeholder).
 - File card interactions: Tap opens Modify view; long press opens File Options menu.
 - File Options menu: Download (web direct or native overlay), Download SVG (web only), Duplicate, Delete.
 - New File modal: Tile size selection grid of [25, 50, 75, 100, 150, 200].
@@ -65,7 +65,7 @@ Core Behaviors and Tool Rules
 - Fixed brush double tap (palette): Cycles rotation three times, then mirror X, then mirror Y.
 - Fixed brush long press (palette): Opens Favorites dialog to add/remove the tile with a color tag.
 - Erase brush: Tap clears a tile. Flood clears all tiles.
-- Clone brush: First tap sets clone source. Drag paints clones relative to the anchor cell. Long press on canvas resets clone source to the pressed cell. Clone wraps around grid edges.
+- Clone brush: First tap sets clone source. Drag paints clones relative to the anchor cell. Long press on canvas resets clone source to the pressed cell. Clone wraps around grid edges. On mobile web (e.g. iOS Safari), synthesized mouse events after a touch are ignored so one tap does not set both source and anchor; only the touch is handled.
 - Pattern brush: Uses a pattern anchor cell to map pattern tiles by offset. Pattern mirrors can be toggled in the pattern picker. Pattern rotation is 90-degree increments. Pattern brush long press/double tap opens the pattern picker.
 - Pattern creation: Drag-select in the grid to define a pattern. Save dialog prompts to store it in category storage.
 - Flood (tap): Fills all cells based on brush mode (random, fixed, pattern, erase). Respects mirror toggles.

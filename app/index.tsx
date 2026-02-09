@@ -1311,6 +1311,8 @@ export default function TestScreen() {
   const longPressTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const longPressTriggeredRef = useRef(false);
   const isTouchDragActiveRef = useRef(false);
+  const ignoreNextMouseRef = useRef(false);
+  const ignoreMouseAfterTouchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const previewSaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const loadTokenRef = useRef(0);
@@ -3240,14 +3242,12 @@ export default function TestScreen() {
     }
   };
 
-  const fileCardWidth = isWeb
-    ? 200
-    : Math.floor(
-        (contentWidth -
-          FILE_GRID_SIDE_PADDING * 2 -
-          FILE_GRID_GAP * (FILE_GRID_COLUMNS_MOBILE - 1)) /
-          FILE_GRID_COLUMNS_MOBILE
-      );
+  const fileCardWidth = Math.floor(
+    (contentWidth -
+      FILE_GRID_SIDE_PADDING * 2 -
+      FILE_GRID_GAP * (FILE_GRID_COLUMNS_MOBILE - 1)) /
+      FILE_GRID_COLUMNS_MOBILE
+  );
   const fileView = (
     <ThemedView
       style={[
@@ -4133,6 +4133,9 @@ export default function TestScreen() {
                 }
               }}
                 onMouseDown={(event: any) => {
+                  if (isWeb && ignoreNextMouseRef.current) {
+                    return;
+                  }
                   setInteracting(true);
                   markInteractionStart();
                   const point = getRelativePoint(event);
@@ -4186,6 +4189,16 @@ export default function TestScreen() {
               }}
               onTouchStart={(event: any) => {
                 isTouchDragActiveRef.current = true;
+                if (isWeb) {
+                  ignoreNextMouseRef.current = true;
+                  if (ignoreMouseAfterTouchTimeoutRef.current) {
+                    clearTimeout(ignoreMouseAfterTouchTimeoutRef.current);
+                  }
+                  ignoreMouseAfterTouchTimeoutRef.current = setTimeout(() => {
+                    ignoreNextMouseRef.current = false;
+                    ignoreMouseAfterTouchTimeoutRef.current = null;
+                  }, 400);
+                }
                 setInteracting(true);
                 markInteractionStart();
                 const point = getRelativePoint(event);
