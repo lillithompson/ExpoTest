@@ -4,6 +4,9 @@ This document is the single source of truth for reconstructing the app from scra
 
 **Structure**
 
+Root Layout (app/_layout.tsx)
+- Persistent mobile web banner: On web, when viewport width < 768 or user agent indicates mobile, a yellow top banner is shown with text "Mobile web partially supported. Use a desktop browser". Hidden on native and on desktop web. Implemented via `getIsMobileWebForWindow` (utils/is-mobile-web.ts), `useIsMobileWeb` (hooks/use-is-mobile-web.ts and .web.ts), and `MobileWebBanner` (components/mobile-web-banner.tsx).
+
 Main Routes
 - `/` (app/index.tsx): File and Modify modes in one screen, controlled by `viewMode`.
 - `/tileSetCreator` (app/tileSetCreator/index.tsx): Tile Set list and management.
