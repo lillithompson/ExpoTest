@@ -32,7 +32,7 @@ Modify View (viewMode = "modify")
 - Brush panel: Scrollable two or three row tile palette plus Random, Clone, Erase, and Pattern buttons.
 - Pattern chooser modal: Lists patterns for the active category with actions for create and select mode.
 - Pattern save modal: Preview of the selection with Save/Cancel.
-- Tile Set chooser overlay: Select built-in categories and user tile sets to define the active palette.
+- Tile Set chooser overlay: Grid of thumbnails (first tile per set) with name below. Built-in categories then user tile sets. Selected items are brighter with green border (#22c55e, 2px); multi-select to define the active palette.
 - Settings overlay (modify view): Allow Border Connections toggle, Download PNG action, Show Debug toggle, background color and line controls.
 - Download overlay (native): ViewShot capture with background toggle and PNG/SVG actions.
 

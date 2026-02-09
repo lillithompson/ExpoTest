@@ -286,7 +286,8 @@ export const useTileGrid = ({
   const buildCompatibleCandidates = (
     cellIndex: number,
     tilesState: Tile[],
-    allowedIndices: Set<number> | null
+    allowedIndices: Set<number> | null,
+    treatUninitializedAsNoConnection = false
   ) => {
     if (tileSourcesLength <= 0) {
       return [] as Tile[];
@@ -318,7 +319,10 @@ export const useTileGrid = ({
         const neighborIndex = r * gridLayout.columns + c;
         const neighborTile = tilesState[neighborIndex];
         if (!neighborTile || neighborTile.imageIndex < 0) {
-          return { pairs: getPairsForDirection(index), connections: new Array(8).fill(false) };
+          if (treatUninitializedAsNoConnection) {
+            return { pairs: getPairsForDirection(index), connections: new Array(8).fill(false) };
+          }
+          return null;
         }
         const neighborConnections = compatTables.getConnectionsForPlacement(
           neighborTile.imageIndex,
@@ -401,7 +405,8 @@ export const useTileGrid = ({
   const isPlacementValid = (
     cellIndex: number,
     placement: Tile,
-    tilesState: Tile[]
+    tilesState: Tile[],
+    treatUninitializedAsNoConnection = false
   ) => {
     const transformed = compatTables.getConnectionsForPlacement(
       placement.imageIndex,
@@ -440,9 +445,12 @@ export const useTileGrid = ({
       const neighborIndex = r * gridLayout.columns + c;
       const neighborTile = tilesState[neighborIndex];
       if (!neighborTile || neighborTile.imageIndex < 0) {
-        return getPairsForDirection(index).every(
-          ([candidateIndex]) => transformed[candidateIndex] === false
-        );
+        if (treatUninitializedAsNoConnection) {
+          return getPairsForDirection(index).every(
+            ([candidateIndex]) => transformed[candidateIndex] === false
+          );
+        }
+        return true;
       }
       const neighborTransformed = compatTables.getConnectionsForPlacement(
         neighborTile.imageIndex,
@@ -1174,10 +1182,10 @@ export const useTileGrid = ({
         if (!tile || tile.imageIndex < 0) {
           continue;
         }
-        if (isPlacementValid(index, tile, nextTiles)) {
+        if (isPlacementValid(index, tile, nextTiles, true)) {
           continue;
         }
-        const candidates = buildCompatibleCandidates(index, nextTiles, allowedSet);
+        const candidates = buildCompatibleCandidates(index, nextTiles, allowedSet, true);
         if (candidates.length === 0) {
           continue;
         }

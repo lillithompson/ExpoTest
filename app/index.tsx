@@ -4915,14 +4915,20 @@ export default function TestScreen() {
             />
             <ThemedView style={styles.overlayPanel}>
               <ThemedText type="title">Tile Sets</ThemedText>
-              <ThemedView style={styles.sectionGroup}>
-                <ThemedText type="defaultSemiBold">Tile Sets</ThemedText>
-                <ThemedView style={styles.overlayList}>
-                  {TILE_CATEGORIES.map((category) => (
+              <ScrollView
+                style={styles.tileSetChooserScroll}
+                contentContainerStyle={styles.tileSetChooserScrollContent}
+                showsVerticalScrollIndicator
+              >
+                <ThemedView style={styles.tileSetChooserSection}>
+                  <ThemedView style={styles.tileSetChooserGrid}>
+                {TILE_CATEGORIES.map((category) => {
+                  const isSelected = selectedCategories.includes(category);
+                  const firstTile = TILE_MANIFEST[category][0];
+                  return (
                     <Pressable
                       key={category}
                       onPress={() => {
-                        const isSelected = selectedCategories.includes(category);
                         if (
                           isSelected &&
                           selectedCategories.length === 1 &&
@@ -4958,86 +4964,129 @@ export default function TestScreen() {
                           });
                         }
                       }}
-                      style={[
-                        styles.overlayItem,
-                        selectedCategories.includes(category) &&
-                          styles.overlayItemSelected,
-                      ]}
+                      style={styles.tileSetChooserCard}
+                      accessibilityState={{ selected: isSelected }}
                     >
-                      <ThemedText type="defaultSemiBold">{category}</ThemedText>
+                      <View
+                        style={[
+                          styles.tileSetChooserThumb,
+                          !isSelected && styles.tileSetChooserThumbUnselected,
+                          isSelected && styles.tileSetChooserThumbSelected,
+                        ]}
+                      >
+                        {firstTile && (
+                          <TileAsset
+                            source={firstTile.source}
+                            name={firstTile.name}
+                            style={styles.tileSetChooserThumbImage}
+                            resizeMode="cover"
+                          />
+                        )}
+                      </View>
+                      <ThemedText
+                        type="defaultSemiBold"
+                        style={styles.tileSetChooserLabel}
+                        numberOfLines={2}
+                      >
+                        {category}
+                      </ThemedText>
                     </Pressable>
-                  ))}
-                </ThemedView>
-                {tileSetSelectionError && (
-                  <ThemedText type="defaultSemiBold" style={styles.errorText}>
-                    {tileSetSelectionError}
-                  </ThemedText>
-                )}
-              </ThemedView>
-              <ThemedView style={styles.sectionGroup}>
-                <ThemedText type="defaultSemiBold">My Tile Sets</ThemedText>
-                {userTileSets.length === 0 ? (
-                  <ThemedText type="defaultSemiBold" style={styles.emptyText}>
-                    No tile sets yet
-                  </ThemedText>
-                ) : (
-                  <ThemedView style={styles.overlayList}>
-                    {userTileSets.map((set) => {
-                      const isSelected = selectedTileSetIds.includes(set.id);
-                      return (
-                        <Pressable
-                          key={set.id}
-                          onPress={() => {
-                            if (
-                              isSelected &&
-                              selectedTileSetIds.length === 1 &&
-                              selectedCategories.length === 0
-                            ) {
-                              setTileSetSelectionError('Select at least one tile set.');
-                              return;
-                            }
-                            const nextTileSetIds = isSelected
-                              ? selectedTileSetIds.filter(
-                                  (entry) => entry !== set.id
-                                )
-                              : [...selectedTileSetIds, set.id];
-                            setTileSetSelectionError(null);
-                            setSelectedTileSetIds(nextTileSetIds);
-                            setSettings((prev) => ({
-                              ...prev,
-                              tileSetCategories: selectedCategories,
-                              tileSetIds: nextTileSetIds,
-                            }));
-                            const nextPaletteSources = getSourcesForSelection(
-                              selectedCategories,
-                              nextTileSetIds
-                            );
-                            const nextSourceNames =
-                              ensureFileSourceNames(nextPaletteSources);
-                            if (activeFileId) {
-                              upsertActiveFile({
-                                tiles,
-                                gridLayout,
-                                tileSetIds: nextTileSetIds,
-                                sourceNames: nextSourceNames,
-                                preferredTileSize: fileTileSize,
-                                lineWidth: activeLineWidth,
-                                lineColor: activeLineColor,
-                              });
-                            }
-                          }}
-                          style={[
-                            styles.overlayItem,
-                            isSelected && styles.overlayItemSelected,
-                          ]}
-                        >
-                          <ThemedText type="defaultSemiBold">{set.name}</ThemedText>
-                        </Pressable>
-                      );
-                    })}
+                  );
+                })}
                   </ThemedView>
-                )}
-              </ThemedView>
+                </ThemedView>
+                <View style={styles.tileSetChooserDivider} />
+                <ThemedView style={styles.tileSetChooserSection}>
+                  {userTileSets.length === 0 ? (
+                    <ThemedText type="defaultSemiBold" style={styles.emptyText}>
+                      No UGC tile sets yet
+                    </ThemedText>
+                  ) : (
+                  <ThemedView style={styles.tileSetChooserGrid}>
+                {userTileSets.map((set) => {
+                  const isSelected = selectedTileSetIds.includes(set.id);
+                  const firstTile = set.tiles[0];
+                  const thumbUri = firstTile?.thumbnailUri ?? firstTile?.previewUri ?? null;
+                  return (
+                    <Pressable
+                      key={set.id}
+                      onPress={() => {
+                        if (
+                          isSelected &&
+                          selectedTileSetIds.length === 1 &&
+                          selectedCategories.length === 0
+                        ) {
+                          setTileSetSelectionError('Select at least one tile set.');
+                          return;
+                        }
+                        const nextTileSetIds = isSelected
+                          ? selectedTileSetIds.filter((entry) => entry !== set.id)
+                          : [...selectedTileSetIds, set.id];
+                        setTileSetSelectionError(null);
+                        setSelectedTileSetIds(nextTileSetIds);
+                        setSettings((prev) => ({
+                          ...prev,
+                          tileSetCategories: selectedCategories,
+                          tileSetIds: nextTileSetIds,
+                        }));
+                        const nextPaletteSources = getSourcesForSelection(
+                          selectedCategories,
+                          nextTileSetIds
+                        );
+                        const nextSourceNames =
+                          ensureFileSourceNames(nextPaletteSources);
+                        if (activeFileId) {
+                          upsertActiveFile({
+                            tiles,
+                            gridLayout,
+                            tileSetIds: nextTileSetIds,
+                            sourceNames: nextSourceNames,
+                            preferredTileSize: fileTileSize,
+                            lineWidth: activeLineWidth,
+                            lineColor: activeLineColor,
+                          });
+                        }
+                      }}
+                      style={styles.tileSetChooserCard}
+                      accessibilityState={{ selected: isSelected }}
+                    >
+                      <View
+                        style={[
+                          styles.tileSetChooserThumb,
+                          !isSelected && styles.tileSetChooserThumbUnselected,
+                          isSelected && styles.tileSetChooserThumbSelected,
+                        ]}
+                      >
+                        {thumbUri ? (
+                          <TileAsset
+                            source={{ uri: thumbUri }}
+                            name="thumbnail"
+                            style={styles.tileSetChooserThumbImage}
+                            resizeMode="cover"
+                          />
+                        ) : (
+                          <View style={styles.tileSetChooserThumbPlaceholder} />
+                        )}
+                      </View>
+                      <ThemedText
+                        type="defaultSemiBold"
+                        style={styles.tileSetChooserLabel}
+                        numberOfLines={2}
+                      >
+                        {set.name}
+                      </ThemedText>
+                    </Pressable>
+                  );
+                })}
+                  </ThemedView>
+                  )}
+                </ThemedView>
+              </ScrollView>
+              {tileSetSelectionError && (
+                <ThemedText type="defaultSemiBold" style={styles.errorText}>
+                  {tileSetSelectionError}
+                </ThemedText>
+              )}
             </ThemedView>
           </ThemedView>
         )}
@@ -5185,6 +5234,60 @@ const styles = StyleSheet.create({
   },
   overlayList: {
     gap: 8,
+  },
+  tileSetChooserScroll: {
+    maxHeight: 320,
+  },
+  tileSetChooserScrollContent: {
+    paddingVertical: 8,
+    gap: 16,
+  },
+  tileSetChooserSection: {},
+  tileSetChooserDivider: {
+    height: 1,
+    backgroundColor: '#d1d5db',
+    marginVertical: 12,
+    width: '100%',
+  },
+  tileSetChooserGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+  },
+  tileSetChooserCard: {
+    width: 96,
+    alignItems: 'center',
+    padding: 6,
+  },
+  tileSetChooserThumb: {
+    width: 72,
+    height: 72,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#1f1f1f',
+    backgroundColor: '#111',
+    overflow: 'hidden',
+  },
+  tileSetChooserThumbUnselected: {
+    opacity: 0.5,
+  },
+  tileSetChooserThumbSelected: {
+    borderColor: '#22c55e',
+    borderWidth: 2,
+  },
+  tileSetChooserThumbImage: {
+    width: '100%',
+    height: '100%',
+  },
+  tileSetChooserThumbPlaceholder: {
+    width: '100%',
+    height: '100%',
+    backgroundColor: '#0f0f0f',
+  },
+  tileSetChooserLabel: {
+    marginTop: 6,
+    textAlign: 'center',
+    fontSize: 12,
   },
   sectionGroup: {
     gap: 8,
