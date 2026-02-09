@@ -90,7 +90,6 @@ const FILE_THUMB_DISPLAY_SIZE = 200;
 const FILE_THUMB_SIZE = 400;
 /** Min content width to treat as desktop (web); above this, thumbnails use 2× display size. */
 const FILE_VIEW_DESKTOP_BREAKPOINT = 768;
-const DEBUG_FILE_CHECK = true;
 const buildUserTileSourceFromName = (name: string): TileSource | null => {
   if (!name.includes(':')) {
     return null;
@@ -656,7 +655,6 @@ export default function TestScreen() {
   );
   const [selectedTileSetIds, setSelectedTileSetIds] = useState<string[]>([]);
   const [fileSourceNames, setFileSourceNames] = useState<string[]>([]);
-  const [lastFileCheck, setLastFileCheck] = useState<string>('');
   const [tileSetSelectionError, setTileSetSelectionError] = useState<string | null>(
     null
   );
@@ -1417,31 +1415,6 @@ export default function TestScreen() {
     },
     [resolveSourceName, activeFileTileSetIds, tileSourcesByName]
   );
-  const handleCheckUgcFile = useCallback(async () => {
-    const candidate =
-      (activeFileSourceNames.find((name) => name.includes(':')) ??
-        fileSourceNames.find((name) => name.includes(':')) ??
-        '') as string;
-    if (!candidate) {
-      Alert.alert('UGC File Check', 'No UGC tile name found in source names.');
-      return;
-    }
-    const direct = buildUserTileSourceFromName(candidate);
-    const uri = (direct?.source as { uri?: string } | null)?.uri ?? '';
-    if (!uri) {
-      Alert.alert('UGC File Check', 'Could not build a file path for this tile.');
-      return;
-    }
-    let exists = false;
-    try {
-      exists = await FileSystem.getInfoAsync(uri).then((info) => info.exists);
-    } catch {
-      exists = false;
-    }
-    const payload = `${candidate} -> ${uri} (${exists ? 'exists' : 'missing'})`;
-    setLastFileCheck(payload);
-    Alert.alert('UGC File Check', payload);
-  }, [activeFileSourceNames, fileSourceNames]);
   const resolveTileAssetForFile = useCallback(
     (
       tile: Tile | undefined,
@@ -3909,19 +3882,6 @@ export default function TestScreen() {
                   Delete all local data
                 </ThemedText>
               </TouchableOpacity>
-              {DEBUG_FILE_CHECK && (
-                <Pressable
-                  style={styles.settingsAction}
-                  onPress={handleCheckUgcFile}
-                  accessibilityRole="button"
-                  accessibilityLabel="Check UGC file path"
-                >
-                  <ThemedText type="defaultSemiBold">Check UGC File</ThemedText>
-                </Pressable>
-              )}
-              {DEBUG_FILE_CHECK && lastFileCheck ? (
-                <ThemedText type="defaultSemiBold">{lastFileCheck}</ThemedText>
-              ) : null}
               <HsvColorPicker
                 label="Background Color"
                 color={settings.backgroundColor}

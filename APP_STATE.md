@@ -33,7 +33,7 @@ Modify View (viewMode = "modify")
 - Canvas frame: Grid background, optional mirror guide lines, optional preview image during hydration.
 - Tile grid: Web renders TileCell components; mouse and touch are both supported so that tap and drag work on desktop and mobile browsers (e.g. Safari on iOS). Touch handlers use the capture phase (onTouchStartCapture, onTouchMoveCapture, onTouchEndCapture, onTouchCancelCapture) so that drag-to-paint works when the gesture starts on an initialized tile (whose image would otherwise be the touch target and prevent the grid from receiving touchmove). Native renders a single Skia canvas (TileGridCanvas) for all tiles.
 - Pattern creation overlays: Top and bottom overlays shown while in pattern creation mode.
-- Brush panel: Scrollable two or three row tile palette plus Random, Clone, Erase, and Pattern buttons. Palette tiles use an absolutely positioned 4px border overlay (dark when unselected, green when selected) and a full-size (itemSize × itemSize) content wrapper so tile images stay centered with no shift on selection or when switching from cached/loading image to atlas canvas.
+- Brush panel: Scrollable two or three row tile palette plus Random, Clone, Erase, and Pattern buttons. The Pattern button shows the label "Pattern" fixed at the top with the selected pattern thumbnail below it so the label does not move. Palette tiles use an absolutely positioned 4px border overlay (dark when unselected, green when selected) and a full-size (itemSize × itemSize) content wrapper so tile images stay centered with no shift on selection or when switching from cached/loading image to atlas canvas.
 - Pattern chooser modal: Lists patterns for the active category with actions for create and select mode.
 - Pattern save modal: Preview of the selection with Save/Cancel.
 - Tile Set chooser overlay: Grid of thumbnails (first tile per set) with name below. Built-in categories then user tile sets. Selected items are brighter with green border (#22c55e, 2px); multi-select to define the active palette.
@@ -171,8 +171,6 @@ Performance and Interaction
 - Clone and pattern tools use anchors and wrap-around indexing for consistent offsets.
 - Mirroring is applied by deriving driven cells and mapping to mirrored targets.
 - Tile placement compatibility uses cached connection tables (buildCompatibilityTables) to avoid recomputing connection transforms per brush action.
-- When `DEBUG_FILE_CHECK` is on, the Settings overlay includes a "Check UGC File" button that alerts whether the first UGC tile name resolves to an on-device SVG file path.
-
 Testing
 - Unit tests for tile resolution and hydration live in `utils/__tests__/tile-grid.test.ts`. They assert: `hydrateTilesWithSourceNames` assigns `tile.name` from the file's sourceNames so UGC index 0 gets the UGC name; `resolveDisplaySource` uses only name-based resolution when `tile.name` is set (never index, so wrong tile cannot show); `getTileSourceIndexByName` resolves by name; `normalizeTiles` preserves `tile.name`. Run with `npm test` (or `npm run test:watch`). Run tests when changing tile-grid utils or UGC/placement/hydration logic.
 - Unit tests for UGC URI detection live in `utils/__tests__/tile-uri.test.ts`. They assert: `isUgcTileFileUri` returns false on web; on native it returns true only for file:// URIs whose path contains `/tile-sets/`, so the TileAsset cache-bypass rule is well-defined and regression-safe. Run tests when changing utils/tile-uri.ts or TileAsset cache behavior.

@@ -1,19 +1,19 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Modal,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  TextInput,
-  View,
+    Modal,
+    Platform,
+    Pressable,
+    ScrollView,
+    StyleSheet,
+    TextInput,
+    View,
 } from 'react-native';
 
-import { ThemedText } from '@/components/themed-text';
-import { TileAtlasSprite } from '@/components/tile-atlas-sprite';
-import { TileAsset } from '@/components/tile-asset';
 import { type TileSource } from '@/assets/images/tiles/manifest';
+import { ThemedText } from '@/components/themed-text';
+import { TileAsset } from '@/components/tile-asset';
+import { TileAtlasSprite } from '@/components/tile-atlas-sprite';
 import { type TileAtlas } from '@/utils/tile-atlas';
 
 type Brush =
@@ -330,6 +330,22 @@ export function TileBrushPanel({
               4,
               Math.floor(previewMax / Math.max(1, previewHeight))
             );
+            const previewSizeSquare =
+              previewWidth > 0 && previewHeight > 0
+                ? Math.min(previewWidth, previewHeight)
+                : 0;
+            const previewStartRow =
+              previewHeight > 0 && previewSizeSquare > 0
+                ? Math.floor((previewHeight - previewSizeSquare) / 2)
+                : 0;
+            const previewStartCol =
+              previewWidth > 0 && previewSizeSquare > 0
+                ? Math.floor((previewWidth - previewSizeSquare) / 2)
+                : 0;
+            const previewTileSizeFill =
+              previewSizeSquare > 0
+                ? Math.max(1, Math.ceil(itemSize / previewSizeSquare))
+                : 0;
             return (
               <Pressable
                 key={
@@ -459,96 +475,106 @@ export function TileBrushPanel({
                     Clone
                   </ThemedText>
                 ) : isPattern ? (
-                  <View style={styles.patternButton}>
-                    <ThemedText type="defaultSemiBold" style={styles.labelText}>
-                      Pattern
-                    </ThemedText>
-                    {selectedPattern && previewWidth > 0 && previewHeight > 0 && (
+                  selectedPattern && previewSizeSquare > 0 ? (
+                    <View style={[styles.patternButton, styles.patternThumbnailFull]}>
                       <View
                         style={{
-                          width: previewWidth * previewTileSize,
-                          height: previewHeight * previewTileSize,
+                          width: previewSizeSquare * previewTileSizeFill,
+                          height: previewSizeSquare * previewTileSizeFill,
                           flexDirection: 'column',
                         }}
                       >
-                        {Array.from({ length: previewHeight }, (_, rowIndex) => (
-                          <View
-                            key={`pattern-preview-row-${rowIndex}`}
-                            style={{ flexDirection: 'row' }}
-                          >
-                            {Array.from({ length: previewWidth }, (_, colIndex) => {
-                              let mappedRow = rowIndex;
-                              let mappedCol = colIndex;
-                              if (previewMirrorX) {
-                                mappedCol = previewWidth - 1 - mappedCol;
-                              }
-                              let sourceRow = mappedRow;
-                              let sourceCol = mappedCol;
-                              if (previewRotationCCW === 90) {
-                                sourceRow = mappedCol;
-                                sourceCol =
-                                  (selectedPattern?.width ?? 0) - 1 - mappedRow;
-                              } else if (previewRotationCCW === 180) {
-                                sourceRow =
-                                  (selectedPattern?.height ?? 0) - 1 - mappedRow;
-                                sourceCol =
-                                  (selectedPattern?.width ?? 0) - 1 - mappedCol;
-                              } else if (previewRotationCCW === 270) {
-                                sourceRow =
-                                  (selectedPattern?.height ?? 0) - 1 - mappedCol;
-                                sourceCol = mappedRow;
-                              }
-                              const index =
-                                sourceRow * (selectedPattern?.width ?? 0) + sourceCol;
-                              const tile = selectedPattern?.tiles[index];
-                              const tileName =
-                                tile && tile.imageIndex >= 0
-                                  ? tileSources[tile.imageIndex]?.name ?? ''
-                                  : '';
-                              const source =
-                                tile && tile.imageIndex >= 0
-                                  ? tileSources[tile.imageIndex]?.source ?? null
-                                  : null;
-                              return (
-                                <View
-                                  key={`pattern-preview-cell-${rowIndex}-${colIndex}`}
-                                  style={{
-                                    width: previewTileSize,
-                                    height: previewTileSize,
-                                    backgroundColor: 'transparent',
-                                  }}
-                                >
-                                  {source && tile && (
-                                    <TileAsset
-                                      source={source}
-                                      name={tileName}
-                                      strokeColor={strokeColor}
-                                      strokeWidth={
-                                        strokeWidth !== undefined
-                                          ? strokeWidth *
-                                            (strokeScaleByName?.get(tileName) ?? 1)
-                                          : undefined
-                                      }
+                        {Array.from({ length: previewSizeSquare }, (_, rowIndex) => {
+                          const actualRow = previewStartRow + rowIndex;
+                          return (
+                            <View
+                              key={`pattern-preview-row-${rowIndex}`}
+                              style={{ flexDirection: 'row' }}
+                            >
+                              {Array.from(
+                                { length: previewSizeSquare },
+                                (_, colIndex) => {
+                                  const actualCol = previewStartCol + colIndex;
+                                  let mappedRow = actualRow;
+                                  let mappedCol = actualCol;
+                                  if (previewMirrorX) {
+                                    mappedCol = previewWidth - 1 - mappedCol;
+                                  }
+                                  let sourceRow = mappedRow;
+                                  let sourceCol = mappedCol;
+                                  if (previewRotationCCW === 90) {
+                                    sourceRow = mappedCol;
+                                    sourceCol =
+                                      (selectedPattern?.width ?? 0) - 1 - mappedRow;
+                                  } else if (previewRotationCCW === 180) {
+                                    sourceRow =
+                                      (selectedPattern?.height ?? 0) - 1 - mappedRow;
+                                    sourceCol =
+                                      (selectedPattern?.width ?? 0) - 1 - mappedCol;
+                                  } else if (previewRotationCCW === 270) {
+                                    sourceRow =
+                                      (selectedPattern?.height ?? 0) - 1 - mappedCol;
+                                    sourceCol = mappedRow;
+                                  }
+                                  const index =
+                                    sourceRow * (selectedPattern?.width ?? 0) + sourceCol;
+                                  const tile = selectedPattern?.tiles[index];
+                                  const tileName =
+                                    tile && tile.imageIndex >= 0
+                                      ? tileSources[tile.imageIndex]?.name ?? ''
+                                      : '';
+                                  const source =
+                                    tile && tile.imageIndex >= 0
+                                      ? tileSources[tile.imageIndex]?.source ?? null
+                                      : null;
+                                  return (
+                                    <View
+                                      key={`pattern-preview-cell-${rowIndex}-${colIndex}`}
                                       style={{
-                                        width: '100%',
-                                        height: '100%',
-                                        transform: [
-                                          { scaleX: tile.mirrorX ? -1 : 1 },
-                                          { scaleY: tile.mirrorY ? -1 : 1 },
-                                          { rotate: `${(tile.rotation + previewRotationCW) % 360}deg` },
-                                        ],
+                                        width: previewTileSizeFill,
+                                        height: previewTileSizeFill,
+                                        backgroundColor: 'transparent',
                                       }}
-                                      resizeMode="cover"
-                                    />
-                                  )}
-                                </View>
-                              );
-                            })}
-                          </View>
-                        ))}
+                                    >
+                                      {source && tile && (
+                                        <TileAsset
+                                          source={source}
+                                          name={tileName}
+                                          strokeColor={strokeColor}
+                                          strokeWidth={
+                                            strokeWidth !== undefined
+                                              ? strokeWidth *
+                                                (strokeScaleByName?.get(tileName) ?? 1)
+                                              : undefined
+                                          }
+                                          style={{
+                                            width: '100%',
+                                            height: '100%',
+                                            transform: [
+                                              { scaleX: tile.mirrorX ? -1 : 1 },
+                                              { scaleY: tile.mirrorY ? -1 : 1 },
+                                              {
+                                                rotate: `${(tile.rotation + previewRotationCW) % 360}deg`,
+                                              },
+                                            ],
+                                          }}
+                                          resizeMode="cover"
+                                        />
+                                      )}
+                                    </View>
+                                  );
+                                }
+                              )}
+                            </View>
+                          );
+                        })}
                       </View>
-                    )}
-                  </View>
+                    </View>
+                  ) : (
+                    <ThemedText type="defaultSemiBold" style={styles.labelText}>
+                      Pattern
+                    </ThemedText>
+                  )
                 ) : (
                   <View
                     style={[
@@ -729,8 +755,14 @@ const styles = StyleSheet.create({
     color: '#fff',
   },
   patternButton: {
+    flex: 1,
+    width: '100%',
     alignItems: 'center',
-    gap: 4,
+    justifyContent: 'center',
+  },
+  patternThumbnailFull: {
+    alignSelf: 'stretch',
+    overflow: 'hidden',
   },
   modalOverlay: {
     flex: 1,
