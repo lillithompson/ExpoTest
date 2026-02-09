@@ -359,12 +359,16 @@ export default function ModifyTileScreen() {
   const contentWidth = safeWidth;
   const contentHeight = safeHeight;
   const availableWidth = contentWidth - CONTENT_PADDING * 2;
+  const reservedForBrushPanel =
+    Platform.OS === 'web'
+      ? Math.max(BRUSH_PANEL_HEIGHT, Math.floor(contentHeight * 0.32))
+      : BRUSH_PANEL_HEIGHT;
   const availableHeight = Math.max(
     contentHeight -
       HEADER_HEIGHT -
       CONTENT_PADDING * 2 -
       TITLE_SPACING -
-      BRUSH_PANEL_HEIGHT,
+      reservedForBrushPanel,
     0
   );
 
@@ -423,11 +427,7 @@ export default function ModifyTileScreen() {
     0,
     contentHeight - HEADER_HEIGHT - CONTENT_PADDING * 2 - TITLE_SPACING - gridHeight
   );
-  const brushRows =
-    Platform.OS === 'ios' &&
-    (brushPanelHeight - BRUSH_PANEL_ROW_GAP * 2) / 3 >= 75
-      ? 3
-      : 2;
+  const brushRows = Platform.OS === 'ios' ? 4 : 3;
   const brushItemSize = Math.max(
     0,
     Math.floor(
@@ -671,9 +671,6 @@ export default function ModifyTileScreen() {
       pick(topRow, leftCol, 7), // NW
     ];
   }, [tiles, tileSources, gridLayout.columns, gridLayout.rows]);
-  const currentConnectivity = borderConnectionStatus
-    ? borderConnectionStatus.map((value) => (value ? '1' : '0')).join('')
-    : '00000000';
   const tileCanvasBackground = '#0F1430';
   const tileCanvasLineColor = 'rgba(203, 213, 245, 0.25)';
   const tileCanvasLineWidth = 0.5;
@@ -720,7 +717,7 @@ export default function ModifyTileScreen() {
             accessibilityLabel="Back to tile set editor"
           >
             <ThemedText type="defaultSemiBold" style={styles.navButtonText}>
-              &lt; {currentConnectivity}
+              &lt; Modify Tile
             </ThemedText>
           </Pressable>
           <ThemedView style={styles.controls}>

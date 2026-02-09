@@ -51,9 +51,9 @@ Tile Set Editor (tileSetCreator/editor.tsx)
 - Settings overlay: Rename tile set.
 
 Tile Modify View (tileSetCreator/modifyTile.tsx)
-- Header row and toolbar actions similar to Modify View.
+- Header row: back button label "Modify Tile" (upper left); toolbar actions similar to Modify View.
 - Grid background and optional debug overlay.
-- Brush panel identical to Modify View for editing the tile template.
+- Brush panel: 3 rows on web (reserves ≥32% content height for larger tiles), 4 rows on iOS; for editing the tile template.
 
 Core Behaviors and Tool Rules
 - Tile connectivity is driven by `tile_########.png/svg` naming (see AI_ASSET_RULES). Connections are used to validate random placements and compatibility.
