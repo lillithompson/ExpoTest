@@ -731,8 +731,30 @@ export default function TestScreen() {
   const useSkiaGrid = Platform.OS !== 'web' && !isExpoGo;
   const shouldUseAspectRatio = false;
   const aspectRatio = null;
-  const safeWidth = Math.max(0, width);
-  const safeHeight = Math.max(0, height - insets.top);
+  const [webViewport, setWebViewport] = useState<{ w: number; h: number } | null>(null);
+  useEffect(() => {
+    if (!isWeb || typeof window === 'undefined' || !window.visualViewport) {
+      return;
+    }
+    const vv = window.visualViewport;
+    const update = () =>
+      setWebViewport({ w: vv.width, h: vv.height });
+    update();
+    vv.addEventListener('resize', update);
+    vv.addEventListener('scroll', update);
+    return () => {
+      vv.removeEventListener('resize', update);
+      vv.removeEventListener('scroll', update);
+    };
+  }, [isWeb]);
+  const safeWidth =
+    isWeb && webViewport != null
+      ? Math.max(0, webViewport.w)
+      : Math.max(0, width);
+  const safeHeight =
+    isWeb && webViewport != null
+      ? Math.max(0, webViewport.h - insets.top)
+      : Math.max(0, height - insets.top);
   const contentWidth = aspectRatio
     ? Math.min(safeWidth, safeHeight / aspectRatio)
     : safeWidth;

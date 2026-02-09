@@ -87,7 +87,7 @@ Visual Rules
 Layout Rules
 - Headers are fixed height (50). Tool buttons are square (40). Brush panel height is 160 with 1px row gaps.
 - File grids are 3 columns on mobile with side padding (12) and gaps (12).
-- Tile palette can be 2 or 3 rows on iOS depending on available height.
+- Tile palette can be 2 or 3 rows on iOS depending on available height. On mobile web, content width uses the visual viewport and the brush panel is constrained to 100% width with minWidth: 0 so the palette is not laid out with an incorrect width (e.g. half-scrolled off screen).
 - Tile canvas layout is capped at 512 cells: `computeGridLayout` and `computeFixedGridLayout` (utils/tile-grid.ts) never return a grid with more than 512 tiles; when capping is needed, dimensions are chosen to be as square as possible (e.g. 22×23). The hook (use-tile-grid) also clamps `totalCells` to this limit.
 
 **Infrastructure**

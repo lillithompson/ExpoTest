@@ -1,6 +1,14 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import {
+  Modal,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  TextInput,
+  View,
+} from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { TileAtlasSprite } from '@/components/tile-atlas-sprite';
@@ -247,14 +255,18 @@ export function TileBrushPanel({
 
   return (
     <View
-      style={[styles.container, { height }]}
+      style={[
+        styles.container,
+        { height },
+        Platform.OS === 'web' && styles.containerWeb,
+      ]}
       onLayout={(event) => setContainerWidth(event.nativeEvent.layout.width)}
     >
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={showIndicator}
         onContentSizeChange={(width) => setContentWidth(width)}
-        style={styles.scroll}
+        style={[styles.scroll, Platform.OS === 'web' && styles.scrollWeb]}
         contentContainerStyle={styles.content}
         contentInset={{ top: 0, left: 0, bottom: 0, right: 0 }}
         scrollIndicatorInsets={{ top: 0, left: 0, bottom: 0, right: 0 }}
@@ -655,8 +667,17 @@ const styles = StyleSheet.create({
     paddingVertical: 0,
     backgroundColor: '#3f3f3f',
   },
+  containerWeb: {
+    width: '100%',
+    minWidth: 0,
+    maxWidth: '100%',
+  },
   scroll: {
     backgroundColor: '#3f3f3f',
+  },
+  scrollWeb: {
+    width: '100%',
+    minWidth: 0,
   },
   content: {
     flexGrow: 1,
