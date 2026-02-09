@@ -759,7 +759,8 @@ export default function ModifyTileScreen() {
           </ThemedView>
         </ThemedView>
       </ThemedView>
-      <View style={[styles.gridWrapper, { height: gridHeight, width: gridWidth }]}>
+      <View style={[Platform.OS === 'web' && styles.gridCanvasWebCenter]}>
+        <View style={[styles.gridWrapper, { height: gridHeight, width: gridWidth }]}>
         <GridBackground
           rows={gridLayout.rows}
           columns={gridLayout.columns}
@@ -979,6 +980,7 @@ export default function ModifyTileScreen() {
             lineWidth={tileCanvasLineWidth}
           />
         )}
+        </View>
       </View>
       <View style={styles.brushPanelWrap}>
         <TileBrushPanel
@@ -1207,6 +1209,10 @@ const styles = StyleSheet.create({
     color: '#2a2a2a',
     fontSize: 18,
     lineHeight: 20,
+  },
+  gridCanvasWebCenter: {
+    width: '100%',
+    alignItems: 'center',
   },
   gridWrapper: {
     position: 'relative',
