@@ -1288,6 +1288,7 @@ export default function TestScreen() {
   const isInteractingRef = useRef(false);
   const longPressTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const longPressTriggeredRef = useRef(false);
+  const isTouchDragActiveRef = useRef(false);
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const previewSaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const loadTokenRef = useRef(0);
@@ -2551,18 +2552,54 @@ export default function TestScreen() {
     interactionPendingRef.current = false;
   }, [tiles]);
 
+  // On web, attach a non-passive touchmove listener so we can preventDefault() during
+  // touch drag (e.g. iOS Safari), otherwise the page scrolls instead of drawing.
+  useEffect(() => {
+    if (!isWeb) {
+      return;
+    }
+    const node = gridRef.current as any;
+    if (!node) {
+      return;
+    }
+    const el: HTMLElement | null =
+      typeof node?.addEventListener === 'function'
+        ? node
+        : node?.getNativeRef?.() ?? node?._wrapperRef?.current ?? node?._node ?? null;
+    if (!el || typeof el.addEventListener !== 'function') {
+      return;
+    }
+    const onTouchMove = (e: TouchEvent) => {
+      if (isTouchDragActiveRef.current) {
+        e.preventDefault();
+      }
+    };
+    el.addEventListener('touchmove', onTouchMove, { passive: false });
+    return () => el.removeEventListener('touchmove', onTouchMove);
+  }, [isWeb]);
 
   const getRelativePoint = (event: any) => {
     if (isWeb) {
       const nativeEvent = event?.nativeEvent ?? event;
       const target = event?.currentTarget;
-      if (target?.getBoundingClientRect) {
-        const rect = target.getBoundingClientRect();
-        const clientX = nativeEvent?.clientX ?? nativeEvent?.pageX ?? event?.clientX;
-        const clientY = nativeEvent?.clientY ?? nativeEvent?.pageY ?? event?.clientY;
-        if (typeof clientX === 'number' && typeof clientY === 'number') {
-          return { x: clientX - rect.left, y: clientY - rect.top };
-        }
+      if (!target?.getBoundingClientRect) {
+        return null;
+      }
+      const rect = target.getBoundingClientRect();
+      // Prefer touch coordinates when present (mobile Safari and other touch browsers)
+      const touch = nativeEvent?.touches?.[0];
+      const clientX =
+        (touch?.clientX ?? touch?.pageX) ??
+        nativeEvent?.clientX ??
+        nativeEvent?.pageX ??
+        event?.clientX;
+      const clientY =
+        (touch?.clientY ?? touch?.pageY) ??
+        nativeEvent?.clientY ??
+        nativeEvent?.pageY ??
+        event?.clientY;
+      if (typeof clientX === 'number' && typeof clientY === 'number') {
+        return { x: clientX - rect.left, y: clientY - rect.top };
       }
       return null;
     }
@@ -4123,6 +4160,62 @@ export default function TestScreen() {
                   }
                   return;
                 }
+                lastPaintedRef.current = null;
+              }}
+              onTouchStart={(event: any) => {
+                isTouchDragActiveRef.current = true;
+                setInteracting(true);
+                markInteractionStart();
+                const point = getRelativePoint(event);
+                if (point) {
+                  const cellIndex = getCellIndexForPoint(point.x, point.y);
+                  if (cellIndex === null) {
+                    return;
+                  }
+                  if (isPatternCreationMode) {
+                    setPatternSelection({ start: cellIndex, end: cellIndex });
+                    return;
+                  }
+                  if (brush.mode === 'clone' && cloneSourceIndex === null) {
+                    setCloneSource(cellIndex);
+                    lastPaintedRef.current = null;
+                    return;
+                  }
+                  handlePaintAt(point.x, point.y);
+                }
+              }}
+              onTouchMove={(event: any) => {
+                if (!isTouchDragActiveRef.current) {
+                  return;
+                }
+                const point = getRelativePoint(event);
+                if (point) {
+                  if (isPatternCreationMode) {
+                    const cellIndex = getCellIndexForPoint(point.x, point.y);
+                    if (cellIndex !== null) {
+                      setPatternSelection((prev) =>
+                        prev ? { ...prev, end: cellIndex } : prev
+                      );
+                    }
+                    return;
+                  }
+                  handlePaintAt(point.x, point.y);
+                }
+              }}
+              onTouchEnd={() => {
+                isTouchDragActiveRef.current = false;
+                setInteracting(false);
+                if (isPatternCreationMode) {
+                  if (patternSelection) {
+                    setShowPatternSaveModal(true);
+                  }
+                  return;
+                }
+                lastPaintedRef.current = null;
+              }}
+              onTouchCancel={() => {
+                isTouchDragActiveRef.current = false;
+                setInteracting(false);
                 lastPaintedRef.current = null;
               }}
             >

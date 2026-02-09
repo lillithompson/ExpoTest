@@ -27,7 +27,7 @@ Modify View (viewMode = "modify")
 - Header row: Back button "< Modify" (returns to File view immediately; save runs in background) and toolbar actions.
 - Toolbar actions: Reset, Flood (tap) / Flood Complete (long press), Reconcile (tap) / Controlled Randomize (long press), Mirror Horizontal toggle, Mirror Vertical toggle.
 - Canvas frame: Grid background, optional mirror guide lines, optional preview image during hydration.
-- Tile grid: Web renders TileCell components. Native renders a single Skia canvas (TileGridCanvas) for all tiles.
+- Tile grid: Web renders TileCell components; mouse and touch are both supported so that tap and drag work on desktop and mobile browsers (e.g. Safari on iOS). Native renders a single Skia canvas (TileGridCanvas) for all tiles.
 - Pattern creation overlays: Top and bottom overlays shown while in pattern creation mode.
 - Brush panel: Scrollable two or three row tile palette plus Random, Clone, Erase, and Pattern buttons. Palette tiles use an absolutely positioned 4px border overlay (dark when unselected, green when selected) and a full-size (itemSize × itemSize) content wrapper so tile images stay centered with no shift on selection or when switching from cached/loading image to atlas canvas.
 - Pattern chooser modal: Lists patterns for the active category with actions for create and select mode.
