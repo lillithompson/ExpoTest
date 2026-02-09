@@ -409,8 +409,7 @@ export function TileBrushPanel({
                 style={[
                   styles.item,
                   { width: itemSize, height: itemSize },
-                  !isSelected && styles.itemDimmed,
-                  isSelected && styles.itemSelected,
+                  isSelected ? styles.itemSelected : styles.itemDimmed,
                   !isLastRow ? { marginBottom: rowGap } : styles.itemBottom,
                 ]}
                 accessibilityRole="button"
@@ -426,6 +425,15 @@ export function TileBrushPanel({
                           : `Brush ${entry.tile.name}`
                 }
               >
+                <View
+                  style={[
+                    styles.itemBorderOverlay,
+                    {
+                      borderColor: isSelected ? '#22c55e' : 'transparent',
+                    },
+                  ]}
+                  pointerEvents="none"
+                />
                 {isRandom ? (
                   <ThemedText type="defaultSemiBold" style={styles.labelText}>
                     Random
@@ -530,28 +538,35 @@ export function TileBrushPanel({
                     )}
                   </View>
                 ) : (
-                  <View style={styles.imageBox}>
-                    <TileAtlasSprite
-                      atlas={atlas}
-                      source={entry.tile.source}
-                      name={entry.tile.name}
-                      strokeColor={favoriteColor ?? strokeColor}
-                      strokeWidth={
-                        strokeWidth !== undefined ? strokeWidth * tileScale : undefined
-                      }
-                      preferAtlas={!favoriteColor}
-                      style={[
-                        styles.image,
-                        {
-                          transform: [
-                            { scaleX: mirrorX ? -1 : 1 },
-                            { scaleY: mirrorY ? -1 : 1 },
-                            { rotate: `${rotation}deg` },
-                          ],
-                        },
-                      ]}
-                      resizeMode="cover"
-                    />
+                  <View
+                    style={[
+                      styles.tileContentWrapper,
+                      { width: itemSize, height: itemSize },
+                    ]}
+                  >
+                    <View style={styles.imageBox}>
+                      <TileAtlasSprite
+                        atlas={atlas}
+                        source={entry.tile.source}
+                        name={entry.tile.name}
+                        strokeColor={favoriteColor ?? strokeColor}
+                        strokeWidth={
+                          strokeWidth !== undefined ? strokeWidth * tileScale : undefined
+                        }
+                        preferAtlas={!favoriteColor}
+                        style={[
+                          styles.image,
+                          {
+                            transform: [
+                              { scaleX: mirrorX ? -1 : 1 },
+                              { scaleY: mirrorY ? -1 : 1 },
+                              { rotate: `${rotation}deg` },
+                            ],
+                          },
+                        ]}
+                        resizeMode="cover"
+                      />
+                    </View>
                   </View>
                 )}
               </Pressable>
@@ -657,24 +672,29 @@ const styles = StyleSheet.create({
     backgroundColor: '#3f3f3f',
   },
   item: {
-    borderWidth: 1,
-    borderColor: '#1f1f1f',
-    borderRadius: 6,
+    marginRight: 1,
     backgroundColor: '#000',
     alignItems: 'center',
     justifyContent: 'center',
     padding: 0,
+    overflow: 'hidden',
+  },
+  itemBorderOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    borderWidth: 4,
   },
   itemDimmed: {
-    opacity: 0.75,
+    opacity: 0.5,
+  },
+  itemSelected: {
+    opacity: 1,
   },
   itemBottom: {
     marginTop: 0,
   },
-  itemSelected: {
-    borderColor: '#22c55e',
-    borderWidth: 4,
-    padding: 0,
+  tileContentWrapper: {
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   imageBox: {
     width: '100%',

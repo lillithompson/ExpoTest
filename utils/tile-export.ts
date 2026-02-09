@@ -357,21 +357,27 @@ export const renderTileCanvasToSvg = async ({
     const x = col * (gridLayout.tileSize + gridGap);
     const y = row * (gridLayout.tileSize + gridGap);
 
+    const sourceByIndex =
+      tile.imageIndex >= 0 ? (tileSources[tile.imageIndex] as { name?: string; source?: unknown } | undefined) : null;
+    const sourceByName = tile.name
+      ? (tileSources as { name?: string; source?: unknown }[]).find((s) => s.name === tile.name)
+      : null;
+    const resolvedSource = sourceByName ?? sourceByIndex;
     const source =
       tile.imageIndex < 0
         ? tile.imageIndex === -2
           ? errorSource
           : null
-        : tileSources[tile.imageIndex]?.source ?? errorSource;
+        : resolvedSource?.source ?? errorSource;
 
     if (!source) {
       continue;
     }
 
-    const tileName = tile.imageIndex >= 0 ? tileSources[tile.imageIndex]?.name ?? '' : '';
+    const tileName = (resolvedSource?.name ?? tile.name) ?? '';
     const scale = strokeScaleByName?.get(tileName) ?? 1;
     const overrides =
-      tile.imageIndex >= 0
+      resolvedSource != null
         ? {
             strokeColor: lineColor,
             strokeWidth: lineWidth !== undefined ? lineWidth * scale : undefined,
@@ -632,22 +638,28 @@ export const renderTileCanvasToDataUrl = async ({
     const x = col * (gridLayout.tileSize + gridGap);
     const y = row * (gridLayout.tileSize + gridGap);
 
+    const sourceByIndex =
+      tile.imageIndex >= 0 ? (tileSources[tile.imageIndex] as { name?: string; source?: unknown } | undefined) : null;
+    const sourceByName = tile.name
+      ? (tileSources as { name?: string; source?: unknown }[]).find((s) => s.name === tile.name)
+      : null;
+    const resolvedSource = sourceByName ?? sourceByIndex;
     const source =
       tile.imageIndex < 0
         ? tile.imageIndex === -2
           ? errorSource
           : null
-        : tileSources[tile.imageIndex]?.source ?? errorSource;
+        : resolvedSource?.source ?? errorSource;
 
     if (!source) {
       continue;
     }
 
-    const tileName = tile.imageIndex >= 0 ? tileSources[tile.imageIndex]?.name ?? '' : '';
+    const tileName = (resolvedSource?.name ?? tile.name) ?? '';
     const scale = strokeScaleByName?.get(tileName) ?? 1;
     const img = await getImage(
       source,
-      tile.imageIndex >= 0
+      resolvedSource != null
         ? {
             strokeColor: lineColor,
             strokeWidth: lineWidth !== undefined ? lineWidth * scale : undefined,

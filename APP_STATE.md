@@ -20,7 +20,7 @@ File View (viewMode = "file")
 - File card interactions: Tap opens Modify view; long press opens File Options menu.
 - File Options menu: Download (web direct or native overlay), Download SVG (web only), Duplicate, Delete.
 - New File modal: Tile size selection grid of [25, 50, 75, 100, 150, 200].
-- Settings overlay (file view): Allow Border Connections toggle, Show Debug toggle, background color picker, background line color picker, background line width slider. "Delete all local data" button: shows an "are you sure" confirmation (Alert); on confirm, clears AsyncStorage for files, tile sets, bakes, and favorites, resets in-memory state via clearAllFiles, reloadTileSets, and clearBrushFavorites, then closes settings and returns to file view.
+- Settings overlay (file view): Allow Border Connections toggle, Show Debug toggle, background color picker, background line color picker, background line width slider. "Delete all local data" button: shows an "are you sure" confirmation (Alert on native, window.confirm on web); on confirm, clears AsyncStorage for files, tile sets, bakes, favorites, and patterns, resets in-memory state via clearAllFiles, reloadTileSets, clearBrushFavorites, and clearAllPatterns, then closes settings and returns to file view.
 
 Modify View (viewMode = "modify")
 - Status bar background strip at the top (white).
@@ -29,7 +29,7 @@ Modify View (viewMode = "modify")
 - Canvas frame: Grid background, optional mirror guide lines, optional preview image during hydration.
 - Tile grid: Web renders TileCell components. Native renders a single Skia canvas (TileGridCanvas) for all tiles.
 - Pattern creation overlays: Top and bottom overlays shown while in pattern creation mode.
-- Brush panel: Scrollable two or three row tile palette plus Random, Clone, Erase, and Pattern buttons.
+- Brush panel: Scrollable two or three row tile palette plus Random, Clone, Erase, and Pattern buttons. Palette tiles use an absolutely positioned 4px border overlay (dark when unselected, green when selected) and a full-size (itemSize × itemSize) content wrapper so tile images stay centered with no shift on selection or when switching from cached/loading image to atlas canvas.
 - Pattern chooser modal: Lists patterns for the active category with actions for create and select mode.
 - Pattern save modal: Preview of the selection with Save/Cancel.
 - Tile Set chooser overlay: Grid of thumbnails (first tile per set) with name below. Built-in categories then user tile sets. Selected items are brighter with green border (#22c55e, 2px); multi-select to define the active palette.
@@ -98,7 +98,7 @@ Persistence and Storage
 - Patterns stored in AsyncStorage key `tile-patterns-v1`.
 - Tile sets stored in AsyncStorage key `tile-sets-v1`; baked tile sources cached in `tile-sets-bakes-v1`.
 - Brush favorites stored in AsyncStorage key `tile-brush-favorites-v1`.
-- Delete all local data (File > Settings): `utils/clear-local-data.ts` clears the above storage keys; app then resets files (useTileFiles.clearAllFiles), tile sets (useTileSets.reloadTileSets), and favorites (clearBrushFavorites from tile-brush-panel).
+- Delete all local data (File > Settings): `utils/clear-local-data.ts` clears the above storage keys (including tile-patterns-v1); app then resets files (useTileFiles.clearAllFiles), tile sets (useTileSets.reloadTileSets), favorites (clearBrushFavorites from tile-brush-panel), and patterns (useTilePatterns.clearAllPatterns).
 - File hydration sanitizes stored data: `tiles` is coerced to an array and `grid` requires numeric `rows`/`columns`, otherwise defaults are applied.
 
 File Data Model
@@ -160,7 +160,7 @@ Skia Rendering (Native)
 - Native (dev build / standalone): Tile grid is rendered by a single Skia Canvas (TileGridCanvas). Each tile is drawn as an SVG image with transforms applied in Skia. Clone overlays and debug dots are drawn directly on the Canvas. The Canvas is mounted inside a ViewShot container to support preview captures.
 - Preview rendering: During file hydration, the grid is hidden and a PNG preview is shown (if available). Preview/thumbnail capture uses ViewShot on native and `renderTileCanvasToDataUrl` on web. On native, the grid preview image uses `expo-image` (not React Native `Image`) so that `file://` URIs from the cache directory display reliably on iOS Expo Go. Each save writes preview/thumb to unique paths (`${fileId}-${timestamp}-full.png` and `-thumb.png`) and deletes the previous file for that document, so the cached image always reflects the latest state (no stale image cache). The modify view delays `gridStabilized` until the tile canvas has painted: on dev/standalone the Skia TileGridCanvas reports `onPaintReady`; on Expo Go a timeout is used (1.8s). Timeouts are 2.5s (Skia) and 1.8s (Expo Go) to avoid a blank canvas while tiles load.
 - File list thumbnails: When a file has `thumbnailUri` or `previewUri`, the app shows that cached thumbnail via `TileAsset` (same on all platforms). When there is no cached thumbnail, native shows the live tile grid as fallback.
-- UGC file thumbnails (Expo Go iOS): Line width must match built-in tile sets. `strokeScaleByName` (from user tile set resolution) scales stroke for palette and canvas. When showing the fallback grid (no cached thumbnail) on native, each tile uses scaled `strokeWidth` (file.lineWidth * strokeScaleByName); download overlay tiles use scaled strokeWidth as well. Generated file thumbnails (web `renderTileCanvasToDataUrl`) and downloaded PNG (web via `downloadFile`) and SVG (native overlay and web file menu) now pass `strokeScaleByName` so UGC line widths in exports match the main canvas. Tile set creator (modifyTile) thumbnail generation also passes a per-set `strokeScaleByName` (from `tileSet.resolution`) so tile-entry thumbnails use consistent stroke scale.
+- UGC file thumbnails (Expo Go iOS): Line width must match built-in tile sets. `strokeScaleByName` (from user tile set resolution) scales stroke for palette and canvas. When showing the fallback grid (no cached thumbnail) on native, each tile uses scaled `strokeWidth` (file.lineWidth * strokeScaleByName); download overlay tiles use scaled strokeWidth as well. Generated file thumbnails (web `renderTileCanvasToDataUrl`) and downloaded PNG (web via `downloadFile`) and SVG (native overlay and web file menu) now pass `strokeScaleByName` so UGC line widths in exports match the main canvas. Tile set creator (modifyTile) thumbnail generation also passes a per-set `strokeScaleByName` (from `tileSet.resolution`) so tile-entry thumbnails use consistent stroke scale. Export (renderTileCanvasToDataUrl and renderTileCanvasToSvg) uses name-based resolution when `tile.name` is set: source and scale are resolved by `tile.name` so UGC tiles get the correct stroke scale in thumbnails even when palette order differs from the file’s source order.
 
 Performance and Interaction
 - Touch and mouse inputs track interaction start/end for perf logging.

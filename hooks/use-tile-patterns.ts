@@ -88,6 +88,15 @@ export const useTilePatterns = () => {
     [persist]
   );
 
+  const clearAllPatterns = useCallback(async () => {
+    setPatterns([]);
+    try {
+      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([]));
+    } catch (error) {
+      console.warn('Failed to clear patterns', error);
+    }
+  }, []);
+
   const updatePattern = useCallback(
     (id: string, updater: (pattern: TilePattern) => TilePattern) => {
       setPatterns((prev) => {
@@ -116,6 +125,7 @@ export const useTilePatterns = () => {
     patternsByCategory,
     createPattern,
     deletePatterns,
+    clearAllPatterns,
     updatePattern,
   };
 };

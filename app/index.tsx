@@ -707,7 +707,7 @@ export default function TestScreen() {
   const [paletteMirrorsY, setPaletteMirrorsY] = useState<Record<number, boolean>>(
     {}
   );
-  const { patternsByCategory, createPattern, deletePatterns } = useTilePatterns();
+  const { patternsByCategory, createPattern, deletePatterns, clearAllPatterns } = useTilePatterns();
   const [selectedPatternId, setSelectedPatternId] = useState<string | null>(null);
   const [isPatternCreationMode, setIsPatternCreationMode] = useState(false);
   const [patternSelection, setPatternSelection] = useState<{
@@ -3765,12 +3765,13 @@ export default function TestScreen() {
                 style={[styles.settingsAction, styles.settingsActionDanger]}
                 onPress={() => {
                   const message =
-                    'Delete all local data? This will permanently delete all saved files, tile sets, and favorites. This cannot be undone.';
+                    'Delete all local data? This will permanently delete all saved files, tile sets, patterns, and favorites. This cannot be undone.';
                   const doDelete = async () => {
                     await clearAllLocalData();
                     await clearAllFiles();
                     await reloadTileSets();
                     clearBrushFavorites();
+                    await clearAllPatterns();
                     setShowSettingsOverlay(false);
                     setViewMode('file');
                   };
@@ -3779,7 +3780,7 @@ export default function TestScreen() {
                       void doDelete();
                     }
                   } else {
-                    Alert.alert('Delete all local data?', message, [
+                    Alert.alert('Delete all local data?', message.trim(), [
                       { text: 'Cancel', style: 'cancel' },
                       { text: 'Delete all', style: 'destructive', onPress: () => void doDelete() },
                     ]);
