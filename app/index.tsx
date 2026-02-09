@@ -3669,14 +3669,16 @@ export default function TestScreen() {
                         tileSetIds: selectedTileSetIds,
                         sourceNames: initialSources,
                       });
-                      setFileSourceNames(initialSources);
-                      setLoadRequestId((prev) => prev + 1);
-                      setLoadPreviewUri(null);
-                      setSuspendTiles(true);
-                      setLoadedToken(0);
-                      setHydrating(true);
                       setShowNewFileModal(false);
                       setViewMode('modify');
+                      requestAnimationFrame(() => {
+                        setFileSourceNames(initialSources);
+                        setLoadRequestId((prev) => prev + 1);
+                        setLoadPreviewUri(null);
+                        setSuspendTiles(true);
+                        setLoadedToken(0);
+                        setHydrating(true);
+                      });
                     }}
                     style={styles.newFileButton}
                     accessibilityRole="button"

@@ -19,7 +19,7 @@ File View (viewMode = "file")
 - File grid: Scrollable list of file cards, sorted by `updatedAt` descending. Cards show previews (thumbnail/preview if available, otherwise live tile grid on native; web uses placeholder).
 - File card interactions: Tap opens Modify view; long press opens File Options menu.
 - File Options menu: Download (web direct or native overlay), Download SVG (web only), Duplicate, Delete.
-- New File modal: Tile size selection grid of [25, 50, 75, 100, 150, 200].
+- New File modal: Tile size selection grid of [25, 50, 75, 100, 150, 200]. Choosing a size creates the file, closes the modal, and navigates to Modify view immediately; load/hydration state is applied on the next frame so the transition is not blocked.
 - Settings overlay (file view): Allow Border Connections toggle, Show Debug toggle, background color picker, background line color picker, background line width slider.
 
 Modify View (viewMode = "modify")
