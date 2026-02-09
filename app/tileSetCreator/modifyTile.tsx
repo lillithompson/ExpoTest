@@ -453,6 +453,13 @@ export default function ModifyTileScreen() {
     strokeColor: tileSet?.lineColor,
     strokeWidth: tileSet?.lineWidth,
   });
+  const strokeScaleByName = useMemo(() => {
+    const map = new Map<string, number>();
+    if (!tileSet) return map;
+    const scale = Math.max(1, tileSet.resolution ?? 1);
+    tileSources.forEach((source) => map.set(source.name, scale));
+    return map;
+  }, [tileSet?.resolution, tileSources]);
 
   const gridOffsetRef = useRef({ x: 0, y: 0 });
   const lastPaintedRef = useRef<number | null>(null);
@@ -506,6 +513,7 @@ export default function ModifyTileScreen() {
             lineColor: tileSet.lineColor,
             lineWidth: tileSet.lineWidth,
             backgroundColor: tileCanvasBackground,
+            strokeScaleByName,
             maxDimension: 192,
           });
         } else {

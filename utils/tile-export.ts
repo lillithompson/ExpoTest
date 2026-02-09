@@ -434,8 +434,11 @@ export const exportTileCanvasAsSvg = async ({
   lineColor,
   lineWidth,
   backgroundColor,
+  strokeScaleByName,
   fileName = 'tile-canvas.svg',
-}: Omit<ExportParams, 'blankSource' | 'backgroundLineColor' | 'backgroundLineWidth'>): Promise<ExportResult> => {
+}: Omit<ExportParams, 'blankSource' | 'backgroundLineColor' | 'backgroundLineWidth'> & {
+  strokeScaleByName?: Map<string, number>;
+}): Promise<ExportResult> => {
   if (typeof document === 'undefined') {
     return { ok: false, error: 'Unable to export SVG.' };
   }
@@ -448,6 +451,7 @@ export const exportTileCanvasAsSvg = async ({
     lineColor,
     lineWidth,
     backgroundColor,
+    strokeScaleByName,
   });
   if (!svg) {
     return { ok: false, error: 'Unable to render SVG.' };

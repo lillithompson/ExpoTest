@@ -3157,6 +3157,7 @@ export default function TestScreen() {
         backgroundColor: includeDownloadBackground
           ? settings.backgroundColor
           : undefined,
+        strokeScaleByName,
       });
       if (!svg) {
         Alert.alert('Download failed', 'Unable to render the SVG.');
@@ -3598,6 +3599,7 @@ export default function TestScreen() {
                         backgroundColor: includeDownloadBackground
                           ? settings.backgroundColor
                           : undefined,
+                        strokeScaleByName,
                       });
                     } else {
                       setDownloadTargetId(file.id);
@@ -3634,6 +3636,7 @@ export default function TestScreen() {
                         backgroundColor: includeDownloadBackground
                           ? settings.backgroundColor
                           : undefined,
+                        strokeScaleByName,
                         fileName: `${file.name}.svg`,
                       });
                     }

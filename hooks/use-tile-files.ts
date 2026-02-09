@@ -303,6 +303,7 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
         backgroundColor?: string;
         backgroundLineColor?: string;
         backgroundLineWidth?: number;
+        strokeScaleByName?: Map<string, number>;
       }
     ) => {
       const dataUrl = await renderTileCanvasToDataUrl({
@@ -319,6 +320,7 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
         lineColor: file.lineColor,
         lineWidth: file.lineWidth,
         backgroundColor: options?.backgroundColor,
+        strokeScaleByName: options?.strokeScaleByName,
         maxDimension: 0,
       });
       if (!dataUrl || typeof document === 'undefined') {
