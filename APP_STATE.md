@@ -72,7 +72,7 @@ Core Behaviors and Tool Rules
 - Pattern brush: Uses a pattern anchor cell to map pattern tiles by offset. Pattern mirrors can be toggled in the pattern picker. Pattern rotation is 90-degree increments. Pattern brush long press/double tap opens the pattern picker.
 - Pattern creation: Drag-select in the grid to define a pattern. Save dialog prompts to store it in category storage.
 - Flood (tap): Fills all cells based on brush mode (random, fixed, pattern, erase). Respects mirror toggles.
-- Flood Complete (long press): Fills only empty cells. When mirrors are enabled, it treats mirrors as a unit and expands driven indices if any mirrored target is filled.
+- Flood Complete (long press): Fills only empty cells. When mirrors are enabled, it treats mirrors as a unit and expands driven indices if any mirrored target is filled. On mobile web, a synthesized tap after long press is ignored (via floodLongPressHandledRef) so Flood (full fill) does not run after Flood Complete.
 - Reconcile (tap): Iteratively replaces invalid tiles with compatible candidates to reduce invalid connections. Uninitialized (empty) tiles are never changed; edges to uninitialized neighbors are treated as 00000000 connectivity when validating and picking replacements.
 - Controlled Randomize (long press): Replaces tiles with connection-compatible equivalents based on their current connection signature.
 

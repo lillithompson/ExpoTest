@@ -1339,6 +1339,7 @@ export default function TestScreen() {
   const viewShotRef = useRef<ViewShot>(null);
   const downloadExpectedRef = useRef(0);
   const pendingFloodCompleteRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const floodLongPressHandledRef = useRef(false);
   const suppressAutosaveRef = useRef(false);
   const clearSequenceRef = useRef(0);
   const pendingRestoreRef = useRef<{
@@ -4009,8 +4010,13 @@ export default function TestScreen() {
               label="Flood"
               icon="format-color-fill"
               onPress={() => {
+                if (floodLongPressHandledRef.current) {
+                  floodLongPressHandledRef.current = false;
+                  return;
+                }
                 if (pendingFloodCompleteRef.current) {
                   clearTimeout(pendingFloodCompleteRef.current);
+                  pendingFloodCompleteRef.current = null;
                 }
                 pendingFloodCompleteRef.current = setTimeout(() => {
                   pendingFloodCompleteRef.current = null;
@@ -4018,6 +4024,7 @@ export default function TestScreen() {
                 }, 0);
               }}
               onLongPress={() => {
+                floodLongPressHandledRef.current = true;
                 if (pendingFloodCompleteRef.current) {
                   clearTimeout(pendingFloodCompleteRef.current);
                   pendingFloodCompleteRef.current = null;
