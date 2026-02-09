@@ -7,6 +7,7 @@ import {
     computeFixedGridLayout,
     computeGridLayout,
     getTileSourceIndexByName,
+    MAX_TILE_CANVAS_CELLS,
     normalizeTiles,
     type GridLayout,
     type Tile
@@ -129,7 +130,10 @@ export const useTileGrid = ({
     fixedRows,
     fixedColumns,
   ]);
-  const totalCells = gridLayout.rows * gridLayout.columns;
+  const totalCells = Math.min(
+    gridLayout.rows * gridLayout.columns,
+    MAX_TILE_CANVAS_CELLS
+  );
   const [tiles, setTiles] = useState<Tile[]>(() =>
     buildInitialTiles(totalCells)
   );

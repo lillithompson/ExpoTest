@@ -14,6 +14,20 @@ export type GridLayout = {
   tileSize: number;
 };
 
+/** Maximum number of tiles allowed in the tile canvas. Layout logic is capped so we never exceed this. */
+export const MAX_TILE_CANVAS_CELLS = 512;
+
+/**
+ * Returns the squarest (rows, columns) with rows * columns <= maxCells.
+ * Used when capping the tile canvas so the grid stays as square as possible.
+ */
+function getSquarestDimensions(maxCells: number): { rows: number; columns: number } {
+  const side = Math.floor(Math.sqrt(maxCells));
+  const columns = side;
+  const rows = Math.floor(maxCells / columns);
+  return { rows, columns };
+}
+
 export const pickRotation = () => {
   const options = [0, 90, 180, 270];
   return options[Math.floor(Math.random() * options.length)];
@@ -161,17 +175,43 @@ export const computeGridLayout = (
     if (rows < 2) {
       continue;
     }
+    if (rows * columns > MAX_TILE_CANVAS_CELLS) {
+      const { rows: sqRows, columns: sqCols } = getSquarestDimensions(MAX_TILE_CANVAS_CELLS);
+      rows = sqRows;
+      const cappedColumns = sqCols;
+      const cappedTileSize = Math.floor(
+        Math.min(
+          (availableWidth - gridGap * (cappedColumns - 1)) / cappedColumns,
+          (availableHeight - gridGap * (sqRows - 1)) / sqRows
+        )
+      );
+      if (cappedTileSize > 0 && sqRows >= 2) {
+        candidates.push({ columns: cappedColumns, rows: sqRows, tileSize: cappedTileSize });
+      }
+      continue;
+    }
     candidates.push({ columns, rows, tileSize });
   }
 
   if (candidates.length === 0) {
-    const columns = Math.max(1, maxColumns);
+    let columns = Math.max(1, maxColumns);
     const rawTileSize = (availableWidth - gridGap * (columns - 1)) / columns;
-    const tileSize = Math.floor(rawTileSize);
-    const rows = Math.max(
+    let tileSize = Math.floor(rawTileSize);
+    let rows = Math.max(
       1,
       Math.floor((availableHeight + gridGap) / (tileSize + gridGap))
     );
+    if (rows * columns > MAX_TILE_CANVAS_CELLS) {
+      const sq = getSquarestDimensions(MAX_TILE_CANVAS_CELLS);
+      columns = sq.columns;
+      rows = sq.rows;
+      tileSize = Math.floor(
+        Math.min(
+          (availableWidth - gridGap * (columns - 1)) / columns,
+          (availableHeight - gridGap * (rows - 1)) / rows
+        )
+      );
+    }
     return { columns, rows, tileSize };
   }
 
@@ -191,8 +231,15 @@ export const computeFixedGridLayout = (
   if (availableWidth <= 0 || availableHeight <= 0 || rows <= 0 || columns <= 0) {
     return { columns, rows, tileSize: 0 };
   }
-  const maxTileWidth = (availableWidth - gridGap * Math.max(0, columns - 1)) / columns;
-  const maxTileHeight = (availableHeight - gridGap * Math.max(0, rows - 1)) / rows;
+  let cappedRows = rows;
+  let cappedColumns = columns;
+  if (cappedRows * cappedColumns > MAX_TILE_CANVAS_CELLS) {
+    const sq = getSquarestDimensions(MAX_TILE_CANVAS_CELLS);
+    cappedRows = sq.rows;
+    cappedColumns = sq.columns;
+  }
+  const maxTileWidth = (availableWidth - gridGap * Math.max(0, cappedColumns - 1)) / cappedColumns;
+  const maxTileHeight = (availableHeight - gridGap * Math.max(0, cappedRows - 1)) / cappedRows;
   const tileSize = Math.max(0, Math.floor(Math.min(maxTileWidth, maxTileHeight)));
-  return { columns, rows, tileSize };
+  return { columns: cappedColumns, rows: cappedRows, tileSize };
 };

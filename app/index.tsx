@@ -1,64 +1,64 @@
+import { MaterialCommunityIcons } from '@expo/vector-icons';
+import Slider from '@react-native-community/slider';
+import Constants from 'expo-constants';
+import * as FileSystem from 'expo-file-system';
+import { Image as ExpoImage } from 'expo-image';
+import { useRouter } from 'expo-router';
+import * as Sharing from 'expo-sharing';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Alert,
-  Animated,
-  Image,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Switch,
-  Text,
-  useWindowDimensions,
-  View,
+    Alert,
+    Animated,
+    Image,
+    Platform,
+    Pressable,
+    ScrollView,
+    StyleSheet,
+    Switch,
+    Text,
+    useWindowDimensions,
+    View,
 } from 'react-native';
-import Slider from '@react-native-community/slider';
-import * as FileSystem from 'expo-file-system';
-import * as Sharing from 'expo-sharing';
-import ViewShot from 'react-native-view-shot';
-import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
-import Constants from 'expo-constants';
-import { Image as ExpoImage } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import ViewShot from 'react-native-view-shot';
 
 import {
-  TILE_CATEGORIES,
-  TILE_MANIFEST,
-  type TileCategory,
-  type TileSource,
+    TILE_CATEGORIES,
+    TILE_MANIFEST,
+    type TileCategory,
+    type TileSource,
 } from '@/assets/images/tiles/manifest';
+import { ThemedText } from '@/components/themed-text';
+import { ThemedView } from '@/components/themed-view';
+import { clearTileAssetCache, prefetchTileAssets, TileAsset } from '@/components/tile-asset';
+import { TileAtlasSprite } from '@/components/tile-atlas-sprite';
 import { TileBrushPanel } from '@/components/tile-brush-panel';
 import { TileDebugOverlay } from '@/components/tile-debug-overlay';
 import { TileGridCanvas } from '@/components/tile-grid-canvas';
-import { TileAsset, clearTileAssetCache, prefetchTileAssets } from '@/components/tile-asset';
-import { TileAtlasSprite } from '@/components/tile-atlas-sprite';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { useTileAtlas } from '@/hooks/use-tile-atlas';
-import { useTileGrid } from '@/hooks/use-tile-grid';
 import { usePersistedSettings } from '@/hooks/use-persisted-settings';
+import { useTileAtlas } from '@/hooks/use-tile-atlas';
 import { useTileFiles, type TileFile } from '@/hooks/use-tile-files';
-import { useTileSets } from '@/hooks/use-tile-sets';
+import { useTileGrid } from '@/hooks/use-tile-grid';
 import { useTilePatterns } from '@/hooks/use-tile-patterns';
+import { useTileSets } from '@/hooks/use-tile-sets';
 import {
-  exportTileCanvasAsSvg,
-  renderTileCanvasToDataUrl,
-  renderTileCanvasToSvg,
-} from '@/utils/tile-export';
-import { getTransformedConnectionsForName, parseTileConnections, transformConnections } from '@/utils/tile-compat';
-import {
-  canApplyEmptyNewFileRestore,
-  canApplyNonEmptyRestore,
+    canApplyEmptyNewFileRestore,
+    canApplyNonEmptyRestore,
 } from '@/utils/load-state';
 import {
-  buildPreviewPath,
-  getFilePreviewUri,
-  hasCachedThumbnail,
-  hasPreview as hasPreviewState,
-  isOwnPreviewUri,
-  showPreview as showPreviewState,
+    buildPreviewPath,
+    getFilePreviewUri,
+    hasCachedThumbnail,
+    hasPreview as hasPreviewState,
+    isOwnPreviewUri,
+    showPreview as showPreviewState,
 } from '@/utils/preview-state';
+import { getTransformedConnectionsForName, parseTileConnections, transformConnections } from '@/utils/tile-compat';
+import {
+    exportTileCanvasAsSvg,
+    renderTileCanvasToDataUrl,
+    renderTileCanvasToSvg,
+} from '@/utils/tile-export';
 import { hydrateTilesWithSourceNames, normalizeTiles, type Tile } from '@/utils/tile-grid';
 
 const GRID_GAP = 0;
@@ -3927,13 +3927,18 @@ export default function TestScreen() {
         </ThemedView>
         <View
           style={[
-            styles.gridWrapper,
-            {
-              height: gridHeight,
-              width: gridWidth,
-            },
+            Platform.OS === 'web' && styles.gridCanvasWebCenter,
           ]}
         >
+          <View
+            style={[
+              styles.gridWrapper,
+              {
+                height: gridHeight,
+                width: gridWidth,
+              },
+            ]}
+          >
           <GridBackground
             rows={gridLayout.rows}
             columns={gridLayout.columns}
@@ -4298,6 +4303,7 @@ export default function TestScreen() {
               />
             </>
           )}
+          </View>
         </View>
         {isPatternCreationMode && !showPatternSaveModal && (
           <View
@@ -5749,6 +5755,10 @@ const styles = StyleSheet.create({
     alignContent: 'flex-start',
     gap: GRID_GAP,
     backgroundColor: 'transparent',
+  },
+  gridCanvasWebCenter: {
+    width: '100%',
+    alignItems: 'center',
   },
   gridWrapper: {
     position: 'relative',
