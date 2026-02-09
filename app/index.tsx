@@ -560,6 +560,34 @@ const TileCell = memo(
           : null
         : resolved?.source ?? ERROR_TILE;
 
+    const tileContent = source ? (
+      <TileAtlasSprite
+        atlas={atlas}
+        key={`cell-${cellIndex}-${tileName}:${tile.imageIndex}:${tile.rotation}:${tile.mirrorX ? 1 : 0}:${
+          tile.mirrorY ? 1 : 0
+        }`}
+        source={source}
+        name={tileName}
+        strokeColor={tile.imageIndex >= 0 ? strokeColor : '#ffffff'}
+        strokeWidth={
+          tile.imageIndex >= 0
+            ? strokeWidth * (strokeScaleByName?.get(tileName) ?? 1)
+            : 4
+        }
+        style={[
+          styles.tileImage,
+          {
+            transform: [
+              { scaleX: tile.mirrorX ? -1 : 1 },
+              { scaleY: tile.mirrorY ? -1 : 1 },
+              { rotate: `${tile.rotation}deg` },
+            ],
+          },
+        ]}
+        resizeMode="cover"
+      />
+    ) : null;
+
     return (
       <View
         key={`cell-${cellIndex}`}
@@ -571,33 +599,14 @@ const TileCell = memo(
           showOverlays && isCloneSource && styles.cloneSource,
         ]}
       >
-        {source && (
-          <TileAtlasSprite
-            atlas={atlas}
-            key={`cell-${cellIndex}-${tileName}:${tile.imageIndex}:${tile.rotation}:${tile.mirrorX ? 1 : 0}:${
-              tile.mirrorY ? 1 : 0
-            }`}
-            source={source}
-            name={tileName}
-            strokeColor={tile.imageIndex >= 0 ? strokeColor : '#ffffff'}
-            strokeWidth={
-              tile.imageIndex >= 0
-                ? strokeWidth * (strokeScaleByName?.get(tileName) ?? 1)
-                : 4
-            }
-            style={[
-              styles.tileImage,
-              {
-                transform: [
-                  { scaleX: tile.mirrorX ? -1 : 1 },
-                  { scaleY: tile.mirrorY ? -1 : 1 },
-                  { rotate: `${tile.rotation}deg` },
-                ],
-              },
-            ]}
-            resizeMode="cover"
-          />
-        )}
+        {tileContent != null ? (
+          <View
+            style={StyleSheet.absoluteFill}
+            pointerEvents={Platform.OS === 'web' ? 'none' : 'auto'}
+          >
+            {tileContent}
+          </View>
+        ) : null}
         {showOverlays && isCloneTargetOrigin && (
           <View pointerEvents="none" style={styles.cloneTargetOrigin} />
         )}
@@ -4222,7 +4231,10 @@ export default function TestScreen() {
                 }
                 lastPaintedRef.current = null;
               }}
-              onTouchStart={(event: any) => {
+              onTouchStartCapture={(event: any) => {
+                // Use capture phase so we receive touchstart even when the target is a child
+                // (e.g. tile image). Otherwise on mobile web, starting a drag on an initialized
+                // tile only fires tap and touchmove never runs.
                 isTouchDragActiveRef.current = true;
                 if (isWeb) {
                   ignoreNextMouseRef.current = true;
@@ -4254,7 +4266,7 @@ export default function TestScreen() {
                   handlePaintAt(point.x, point.y);
                 }
               }}
-              onTouchMove={(event: any) => {
+              onTouchMoveCapture={(event: any) => {
                 if (!isTouchDragActiveRef.current) {
                   return;
                 }
@@ -4272,7 +4284,7 @@ export default function TestScreen() {
                   handlePaintAt(point.x, point.y);
                 }
               }}
-              onTouchEnd={() => {
+              onTouchEndCapture={() => {
                 isTouchDragActiveRef.current = false;
                 setInteracting(false);
                 if (isPatternCreationMode) {
@@ -4283,7 +4295,7 @@ export default function TestScreen() {
                 }
                 lastPaintedRef.current = null;
               }}
-              onTouchCancel={() => {
+              onTouchCancelCapture={() => {
                 isTouchDragActiveRef.current = false;
                 setInteracting(false);
                 lastPaintedRef.current = null;
