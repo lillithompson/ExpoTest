@@ -438,8 +438,7 @@ export function TileBrushPanel({
                 style={[
                   styles.item,
                   { width: itemSize, height: itemSize },
-                  (isRandom || isErase || isClone || (isPattern && !(selectedPattern && previewSizeSquare > 0))) &&
-                    styles.itemLabelMode,
+                  (isRandom || isErase || isClone || isPattern) && styles.itemLabelMode,
                   isSelected ? styles.itemSelected : styles.itemDimmed,
                   !isLastRow ? { marginBottom: rowGap } : styles.itemBottom,
                 ]}
