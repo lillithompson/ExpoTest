@@ -62,7 +62,7 @@ Tile Modify View (tileSetCreator/modifyTile.tsx)
 Core Behaviors and Tool Rules
 - Tile connectivity is driven by `tile_########.png/svg` naming (see AI_ASSET_RULES). Connections are used to validate random placements and compatibility.
 - Allow Border Connections: When off, edges behave as if neighbors are empty and connections cannot extend past the grid.
-- Random brush tap: Attempts to place a compatible tile at the tapped cell. If no legal placement is found and legal placement is required, the tap does nothing. Otherwise an error tile is placed.
+- Random brush tap (single-tile only): Attempts to place a compatible tile at the tapped cell. When Allow Border Connections is off and the cell has at least one adjacent initialized tile, uninitialized (empty) neighbors are treated as 00000000 connections for both candidate selection and validation; when the cell has zero adjacent tiles, behavior is unchanged. Flood fill and Reconcile are not affected. If no legal placement is found and legal placement is required, the tap does nothing. Otherwise an error tile is placed.
 - Random brush double tap: Opens the Tile Set chooser.
 - Random brush long press: Opens the Tile Set chooser.
 - Fixed brush tap: Places the selected tile with current rotation/mirror and mirrors to linked cells when mirror toggles are enabled.

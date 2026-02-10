@@ -52,6 +52,10 @@ export const usePersistedSettings = () => {
         setSettingsState((prev) => ({
           ...prev,
           ...parsed,
+          allowEdgeConnections:
+            typeof parsed.allowEdgeConnections === 'boolean'
+              ? parsed.allowEdgeConnections
+              : true,
         }));
       } catch (error) {
         console.warn('Failed to load settings', error);

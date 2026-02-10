@@ -387,13 +387,48 @@ export const useTileGrid = ({
   const selectCompatibleTile = (
     cellIndex: number,
     tilesState: Tile[],
-    allowedIndices: Set<number> | null
+    allowedIndices: Set<number> | null,
+    treatUninitializedAsNoConnection = false
   ) => {
-    const candidates = buildCompatibleCandidates(cellIndex, tilesState, allowedIndices);
+    const candidates = buildCompatibleCandidates(
+      cellIndex,
+      tilesState,
+      allowedIndices,
+      treatUninitializedAsNoConnection
+    );
     if (candidates.length === 0) {
       return null;
     }
     return candidates[Math.floor(Math.random() * candidates.length)];
+  };
+
+  const getInitializedNeighborCount = (cellIndex: number, tilesState: Tile[]) => {
+    const row = Math.floor(cellIndex / gridLayout.columns);
+    const col = cellIndex % gridLayout.columns;
+    const directions = [
+      { dr: -1, dc: 0 },
+      { dr: -1, dc: 1 },
+      { dr: 0, dc: 1 },
+      { dr: 1, dc: 1 },
+      { dr: 1, dc: 0 },
+      { dr: 1, dc: -1 },
+      { dr: 0, dc: -1 },
+      { dr: -1, dc: -1 },
+    ];
+    let count = 0;
+    for (const dir of directions) {
+      const r = row + dir.dr;
+      const c = col + dir.dc;
+      if (r < 0 || c < 0 || r >= gridLayout.rows || c >= gridLayout.columns) {
+        continue;
+      }
+      const neighborIndex = r * gridLayout.columns + c;
+      const neighborTile = tilesState[neighborIndex];
+      if (neighborTile && neighborTile.imageIndex >= 0) {
+        count += 1;
+      }
+    }
+    return count;
   };
 
   const getRandomPlacement = (cellIndex: number, tilesState: Tile[]) => {
@@ -851,10 +886,18 @@ export const useTileGrid = ({
       return;
     }
 
-    const selection = selectCompatibleTile(cellIndex, renderTiles, randomSourceSet);
+    const treatUninitForRandomBrush =
+      !allowEdgeConnections &&
+      getInitializedNeighborCount(cellIndex, renderTiles) > 0;
+    const selection = selectCompatibleTile(
+      cellIndex,
+      renderTiles,
+      randomSourceSet,
+      treatUninitForRandomBrush
+    );
     if (
       !selection ||
-      !isPlacementValid(cellIndex, selection, renderTiles)
+      !isPlacementValid(cellIndex, selection, renderTiles, treatUninitForRandomBrush)
     ) {
       if (randomRequiresLegal) {
         return;
