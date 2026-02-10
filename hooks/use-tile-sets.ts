@@ -151,7 +151,17 @@ const buildBakeSignature = (set: TileSet) => {
 };
 
 
-export const useTileSets = () => {
+export type BakedNameReplacement = { oldName: string; newName: string };
+
+export type TileSourceNamesRemovedOptions = { namePrefix?: string };
+
+export const useTileSets = (options?: {
+  onBakedNamesReplaced?: (replacements: BakedNameReplacement[]) => void;
+  onTileSourceNamesRemoved?: (
+    names: string[],
+    opts?: TileSourceNamesRemovedOptions
+  ) => void;
+}) => {
   const [tileSets, setTileSets] = useState<TileSet[]>([]);
   const [isLoaded, setIsLoaded] = useState(false);
   const [bakedSourcesBySetId, setBakedSourcesBySetId] = useState<
@@ -163,6 +173,10 @@ export const useTileSets = () => {
   const bakeSignatureRef = useRef<Record<string, string>>({});
   const tileSignatureRef = useRef<Record<string, Record<string, string>>>({});
   const svgSourceCacheRef = useRef<Map<string, string>>(new Map());
+  const onBakedNamesReplacedRef = useRef(options?.onBakedNamesReplaced);
+  const onTileSourceNamesRemovedRef = useRef(options?.onTileSourceNamesRemoved);
+  onBakedNamesReplacedRef.current = options?.onBakedNamesReplaced;
+  onTileSourceNamesRemovedRef.current = options?.onTileSourceNamesRemoved;
 
   const yieldToEventLoop = useCallback(async () => {
     if (typeof requestAnimationFrame === 'function') {
@@ -275,6 +289,7 @@ export const useTileSets = () => {
       }
       const updates: Record<string, TileSource[]> = {};
       const currentNameUpdates: Record<string, string[]> = {};
+      const nameReplacements: BakedNameReplacement[] = [];
       for (const set of tileSets) {
         const signature = buildBakeSignature(set);
         if (bakeSignatureRef.current[set.id] === signature) {
@@ -344,6 +359,9 @@ export const useTileSets = () => {
             const fileName = `${tile.id}_${tile.updatedAt}_${bits}.svg`;
             const qualifiedName = qualifyBakedName(set.id, fileName);
             currentNames.push(qualifiedName);
+            if (prevSource && prevSource.name && prevSource.name !== qualifiedName) {
+              nameReplacements.push({ oldName: prevSource.name, newName: qualifiedName });
+            }
             const fallbackRows =
               tile.grid.rows > 0 ? tile.grid.rows : set.resolution;
             const fallbackColumns =
@@ -397,16 +415,18 @@ export const useTileSets = () => {
         }
         currentNameUpdates[set.id] = currentNames;
         const mergedByName = new Map<string, TileSource>();
-        prevSources.forEach((source) => {
-          if (source?.name) {
-            mergedByName.set(source.name, source);
-          }
-        });
-        bakedSources.forEach((source) => {
-          if (source?.name) {
-            mergedByName.set(source.name, source);
-          }
-        });
+        if (set.tiles.length > 0) {
+          prevSources.forEach((source) => {
+            if (source?.name) {
+              mergedByName.set(source.name, source);
+            }
+          });
+          bakedSources.forEach((source) => {
+            if (source?.name) {
+              mergedByName.set(source.name, source);
+            }
+          });
+        }
         updates[set.id] = Array.from(mergedByName.values());
         bakeSignatureRef.current[set.id] = signature;
         tileSignatureRef.current[set.id] = perTileSignatures;
@@ -427,6 +447,9 @@ export const useTileSets = () => {
           });
           return next;
         });
+        if (nameReplacements.length > 0) {
+          onBakedNamesReplacedRef.current?.(nameReplacements);
+        }
       }
     };
 
@@ -516,13 +539,20 @@ export const useTileSets = () => {
 
   const deleteTileSet = useCallback(
     (id: string) => {
+      const sources = bakedSourcesBySetId[id] ?? [];
+      const removedNames = sources
+        .map((s) => (s && typeof s.name === 'string' ? s.name : null))
+        .filter((n): n is string => n !== null);
+      if (removedNames.length > 0) {
+        onTileSourceNamesRemovedRef.current?.(removedNames);
+      }
       setTileSets((prev) => {
         const next = prev.filter((set) => set.id !== id);
         void persist(next);
         return next;
       });
     },
-    [persist]
+    [bakedSourcesBySetId, persist]
   );
 
   const updateTileSet = useCallback(
@@ -597,6 +627,24 @@ export const useTileSets = () => {
 
   const deleteTileFromSet = useCallback(
     (setId: string, tileId: string) => {
+      const sources = bakedSourcesBySetId[setId] ?? [];
+      const removedNames = sources
+        .filter((s) => {
+          if (!s?.name) return false;
+          const legacy = getLegacyBakedName(setId, s.name);
+          const parsed = parseBakedName(legacy);
+          if (parsed) {
+            return parsed.tileId === tileId;
+          }
+          return legacy.startsWith(`${tileId}_`);
+        })
+        .map((s) => s.name as string);
+      const qualifiedPrefix = `${setId}:${tileId}_`;
+      if (removedNames.length > 0 || qualifiedPrefix.length > 0) {
+        onTileSourceNamesRemovedRef.current?.(removedNames, {
+          namePrefix: qualifiedPrefix,
+        });
+      }
       setTileSets((prev) => {
         const next = prev.map((set) => {
           if (set.id !== setId) {
@@ -612,7 +660,7 @@ export const useTileSets = () => {
         return next;
       });
     },
-    [persist]
+    [bakedSourcesBySetId, persist]
   );
 
   return {

@@ -17,13 +17,15 @@ import ViewShot from 'react-native-view-shot';
 
 import {
     TILE_CATEGORIES,
-    TILE_MANIFEST
+    TILE_MANIFEST,
+    type TileCategory,
 } from '@/assets/images/tiles/manifest';
 import { DesktopNavTabs } from '@/components/desktop-nav-tabs';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { TileAsset } from '@/components/tile-asset';
 import { useIsMobileWeb } from '@/hooks/use-is-mobile-web';
+import { useTileFiles } from '@/hooks/use-tile-files';
 import { type TileSetTile, useTileSets } from '@/hooks/use-tile-sets';
 import { TAB_BAR_HEIGHT, useTabBarVisible } from '@/contexts/tab-bar-visible';
 import { renderTileCanvasToDataUrl } from '@/utils/tile-export';
@@ -55,6 +57,9 @@ export default function TileSetCreatorScreen() {
   const router = useRouter();
   const { tabBarVisible } = useTabBarVisible();
   const isMobileWeb = useIsMobileWeb();
+  const { replaceTileSourceNamesWithError } = useTileFiles(
+    DEFAULT_CATEGORY as TileCategory
+  );
   const {
     tileSets,
     bakedSourcesBySetId,
@@ -62,7 +67,7 @@ export default function TileSetCreatorScreen() {
     createTileSet,
     deleteTileSet,
     updateTileSet,
-  } = useTileSets();
+  } = useTileSets({ onTileSourceNamesRemoved: replaceTileSourceNamesWithError });
   const [isSelectMode, setIsSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const selectBarAnim = useRef(new Animated.Value(0)).current;

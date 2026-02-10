@@ -23,6 +23,7 @@ import { TileBrushPanel } from '@/components/tile-brush-panel';
 import { TileDebugOverlay } from '@/components/tile-debug-overlay';
 import { usePersistedSettings } from '@/hooks/use-persisted-settings';
 import { useTileAtlas } from '@/hooks/use-tile-atlas';
+import { useTileFiles } from '@/hooks/use-tile-files';
 import { useTileGrid } from '@/hooks/use-tile-grid';
 import { useTilePatterns } from '@/hooks/use-tile-patterns';
 import { useTileSets } from '@/hooks/use-tile-sets';
@@ -303,7 +304,13 @@ export default function ModifyTileScreen() {
   const setId = params.setId ?? '';
   const tileId = params.tileId ?? '';
   const { settings, setSettings } = usePersistedSettings();
-  const { tileSets, updateTileInSet, updateTileSet } = useTileSets();
+  const { replaceTileSourceNames, replaceTileSourceNamesWithError } = useTileFiles(
+    TILE_CATEGORIES[0] as TileCategory
+  );
+  const { tileSets, updateTileInSet, updateTileSet } = useTileSets({
+    onBakedNamesReplaced: replaceTileSourceNames,
+    onTileSourceNamesRemoved: replaceTileSourceNamesWithError,
+  });
   const { patternsByCategory } = useTilePatterns();
   const [showTileSetChooser, setShowTileSetChooser] = useState(false);
   const [tileSetSelectionError, setTileSetSelectionError] = useState<string | null>(

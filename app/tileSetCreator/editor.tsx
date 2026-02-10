@@ -14,10 +14,15 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { TILE_CATEGORIES, TILE_MANIFEST } from '@/assets/images/tiles/manifest';
+import {
+  TILE_CATEGORIES,
+  TILE_MANIFEST,
+  type TileCategory,
+} from '@/assets/images/tiles/manifest';
 import { TileAsset } from '@/components/tile-asset';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { useTileFiles } from '@/hooks/use-tile-files';
 import { useTileSets, type TileSetTile } from '@/hooks/use-tile-sets';
 import {
   getTransformedConnectionsForName,
@@ -113,13 +118,16 @@ export default function TileSetEditorScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{ setId?: string }>();
   const setId = params.setId ?? '';
+  const { replaceTileSourceNamesWithError } = useTileFiles(
+    TILE_CATEGORIES[0] as TileCategory
+  );
   const {
     tileSets,
     addTileToSet,
     deleteTileFromSet,
     updateTileSet,
     reloadTileSets,
-  } = useTileSets();
+  } = useTileSets({ onTileSourceNamesRemoved: replaceTileSourceNamesWithError });
   const tileSet = tileSets.find((set) => set.id === setId) ?? null;
   const [isSelectMode, setIsSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());

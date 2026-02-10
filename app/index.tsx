@@ -827,6 +827,8 @@ export default function TestScreen() {
     deleteFile,
     clearAllFiles,
     upsertActiveFile,
+    replaceTileSourceNames,
+    replaceTileSourceNamesWithError,
     ready,
   } = useTileFiles(DEFAULT_CATEGORY);
   const {
@@ -835,7 +837,10 @@ export default function TestScreen() {
     currentBakedNamesBySetId,
     isLoaded: tileSetsLoaded,
     reloadTileSets,
-  } = useTileSets();
+  } = useTileSets({
+    onBakedNamesReplaced: replaceTileSourceNames,
+    onTileSourceNamesRemoved: replaceTileSourceNamesWithError,
+  });
 
   const activeCategories = useMemo(
     () => normalizeCategories(selectedCategories),
@@ -844,8 +849,13 @@ export default function TestScreen() {
   const primaryCategory = activeCategories[0] ?? DEFAULT_CATEGORY;
   const areTileSetsReady = useCallback(
     (ids: string[]) =>
-      ids.every((id) => (bakedSourcesBySetId[id]?.length ?? 0) > 0),
-    [bakedSourcesBySetId]
+      ids.every((id) => {
+        const count = bakedSourcesBySetId[id]?.length ?? 0;
+        if (count > 0) return true;
+        const set = userTileSets.find((s) => s.id === id);
+        return set ? set.tiles.length === 0 : false;
+      }),
+    [bakedSourcesBySetId, userTileSets]
   );
   const currentBakedNameSets = useMemo(() => {
     const map = new Map<string, Set<string>>();
@@ -1498,12 +1508,23 @@ export default function TestScreen() {
       return true;
     }
     if (activeFileSourceNames.length === 0) {
-      return false;
+      const file = activeFile ?? null;
+      if (!file?.tiles?.length) return true;
+      const needsSource = file.tiles.some(
+        (t) => t && t.imageIndex >= 0
+      );
+      return !needsSource;
     }
     return activeFileSourceNames.every((name) =>
       Boolean(resolveSourceName(name, activeFileTileSetIds))
     );
-  }, [activeFileSourceNames, resolveSourceName, activeFileTileSetIds, hasActiveFileTiles]);
+  }, [
+    activeFile,
+    activeFileSourceNames,
+    resolveSourceName,
+    activeFileTileSetIds,
+    hasActiveFileTiles,
+  ]);
   const isTileSetSourcesReadyForActiveFile = useMemo(() => {
     const file = activeFile ?? null;
     if (!file) {

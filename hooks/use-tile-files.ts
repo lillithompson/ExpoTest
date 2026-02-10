@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { TILE_CATEGORIES, type TileCategory } from '@/assets/images/tiles/manifest';
 import { renderTileCanvasToDataUrl } from '@/utils/tile-export';
+import { applyRemovedSourcesToFile } from '@/utils/tile-file-sync';
 import { type GridLayout, type Tile } from '@/utils/tile-grid';
 
 export type TileFile = {
@@ -362,6 +363,100 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
     await AsyncStorage.removeItem(ACTIVE_KEY);
   }, []);
 
+  /**
+   * Replaces tiles that reference removed sources (deleted tile set or tile)
+   * with the tile_error tile so files do not become corrupted. Replaces both
+   * tiles matched by name and tiles that reference a removed source by imageIndex.
+   * When namePrefix is set (e.g. "setId:tileId_" for a single deleted tile), any
+   * tile.name or sourceNames entry starting with that prefix is also replaced.
+   */
+  const replaceTileSourceNamesWithError = useCallback(
+    (
+      removedNames: string[],
+      options?: { namePrefix?: string }
+    ) => {
+      if (removedNames.length === 0 && (options?.namePrefix ?? '') === '') {
+        return;
+      }
+      setFiles((prev) => {
+        let anyChanged = false;
+        const next = prev.map((file) => {
+          const result = applyRemovedSourcesToFile(
+            { tiles: file.tiles, sourceNames: file.sourceNames },
+            removedNames,
+            options
+          );
+          if (!result.changed) {
+            return file;
+          }
+          anyChanged = true;
+          return {
+            ...file,
+            tiles: result.tiles,
+            sourceNames: result.sourceNames,
+            updatedAt: Date.now(),
+          };
+        });
+        if (anyChanged) {
+          void persistFiles(next, activeFileId);
+        }
+        return next;
+      });
+    },
+    [activeFileId, persistFiles]
+  );
+
+  /**
+   * Replaces tile source names across all files (e.g. when a user tile is modified
+   * and the baked filename changes). Updates both tile.name and file.sourceNames
+   * so that existing designs keep pointing at the new asset.
+   */
+  const replaceTileSourceNames = useCallback(
+    (replacements: Array<{ oldName: string; newName: string }>) => {
+      if (replacements.length === 0) {
+        return;
+      }
+      const oldToNew = new Map(replacements.map((r) => [r.oldName, r.newName]));
+      setFiles((prev) => {
+        let anyChanged = false;
+        const next = prev.map((file) => {
+          let fileChanged = false;
+          const newTiles = file.tiles.map((tile) => {
+            const newName = tile.name ? oldToNew.get(tile.name) : undefined;
+            if (newName) {
+              fileChanged = true;
+              return { ...tile, name: newName };
+            }
+            return tile;
+          });
+          const newSourceNames = file.sourceNames.map((n) => {
+            const newName = oldToNew.get(n);
+            if (newName) {
+              fileChanged = true;
+              return newName;
+            }
+            return n;
+          });
+          if (!fileChanged) {
+            return file;
+          }
+          anyChanged = true;
+          return {
+            ...file,
+            tiles: newTiles,
+            sourceNames: newSourceNames,
+            updatedAt: Date.now(),
+          };
+        });
+        if (anyChanged) {
+          void persistFiles(next, activeFileId);
+        }
+        return next;
+      });
+    },
+    [activeFileId, persistFiles]
+  );
+
   const activeFile = useMemo(
     () => files.find((file) => file.id === activeFileId) ?? null,
     [files, activeFileId]
@@ -378,6 +473,8 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
     deleteFile,
     clearAllFiles,
     upsertActiveFile,
+    replaceTileSourceNames,
+    replaceTileSourceNamesWithError,
     ready,
   };
 };
