@@ -1342,17 +1342,19 @@ export default function TestScreen() {
       TITLE_SPACING -
       gridHeight
   );
-  const brushRows =
-    Platform.OS === 'ios' &&
-    (brushPanelHeight - BRUSH_PANEL_ROW_GAP * 2) / 3 >= 75
-      ? 3
-      : 2;
   const isDesktopWeb =
     Platform.OS === 'web' && width >= FILE_VIEW_DESKTOP_BREAKPOINT;
   const brushContentHeight =
     isDesktopWeb
       ? Math.max(0, brushPanelHeight - WEB_SCROLLBAR_HEIGHT)
       : brushPanelHeight;
+  /** If row height would exceed this (px), use more rows so each row stays at or below it. */
+  const MAX_BRUSH_ROW_HEIGHT = 120;
+  const minRowsForHeight = Math.ceil(
+    (brushContentHeight + BRUSH_PANEL_ROW_GAP) /
+      (MAX_BRUSH_ROW_HEIGHT + BRUSH_PANEL_ROW_GAP)
+  );
+  const brushRows = Math.max(2, Math.min(minRowsForHeight, 5));
   const brushItemSize = Math.max(
     0,
     Math.floor(

@@ -438,13 +438,19 @@ export default function ModifyTileScreen() {
     0,
     contentHeight - HEADER_HEIGHT - CONTENT_PADDING * 2 - TITLE_SPACING - gridHeight
   );
-  const brushRows = Platform.OS === 'ios' ? 4 : 3;
   const isDesktopWeb =
     Platform.OS === 'web' && width >= DESKTOP_WEB_BREAKPOINT;
   const brushContentHeight =
     isDesktopWeb
       ? Math.max(0, brushPanelHeight - WEB_SCROLLBAR_HEIGHT)
       : brushPanelHeight;
+  /** If row height would exceed this (px), use more rows so each row stays at or below it. */
+  const MAX_BRUSH_ROW_HEIGHT = 120;
+  const minRowsForHeight = Math.ceil(
+    (brushContentHeight + BRUSH_PANEL_ROW_GAP) /
+      (MAX_BRUSH_ROW_HEIGHT + BRUSH_PANEL_ROW_GAP)
+  );
+  const brushRows = Math.max(2, Math.min(minRowsForHeight, 5));
   const brushItemSize = Math.max(
     0,
     Math.floor(

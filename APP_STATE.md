@@ -35,7 +35,7 @@ Modify View (viewMode = "modify")
 - Canvas frame: Grid background, optional mirror guide lines, optional preview image during hydration.
 - Tile grid: Web renders TileCell components; mouse and touch are both supported so that tap and drag work on desktop and mobile browsers (e.g. Safari on iOS). Touch handlers use the capture phase (onTouchStartCapture, onTouchMoveCapture, onTouchEndCapture, onTouchCancelCapture) so that drag-to-paint works when the gesture starts on an initialized tile (whose image would otherwise be the touch target and prevent the grid from receiving touchmove). Native renders a single Skia canvas (TileGridCanvas) for all tiles.
 - Pattern creation overlays: Top and bottom overlays shown while in pattern creation mode.
-- Brush panel: Scrollable two or three row tile palette plus Random, Clone, Erase, and Pattern buttons. Random, Erase, Clone, and Pattern (when no pattern selected) show a centered icon above smaller, unbold label text. The Pattern button shows the same icon+label style when no pattern is selected; when a pattern is selected it shows the pattern thumbnail. Palette tiles use an absolutely positioned 4px border overlay (dark when unselected, green when selected) and a full-size (itemSize × itemSize) content wrapper so tile images stay centered with no shift on selection or when switching from cached/loading image to atlas canvas.
+- Brush panel: Scrollable tile palette (2–5 rows; when row height would exceed 120px another row is added) plus Random, Clone, Erase, and Pattern buttons. Random, Erase, Clone, and Pattern (when no pattern selected) show a centered icon above smaller, unbold label text. The Pattern button shows the same icon+label style when no pattern is selected; when a pattern is selected it shows the pattern thumbnail. Palette tiles use an absolutely positioned 4px border overlay (dark when unselected, green when selected) and a full-size (itemSize × itemSize) content wrapper so tile images stay centered with no shift on selection or when switching from cached/loading image to atlas canvas.
 - Pattern chooser modal: Lists patterns for the active category with actions for create and select mode.
 - Pattern save modal: Preview of the selection with Save/Cancel.
 - Tile Set chooser overlay: Grid of thumbnails (first tile per set) with name below. At top: Allow Border Connections toggle. Built-in categories then user tile sets. Selected items are brighter with green border (#22c55e, 2px); multi-select to define the active palette.
@@ -59,7 +59,7 @@ Tile Set Editor (tileSetCreator/editor.tsx)
 Tile Modify View (tileSetCreator/modifyTile.tsx)
 - Header row: back button label "Modify Tile" (upper left); toolbar actions similar to Modify View.
 - Grid background and optional debug overlay.
-- Brush panel: 3 rows on web (reserves ≥32% content height for larger tiles), 4 rows on iOS; for editing the tile template.
+- Brush panel: 2–5 rows (row count increases when row height would exceed 120px); for editing the tile template.
 
 Core Behaviors and Tool Rules
 - Tile connectivity is driven by `tile_########.png/svg` naming (see AI_ASSET_RULES). Connections are used to validate random placements and compatibility.
@@ -95,7 +95,7 @@ Layout Rules
 - On mobile web and iOS, the bottom tab bar has min height 48 plus safe area inset; File and Tile Set Creator list screens add matching bottom padding when the tab bar is visible.
 - Headers are fixed height (50). Tool buttons are square (40). Brush panel height is 160 with 1px row gaps.
 - File grids are 3 columns on mobile with side padding (12) and gaps (12).
-- Tile palette can be 2 or 3 rows on iOS depending on available height. On desktop web, the brush panel reserves space for the horizontal scrollbar (WEB_SCROLLBAR_HEIGHT) so the bottom row is not cut off; on mobile web this space is not reserved. On mobile web, content width uses the visual viewport and the brush panel is constrained to 100% width with minWidth: 0 so the palette is not laid out with an incorrect width (e.g. half-scrolled off screen). The palette content uses justifyContent: 'flex-start' on web so the left edge of the tile palette aligns with the left edge of the screen.
+- Tile palette uses 2–5 rows; when the height of a row would exceed 120px, another row is added so each row stays at or below 120px. On desktop web, the brush panel reserves space for the horizontal scrollbar (WEB_SCROLLBAR_HEIGHT) so the bottom row is not cut off; on mobile web this space is not reserved. On mobile web, content width uses the visual viewport and the brush panel is constrained to 100% width with minWidth: 0 so the palette is not laid out with an incorrect width (e.g. half-scrolled off screen). The palette content uses justifyContent: 'flex-start' on web so the left edge of the tile palette aligns with the left edge of the screen.
 - Tile canvas layout is capped at 512 cells: `computeGridLayout` and `computeFixedGridLayout` (utils/tile-grid.ts) never return a grid with more than 512 tiles; when capping is needed, dimensions are chosen to be as square as possible (e.g. 22×23). The hook (use-tile-grid) also clamps `totalCells` to this limit.
 
 **Infrastructure**
