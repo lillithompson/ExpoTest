@@ -3869,7 +3869,7 @@ export default function TestScreen() {
             />
             <ThemedView style={styles.newFilePanel}>
               <ThemedText type="title">
-                New File Size
+                {isWeb && !isMobileWeb ? 'Preferred Tile Size' : 'New File Size'}
               </ThemedText>
               <ThemedView style={styles.newFileGrid}>
                 {(Platform.OS === 'ios' || isMobileWeb
@@ -6188,7 +6188,7 @@ const styles = StyleSheet.create({
     height: '100%',
   },
   newFilePanel: {
-    width: 260,
+    width: 320,
     borderRadius: 8,
     borderWidth: 1,
     borderColor: '#1f1f1f',
