@@ -85,6 +85,12 @@ const FILE_GRID_GAP = 12;
 const DEFAULT_CATEGORY = (TILE_CATEGORIES as string[]).includes('angular')
   ? ('angular' as TileCategory)
   : TILE_CATEGORIES[0];
+/** On iOS and mobile web, new file dialog shows S/M/L (resolutions 100, 50, 25). */
+const NEW_FILE_RESOLUTION_SIMPLE: { label: string; size: number }[] = [
+  { label: 'S', size: 100 },
+  { label: 'M', size: 50 },
+  { label: 'L', size: 25 },
+];
 const ERROR_TILE = require('@/assets/images/tiles/tile_error.svg');
 const PREVIEW_DIR = `${FileSystem.cacheDirectory ?? ''}tile-previews/`;
 /** Max file thumbnail display size (web cap): narrow = this, desktop = 2×. */
@@ -3860,17 +3866,22 @@ export default function TestScreen() {
               accessibilityLabel="Close new file options"
             />
             <ThemedView style={styles.newFilePanel}>
-              <ThemedText type="title">New File Tile Size</ThemedText>
+              <ThemedText type="title">
+                New File Size
+              </ThemedText>
               <ThemedView style={styles.newFileGrid}>
-                {NEW_FILE_TILE_SIZES.map((size) => (
+                {(Platform.OS === 'ios' || isMobileWeb
+                  ? NEW_FILE_RESOLUTION_SIMPLE
+                  : NEW_FILE_TILE_SIZES.map((size) => ({ label: String(size), size }))
+                ).map((option) => (
                   <Pressable
-                    key={`new-file-size-${size}`}
+                    key={`new-file-size-${option.label}`}
                     onPress={() => {
                       const initialSources = getSourcesForSelection(
                         activeCategories,
                         selectedTileSetIds
                       ).map((source) => source.name);
-                      createFile(DEFAULT_CATEGORY, size, {
+                      createFile(DEFAULT_CATEGORY, option.size, {
                         lineWidth: activeLineWidth,
                         lineColor: activeLineColor,
                         tileSetIds: selectedTileSetIds,
@@ -3887,9 +3898,13 @@ export default function TestScreen() {
                     }}
                     style={styles.newFileButton}
                     accessibilityRole="button"
-                    accessibilityLabel={`Create file with tile size ${size}`}
+                    accessibilityLabel={
+                      Platform.OS === 'ios' || isMobileWeb
+                        ? `Create file with resolution ${option.label} (${option.size}px)`
+                        : `Create file with tile size ${option.size}`
+                    }
                   >
-                    <ThemedText type="defaultSemiBold">{size}</ThemedText>
+                    <ThemedText type="defaultSemiBold">{option.label}</ThemedText>
                   </Pressable>
                 ))}
               </ThemedView>
