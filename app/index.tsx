@@ -72,7 +72,7 @@ const BRUSH_PANEL_HEIGHT = 160;
 const PATTERN_THUMB_HEIGHT = 70;
 const PATTERN_THUMB_PADDING = 4;
 const BRUSH_PANEL_ROW_GAP = 1;
-/** Reserve space for horizontal scrollbar so the bottom row is not cut off on web. */
+/** Reserve space for horizontal scrollbar so the bottom row is not cut off on desktop web. */
 const WEB_SCROLLBAR_HEIGHT = 17;
 const FILE_GRID_MIN_CARD_WIDTH = 100;
 /** On desktop web, use larger min card width so thumbnails display bigger (fewer columns). */
@@ -1295,8 +1295,10 @@ export default function TestScreen() {
     (brushPanelHeight - BRUSH_PANEL_ROW_GAP * 2) / 3 >= 75
       ? 3
       : 2;
+  const isDesktopWeb =
+    Platform.OS === 'web' && width >= FILE_VIEW_DESKTOP_BREAKPOINT;
   const brushContentHeight =
-    Platform.OS === 'web'
+    isDesktopWeb
       ? Math.max(0, brushPanelHeight - WEB_SCROLLBAR_HEIGHT)
       : brushPanelHeight;
   const brushItemSize = Math.max(
