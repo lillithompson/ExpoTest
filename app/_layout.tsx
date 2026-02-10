@@ -1,7 +1,7 @@
 import { DefaultTheme, ThemeProvider } from '@react-navigation/native';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Platform, View } from 'react-native';
 import 'react-native-reanimated';
 
@@ -15,6 +15,12 @@ function useShowMobileTabBar(): boolean {
 }
 
 export default function RootLayout() {
+  useEffect(() => {
+    if (Platform.OS === 'web' && typeof document !== 'undefined' && document.documentElement) {
+      document.documentElement.style.colorScheme = 'light';
+    }
+  }, []);
+
   const showMobileTabBar = useShowMobileTabBar();
   const [hideTabBarOverModify, setHideTabBarOverModify] = useState(false);
   const [hideTabBarOverOverlay, setHideTabBarOverOverlay] = useState(false);

@@ -82,6 +82,7 @@ Core Behaviors and Tool Rules
 **UI**
 
 Visual Rules
+- Color scheme: On web (including mobile web), the app always uses light mode colors and does not follow the device dark-mode setting; this avoids incorrect colors when the phone is in dark mode. The web-specific hook `use-color-scheme.web.ts` returns `'light'`; native uses `use-color-scheme.ts` which also returns `'light'`. For web, the root HTML (`app/+html.tsx`) sets `<meta name="color-scheme" content="light" />` and the root layout sets `document.documentElement.style.colorScheme = 'light'` so the browser applies light styling to the page and dialogs (e.g. New File modal on mobile web).
 - Backgrounds: Main screen background is dark gray (#3f3f3f). File and Tile Set list headers are near-black (#202125). Tile Set editor uses a light header (#E2E3E9).
 - Panels and overlays: Modal panels are white with dark borders (#1f1f1f). Backdrops are translucent black (rgba(0,0,0,0.7)).
 - Highlights: Selection and active states use green (#22c55e). Destructive actions use red (#dc2626).
