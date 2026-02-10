@@ -47,7 +47,7 @@ Tile Set Creator List (tileSetCreator/index.tsx)
 - Select mode bar: Animated bar with Delete, selected count, Exit.
 - Tile set grid: Cards with 2x2 previews (baked image or, on native, live grid). On web, a dark placeholder is shown until the baked preview is ready (no live grid) to avoid a white-border flash; baked previews are cached in a module-level map so they persist across navigations and are not regenerated when returning to the list. Long press (web only) opens download modal.
 - Create Tile Set modal: Name input and resolution options 2, 3, 4.
-- Download Tile Set modal (web only): Downloads all tiles in the set as a ZIP of SVGs.
+- Download Tile Set modal (web only): Downloads all tiles in the set as a ZIP of SVGs. Each SVG is named `{tile set name}_{connectivity}.svg` (spaces in the tile set name become underscores). If multiple tiles share the same connectivity, they are named `{tile set name}_01_{connectivity}.svg`, `{tile set name}_02_{connectivity}.svg`, etc.
 
 Tile Set Editor (tileSetCreator/editor.tsx)
 - Header row: Back, tile set name, actions for Add Tile, Select Mode, and Settings.

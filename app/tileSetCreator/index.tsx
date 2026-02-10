@@ -340,6 +340,21 @@ export default function TileSetCreatorScreen() {
         const response = await fetch(uri);
         return await response.text();
       };
+      const connectivityFromName = (name: string): string => {
+        const match = name.match(/_([01]{8})\.svg$/);
+        return match?.[1] ?? '00000000';
+      };
+      const baseSetName = set.name
+        .trim()
+        .replace(/\s+/g, '_')
+        .replace(/[^\w\-]+/g, '_')
+        .replace(/^_+|_+$/g, '') || 'tile-set';
+      const connectivityCounts = new Map<string, number>();
+      for (let i = 0; i < activeSources.length; i += 1) {
+        const conn = connectivityFromName(activeSources[i].name ?? '');
+        connectivityCounts.set(conn, (connectivityCounts.get(conn) ?? 0) + 1);
+      }
+      const connectivityOrdinal = new Map<string, number>();
       const zip = new JSZip();
       for (let i = 0; i < activeSources.length; i += 1) {
         const source = activeSources[i];
@@ -348,7 +363,15 @@ export default function TileSetCreatorScreen() {
           continue;
         }
         const svg = await readSvg(uri);
-        const fileName = source.name ?? `tile_${i}.svg`;
+        const connectivity = connectivityFromName(source.name ?? '');
+        const count = connectivityCounts.get(connectivity) ?? 1;
+        const fileName =
+          count > 1
+            ? `${baseSetName}_${String((connectivityOrdinal.get(connectivity) ?? 0) + 1).padStart(2, '0')}_${connectivity}.svg`
+            : `${baseSetName}_${connectivity}.svg`;
+        if (count > 1) {
+          connectivityOrdinal.set(connectivity, (connectivityOrdinal.get(connectivity) ?? 0) + 1);
+        }
         zip.file(fileName, svg);
       }
       const blob = await zip.generateAsync({ type: 'blob' });
