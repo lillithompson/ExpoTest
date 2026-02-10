@@ -6,6 +6,7 @@ This document is the single source of truth for reconstructing the app from scra
 
 Root Layout (app/_layout.tsx)
 - Mobile web banner is not shown. The component and hooks (`getIsMobileWebForWindow`, `useIsMobileWeb`, `MobileWebBanner`) remain in the codebase but are not rendered in the layout.
+- On **mobile web** and **iOS** only: an iOS-style bottom tab bar (components/mobile-tab-bar.tsx) is shown when the current route is `/` or `/tileSetCreator`. It has two tabs: "Files" (navigates to `/`) and "Tile Sets" (navigates to `/tileSetCreator`). The tab bar is hidden on editor, modifyTile, manual, and modal. Desktop web and Android use the existing header-based navigation (tap "File" or "Tile Sets" in the header to switch). Tab bar visibility is provided via TabBarVisibleProvider; File and Tile Set Creator list screens add bottom padding (TAB_BAR_HEIGHT + safe area bottom) when the tab bar is visible so content is not obscured.
 
 Main Routes
 - `/` (app/index.tsx): File and Modify modes in one screen, controlled by `viewMode`.
@@ -17,7 +18,7 @@ Main Routes
 
 File View (viewMode = "file")
 - Status bar background strip at the top (white).
-- Header row: Title "File" (press navigates to Tile Set Creator), actions on the right.
+- Header row: Title "Files" (press navigates to Tile Set Creator), actions on the right.
 - Header actions: New File (plus), Select Mode (checkbox), Settings (cog).
 - Select mode bar: Animated bar with Delete button (left), selected count (center), Exit (right).
 - File grid: Scrollable list of file cards, sorted by `updatedAt` descending. Column count is computed from content width so as many columns as fit: on desktop web (width ≥ 768) at least FILE_GRID_MIN_CARD_WIDTH_DESKTOP_WEB (240px) per card for larger thumbnails; otherwise FILE_GRID_MIN_CARD_WIDTH (100px). Cards pack to the upper left with no extra horizontal spread. On web, file thumbnail display size is capped (aspect ratio preserved): FILE_THUMB_DISPLAY_SIZE (200 px) on narrow viewports, 400 px (2×) on desktop (content width ≥ 768). Generated thumbnail resolution is FILE_THUMB_SIZE 400 (2× display for sharp thumbnails on desktop); native ViewShot and web renderTileCanvasToDataUrl use 400. Cards show previews (thumbnail/preview if available, otherwise live tile grid on native; web uses placeholder).
@@ -89,6 +90,7 @@ Visual Rules
 - Cards and thumbnails: Dark frames with borders; selection adds a green border and thicker stroke.
 
 Layout Rules
+- On mobile web and iOS, the bottom tab bar has min height 48 plus safe area inset; File and Tile Set Creator list screens add matching bottom padding when the tab bar is visible.
 - Headers are fixed height (50). Tool buttons are square (40). Brush panel height is 160 with 1px row gaps.
 - File grids are 3 columns on mobile with side padding (12) and gaps (12).
 - Tile palette can be 2 or 3 rows on iOS depending on available height. On desktop web, the brush panel reserves space for the horizontal scrollbar (WEB_SCROLLBAR_HEIGHT) so the bottom row is not cut off; on mobile web this space is not reserved. On mobile web, content width uses the visual viewport and the brush panel is constrained to 100% width with minWidth: 0 so the palette is not laid out with an incorrect width (e.g. half-scrolled off screen). The palette content uses justifyContent: 'flex-start' on web so the left edge of the tile palette aligns with the left edge of the screen.

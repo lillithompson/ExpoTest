@@ -37,6 +37,7 @@ import { clearBrushFavorites, TileBrushPanel } from '@/components/tile-brush-pan
 import { TileDebugOverlay } from '@/components/tile-debug-overlay';
 import { TileGridCanvas } from '@/components/tile-grid-canvas';
 import { useIsMobileWeb } from '@/hooks/use-is-mobile-web';
+import { TAB_BAR_HEIGHT, useTabBarVisible } from '@/contexts/tab-bar-visible';
 import { usePersistedSettings } from '@/hooks/use-persisted-settings';
 import { useTileAtlas } from '@/hooks/use-tile-atlas';
 import { useTileFiles, type TileFile } from '@/hooks/use-tile-files';
@@ -646,6 +647,7 @@ export default function TestScreen() {
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const { tabBarVisible } = useTabBarVisible();
   const gridRef = useRef<View>(null);
   const gridCaptureRef = useRef<ViewShot>(null);
   const gridOffsetRef = useRef({ x: 0, y: 0 });
@@ -3276,7 +3278,7 @@ export default function TestScreen() {
         styles.screen,
         {
           paddingTop: insets.top,
-          paddingBottom: 0,
+          paddingBottom: tabBarVisible ? TAB_BAR_HEIGHT + insets.bottom : 0,
           paddingLeft: 0,
           paddingRight: 0,
           display: viewMode === 'file' ? 'flex' : 'none',
@@ -3298,7 +3300,7 @@ export default function TestScreen() {
             accessibilityLabel="Open tile sets"
           >
             <ThemedText type="title" style={styles.fileTitle}>
-              File
+              Files
             </ThemedText>
           </Pressable>
           <ThemedView style={styles.fileHeaderActions}>
@@ -3944,7 +3946,7 @@ export default function TestScreen() {
         styles.screen,
         {
           paddingTop: insets.top,
-          paddingBottom: 0,
+          paddingBottom: tabBarVisible ? TAB_BAR_HEIGHT + insets.bottom : 0,
           paddingLeft: 0,
           paddingRight: 0,
           display: viewMode === 'file' ? 'none' : 'flex',

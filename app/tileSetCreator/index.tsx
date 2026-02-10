@@ -23,6 +23,7 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { TileAsset } from '@/components/tile-asset';
 import { type TileSetTile, useTileSets } from '@/hooks/use-tile-sets';
+import { TAB_BAR_HEIGHT, useTabBarVisible } from '@/contexts/tab-bar-visible';
 import { renderTileCanvasToDataUrl } from '@/utils/tile-export';
 import { type Tile } from '@/utils/tile-grid';
 
@@ -50,6 +51,7 @@ export default function TileSetCreatorScreen() {
   const { width } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const { tabBarVisible } = useTabBarVisible();
   const {
     tileSets,
     bakedSourcesBySetId,
@@ -365,7 +367,7 @@ export default function TileSetCreatorScreen() {
         styles.screen,
         {
           paddingTop: insets.top,
-          paddingBottom: 0,
+          paddingBottom: tabBarVisible ? TAB_BAR_HEIGHT + insets.bottom : 0,
           paddingLeft: 0,
           paddingRight: 0,
         },
