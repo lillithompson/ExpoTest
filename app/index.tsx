@@ -3283,10 +3283,7 @@ export default function TestScreen() {
         styles.screen,
         {
           paddingTop: insets.top,
-          paddingBottom:
-            tabBarVisible && viewMode !== 'modify'
-              ? TAB_BAR_HEIGHT + insets.bottom
-              : 0,
+          paddingBottom: 0,
           paddingLeft: 0,
           paddingRight: 0,
           display: viewMode === 'file' ? 'flex' : 'none',
@@ -3379,7 +3376,14 @@ export default function TestScreen() {
         </Animated.View>
         <ScrollView
           style={styles.fileScroll}
-          contentContainerStyle={styles.fileGrid}
+          contentContainerStyle={[
+            styles.fileGrid,
+            tabBarVisible &&
+              viewMode !== 'modify' && {
+                paddingBottom:
+                  FILE_GRID_GAP + TAB_BAR_HEIGHT + insets.bottom,
+              },
+          ]}
           showsVerticalScrollIndicator
         >
           {[...files]

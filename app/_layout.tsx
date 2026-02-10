@@ -36,7 +36,11 @@ export default function RootLayout() {
               <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
             </Stack>
           </View>
-          {showMobileTabBar && <MobileTabBar />}
+          {showMobileTabBar && (
+            <View style={{ position: 'absolute', bottom: 0, left: 0, right: 0 }}>
+              <MobileTabBar />
+            </View>
+          )}
         </View>
       </TabBarVisibleProvider>
       <StatusBar style="dark" />

@@ -370,7 +370,7 @@ export default function TileSetCreatorScreen() {
         styles.screen,
         {
           paddingTop: insets.top,
-          paddingBottom: tabBarVisible ? TAB_BAR_HEIGHT + insets.bottom : 0,
+          paddingBottom: 0,
           paddingLeft: 0,
           paddingRight: 0,
         },
@@ -451,7 +451,13 @@ export default function TileSetCreatorScreen() {
       </Animated.View>
       <ScrollView
         style={styles.fileScroll}
-        contentContainerStyle={styles.fileGrid}
+        contentContainerStyle={[
+          styles.fileGrid,
+          tabBarVisible && {
+            paddingBottom:
+              FILE_GRID_GAP + TAB_BAR_HEIGHT + insets.bottom,
+          },
+        ]}
         showsVerticalScrollIndicator
       >
         {[...tileSets]
