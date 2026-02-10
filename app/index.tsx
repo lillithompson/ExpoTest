@@ -4034,7 +4034,24 @@ export default function TestScreen() {
                 setViewMode('file');
               }}
             />
-            <ThemedView style={styles.controls}>
+            <ThemedView
+              style={[
+                styles.controls,
+                (Platform.OS === 'ios' || (isWeb && isMobileWeb)) && {
+                  gap: 0,
+                },
+              ]}
+            >
+            <ToolbarButton
+              key={`selection-${isSelectionMode}`}
+              label="Selection"
+              icon="select-drag"
+              active={isSelectionMode}
+              onPress={() => {
+                setIsSelectionMode((prev) => !prev);
+                setCanvasSelection(null);
+              }}
+            />
             <ToolbarButton
               label="Reset"
               icon="refresh"
@@ -4088,16 +4105,6 @@ export default function TestScreen() {
                   pendingFloodCompleteRef.current = null;
                 }
                 controlledRandomize();
-              }}
-            />
-            <ToolbarButton
-              key={`selection-${isSelectionMode}`}
-              label="Selection"
-              icon="select-drag"
-              active={isSelectionMode}
-              onPress={() => {
-                setIsSelectionMode((prev) => !prev);
-                setCanvasSelection(null);
               }}
             />
             <ToolbarButton
