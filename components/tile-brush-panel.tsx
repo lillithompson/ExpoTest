@@ -1,3 +1,4 @@
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -437,6 +438,8 @@ export function TileBrushPanel({
                 style={[
                   styles.item,
                   { width: itemSize, height: itemSize },
+                  (isRandom || isErase || isClone || (isPattern && !(selectedPattern && previewSizeSquare > 0))) &&
+                    styles.itemLabelMode,
                   isSelected ? styles.itemSelected : styles.itemDimmed,
                   !isLastRow ? { marginBottom: rowGap } : styles.itemBottom,
                 ]}
@@ -463,17 +466,41 @@ export function TileBrushPanel({
                   pointerEvents="none"
                 />
                 {isRandom ? (
-                  <ThemedText type="defaultSemiBold" style={styles.labelText}>
-                    Random
-                  </ThemedText>
+                  <View style={styles.labelButton}>
+                    <MaterialCommunityIcons
+                      name="shuffle-variant"
+                      size={itemSize * 0.4}
+                      color="#fff"
+                      style={styles.labelIcon}
+                    />
+                    <ThemedText type="default" style={styles.labelTextSmall}>
+                      Random
+                    </ThemedText>
+                  </View>
                 ) : isErase ? (
-                  <ThemedText type="defaultSemiBold" style={styles.labelText}>
-                    Erase
-                  </ThemedText>
+                  <View style={styles.labelButton}>
+                    <MaterialCommunityIcons
+                      name="eraser-variant"
+                      size={itemSize * 0.4}
+                      color="#fff"
+                      style={styles.labelIcon}
+                    />
+                    <ThemedText type="default" style={styles.labelTextSmall}>
+                      Erase
+                    </ThemedText>
+                  </View>
                 ) : isClone ? (
-                  <ThemedText type="defaultSemiBold" style={styles.labelText}>
-                    Clone
-                  </ThemedText>
+                  <View style={styles.labelButton}>
+                    <MaterialCommunityIcons
+                      name="content-copy"
+                      size={itemSize * 0.4}
+                      color="#fff"
+                      style={styles.labelIcon}
+                    />
+                    <ThemedText type="default" style={styles.labelTextSmall}>
+                      Clone
+                    </ThemedText>
+                  </View>
                 ) : isPattern ? (
                   selectedPattern && previewSizeSquare > 0 ? (
                     <View style={[styles.patternButton, styles.patternThumbnailFull]}>
@@ -571,9 +598,17 @@ export function TileBrushPanel({
                       </View>
                     </View>
                   ) : (
-                    <ThemedText type="defaultSemiBold" style={styles.labelText}>
-                      Pattern
-                    </ThemedText>
+                    <View style={styles.labelButton}>
+                      <MaterialCommunityIcons
+                        name="view-grid-outline"
+                        size={itemSize * 0.4}
+                        color="#fff"
+                        style={styles.labelIcon}
+                      />
+                      <ThemedText type="default" style={styles.labelTextSmall}>
+                        Pattern
+                      </ThemedText>
+                    </View>
                   )
                 ) : (
                   <View
@@ -726,6 +761,9 @@ const styles = StyleSheet.create({
     padding: 0,
     overflow: 'hidden',
   },
+  itemLabelMode: {
+    backgroundColor: '#1a1a28',
+  },
   itemBorderOverlay: {
     ...StyleSheet.absoluteFillObject,
     borderWidth: 4,
@@ -753,6 +791,20 @@ const styles = StyleSheet.create({
   },
   labelText: {
     color: '#fff',
+  },
+  labelButton: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingTop: 2,
+  },
+  labelIcon: {
+    marginBottom: -2,
+  },
+  labelTextSmall: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: '400',
   },
   patternButton: {
     flex: 1,
