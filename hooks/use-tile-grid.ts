@@ -52,6 +52,8 @@ type Params = {
     getterResult?: string | null;
     brushSourceName?: string | null;
   }) => void;
+  /** When set, clear/flood/reconcile apply only to cells in this rect (start/end cell indices). */
+  canvasSelection?: { start: number; end: number } | null;
 };
 
 type Result = {
@@ -96,6 +98,7 @@ export const useTileGrid = ({
   patternAnchorKey,
   getFixedBrushSourceName,
   onFixedPlacementDebug,
+  canvasSelection = null,
 }: Params): Result => {
   const clearLogRef = useRef<{ clearId: number } | null>(null);
   const previousTileSourcesRef = useRef<TileSource[] | null>(null);
@@ -134,6 +137,21 @@ export const useTileGrid = ({
     gridLayout.rows * gridLayout.columns,
     MAX_TILE_CANVAS_CELLS
   );
+  const selectionBounds = useMemo(() => {
+    if (!canvasSelection || gridLayout.columns === 0) {
+      return null;
+    }
+    const startRow = Math.floor(canvasSelection.start / gridLayout.columns);
+    const startCol = canvasSelection.start % gridLayout.columns;
+    const endRow = Math.floor(canvasSelection.end / gridLayout.columns);
+    const endCol = canvasSelection.end % gridLayout.columns;
+    return {
+      minRow: Math.min(startRow, endRow),
+      maxRow: Math.max(startRow, endRow),
+      minCol: Math.min(startCol, endCol),
+      maxCol: Math.max(startCol, endCol),
+    };
+  }, [canvasSelection, gridLayout.columns]);
   const [tiles, setTiles] = useState<Tile[]>(() =>
     buildInitialTiles(totalCells)
   );
@@ -291,7 +309,8 @@ export const useTileGrid = ({
     cellIndex: number,
     tilesState: Tile[],
     allowedIndices: Set<number> | null,
-    treatUninitializedAsNoConnection = false
+    treatUninitializedAsNoConnection = false,
+    selectionSet?: Set<number> | null
   ) => {
     if (tileSourcesLength <= 0) {
       return [] as Tile[];
@@ -321,6 +340,13 @@ export const useTileGrid = ({
           return null;
         }
         const neighborIndex = r * gridLayout.columns + c;
+        if (
+          selectionSet &&
+          !allowEdgeConnections &&
+          !selectionSet.has(neighborIndex)
+        ) {
+          return { pairs: getPairsForDirection(index), connections: new Array(8).fill(false) };
+        }
         const neighborTile = tilesState[neighborIndex];
         if (!neighborTile || neighborTile.imageIndex < 0) {
           if (treatUninitializedAsNoConnection) {
@@ -388,13 +414,15 @@ export const useTileGrid = ({
     cellIndex: number,
     tilesState: Tile[],
     allowedIndices: Set<number> | null,
-    treatUninitializedAsNoConnection = false
+    treatUninitializedAsNoConnection = false,
+    selectionSet?: Set<number> | null
   ) => {
     const candidates = buildCompatibleCandidates(
       cellIndex,
       tilesState,
       allowedIndices,
-      treatUninitializedAsNoConnection
+      treatUninitializedAsNoConnection,
+      selectionSet
     );
     if (candidates.length === 0) {
       return null;
@@ -431,9 +459,29 @@ export const useTileGrid = ({
     return count;
   };
 
-  const getRandomPlacement = (cellIndex: number, tilesState: Tile[]) => {
-    const selection = selectCompatibleTile(cellIndex, tilesState, randomSourceSet);
-    if (selection && isPlacementValid(cellIndex, selection, tilesState)) {
+  const getRandomPlacement = (
+    cellIndex: number,
+    tilesState: Tile[],
+    treatUninitializedAsNoConnection = false,
+    selectionSet?: Set<number> | null
+  ) => {
+    const selection = selectCompatibleTile(
+      cellIndex,
+      tilesState,
+      randomSourceSet,
+      treatUninitializedAsNoConnection,
+      selectionSet
+    );
+    if (
+      selection &&
+      isPlacementValid(
+        cellIndex,
+        selection,
+        tilesState,
+        treatUninitializedAsNoConnection,
+        selectionSet
+      )
+    ) {
       return selection;
     }
     return randomRequiresLegal
@@ -445,7 +493,8 @@ export const useTileGrid = ({
     cellIndex: number,
     placement: Tile,
     tilesState: Tile[],
-    treatUninitializedAsNoConnection = false
+    treatUninitializedAsNoConnection = false,
+    selectionSet?: Set<number> | null
   ) => {
     const transformed = compatTables.getConnectionsForPlacement(
       placement.imageIndex,
@@ -482,6 +531,15 @@ export const useTileGrid = ({
         return true;
       }
       const neighborIndex = r * gridLayout.columns + c;
+      if (
+        selectionSet &&
+        !allowEdgeConnections &&
+        !selectionSet.has(neighborIndex)
+      ) {
+        return getPairsForDirection(index).every(
+          ([candidateIndex]) => transformed[candidateIndex] === false
+        );
+      }
       const neighborTile = tilesState[neighborIndex];
       if (!neighborTile || neighborTile.imageIndex < 0) {
         if (treatUninitializedAsNoConnection) {
@@ -661,13 +719,34 @@ export const useTileGrid = ({
     return indices;
   };
 
+  const getSelectionCellIndices = () => {
+    if (!selectionBounds) {
+      return [];
+    }
+    const { minRow, maxRow, minCol, maxCol } = selectionBounds;
+    const indices: number[] = [];
+    for (let row = minRow; row <= maxRow; row += 1) {
+      for (let col = minCol; col <= maxCol; col += 1) {
+        indices.push(row * gridLayout.columns + col);
+      }
+    }
+    return indices;
+  };
+
+  const getIndicesToProcess = () =>
+    selectionBounds ? getSelectionCellIndices() : getDrivenCellIndices();
+
   const applyPlacementsToArray = (
     nextTiles: Tile[],
     placements: Map<number, Tile>,
-    driverIndex: number
+    driverIndex: number,
+    allowIndices?: Set<number> | null
   ) => {
     placements.forEach((placement, index) => {
       if (index < 0 || index >= nextTiles.length) {
+        return;
+      }
+      if (allowIndices != null && !allowIndices.has(index)) {
         return;
       }
       if (index !== driverIndex && nextTiles[index]?.imageIndex >= 0) {
@@ -679,10 +758,14 @@ export const useTileGrid = ({
 
   const applyPlacementsToArrayOverride = (
     nextTiles: Tile[],
-    placements: Map<number, Tile>
+    placements: Map<number, Tile>,
+    allowIndices?: Set<number> | null
   ) => {
     placements.forEach((placement, index) => {
       if (index < 0 || index >= nextTiles.length) {
+        return;
+      }
+      if (allowIndices != null && !allowIndices.has(index)) {
         return;
       }
       nextTiles[index] = placement;
@@ -958,44 +1041,75 @@ export const useTileGrid = ({
     if (totalCells <= 0) {
       return;
     }
+    const selectionSet = selectionBounds ? new Set(getSelectionCellIndices()) : null;
     if (brush.mode === 'erase') {
-      withBulkUpdate(() => {
-        applyTiles(buildInitialTiles(totalCells));
-      });
+      if (selectionSet && selectionSet.size > 0) {
+        const empty = { imageIndex: -1, rotation: 0, mirrorX: false, mirrorY: false };
+        withBulkUpdate(() => {
+          setTiles((prev) => {
+            const next = [...normalizeTiles(prev, totalCells, tileSourcesLength)];
+            selectionSet.forEach((index) => {
+              next[index] = { ...empty };
+            });
+            return next;
+          });
+        });
+      } else if (!selectionBounds) {
+        withBulkUpdate(() => {
+          applyTiles(buildInitialTiles(totalCells));
+        });
+      }
       return;
     }
     if (brush.mode === 'clone') {
       return;
     }
+    const indicesToProcess = getIndicesToProcess();
     if (brush.mode === 'pattern') {
       if (!pattern || pattern.width <= 0 || pattern.height <= 0) {
         return;
       }
-      const nextTiles = buildInitialTiles(totalCells);
-      if (mirrorHorizontal || mirrorVertical) {
-        for (const index of getDrivenCellIndices()) {
+      const nextTiles = selectionSet
+        ? [...normalizeTiles(tiles, totalCells, tileSourcesLength)]
+        : buildInitialTiles(totalCells);
+      if (selectionSet && !mirrorHorizontal && !mirrorVertical) {
+        selectionSet.forEach((index) => {
+          const row = Math.floor(index / gridLayout.columns);
+          const col = index % gridLayout.columns;
+          const tile = getPatternTileForPosition(row, col);
+          nextTiles[index] = tile
+            ? {
+                imageIndex: tile.imageIndex,
+                rotation: tile.rotation,
+                mirrorX: tile.mirrorX,
+                mirrorY: tile.mirrorY,
+                name: tile.name,
+              }
+            : { imageIndex: -1, rotation: 0, mirrorX: false, mirrorY: false };
+        });
+      } else if (mirrorHorizontal || mirrorVertical) {
+        for (const index of indicesToProcess) {
           const row = Math.floor(index / gridLayout.columns);
           const col = index % gridLayout.columns;
           const tile = getPatternTileForPosition(row, col);
           if (!tile) {
             continue;
           }
-          applyPlacementsToArrayOverride(nextTiles, getMirroredPlacements(index, tile));
+          applyPlacementsToArrayOverride(nextTiles, getMirroredPlacements(index, tile), selectionSet ?? undefined);
         }
       } else {
-        for (let row = 0; row < gridLayout.rows; row += 1) {
-          for (let col = 0; col < gridLayout.columns; col += 1) {
-            const targetIndex = row * gridLayout.columns + col;
-            const tile = getPatternTileForPosition(row, col);
-            if (tile) {
-              nextTiles[targetIndex] = {
-                imageIndex: tile.imageIndex,
-                rotation: tile.rotation,
-                mirrorX: tile.mirrorX,
-                mirrorY: tile.mirrorY,
-                name: tile.name,
-              };
-            }
+        for (const index of indicesToProcess) {
+          const row = Math.floor(index / gridLayout.columns);
+          const col = index % gridLayout.columns;
+          const tile = getPatternTileForPosition(row, col);
+          if (tile) {
+            nextTiles[index] = {
+              imageIndex: tile.imageIndex,
+              rotation: tile.rotation,
+              mirrorX: tile.mirrorX,
+              mirrorY: tile.mirrorY,
+              name: tile.name,
+            };
           }
         }
       }
@@ -1005,14 +1119,43 @@ export const useTileGrid = ({
       return;
     }
     if (brush.mode === 'random') {
-      if (mirrorHorizontal || mirrorVertical) {
-        const nextTiles = buildInitialTiles(totalCells);
-        for (const index of getDrivenCellIndices()) {
-          const placement = getRandomPlacement(index, nextTiles);
-          applyPlacementsToArrayOverride(
-            nextTiles,
-            getMirroredPlacements(index, placement)
-          );
+      if (tileSourcesLength <= 0) {
+        return;
+      }
+      if (selectionSet && selectionSet.size === 0) {
+        return;
+      }
+      if (mirrorHorizontal || mirrorVertical || selectionSet) {
+        const nextTiles = selectionSet
+          ? [...normalizeTiles(tiles, totalCells, tileSourcesLength)]
+          : buildInitialTiles(totalCells);
+        const indices =
+          selectionSet && indicesToProcess.length > 0
+            ? [...indicesToProcess].sort(() => Math.random() - 0.5)
+            : indicesToProcess;
+        if (selectionSet && !mirrorHorizontal && !mirrorVertical) {
+          indices.forEach((index) => {
+            nextTiles[index] = getRandomPlacement(
+              index,
+              nextTiles,
+              false,
+              selectionSet
+            );
+          });
+        } else {
+          for (const index of indices) {
+            const placement = getRandomPlacement(
+              index,
+              nextTiles,
+              false,
+              selectionSet ?? undefined
+            );
+            applyPlacementsToArrayOverride(
+              nextTiles,
+              getMirroredPlacements(index, placement),
+              selectionSet ?? undefined
+            );
+          }
         }
         withBulkUpdate(() => {
           applyTiles(nextTiles);
@@ -1033,19 +1176,29 @@ export const useTileGrid = ({
     if (fixedIndex < 0 || fixedIndex >= tileSourcesLength) {
       return;
     }
-    if (mirrorHorizontal || mirrorVertical) {
-      const nextTiles = buildInitialTiles(totalCells);
-      for (const index of getDrivenCellIndices()) {
-        applyPlacementsToArrayOverride(
-          nextTiles,
-          getMirroredPlacements(index, {
-            imageIndex: fixedIndex,
-            rotation: brush.rotation,
-            mirrorX: brush.mirrorX,
-            mirrorY: false,
-            name: fixedName,
-          })
-        );
+    if (mirrorHorizontal || mirrorVertical || selectionSet) {
+      const nextTiles = selectionSet
+        ? [...normalizeTiles(tiles, totalCells, tileSourcesLength)]
+        : buildInitialTiles(totalCells);
+      const fixedTile = {
+        imageIndex: fixedIndex,
+        rotation: brush.rotation,
+        mirrorX: brush.mirrorX,
+        mirrorY: false,
+        name: fixedName,
+      };
+      if (selectionSet && !mirrorHorizontal && !mirrorVertical) {
+        selectionSet.forEach((index) => {
+          nextTiles[index] = { ...fixedTile };
+        });
+      } else {
+        for (const index of indicesToProcess) {
+          applyPlacementsToArrayOverride(
+            nextTiles,
+            getMirroredPlacements(index, fixedTile),
+            selectionSet ?? undefined
+          );
+        }
       }
       withBulkUpdate(() => {
         applyTiles(nextTiles);
@@ -1069,22 +1222,36 @@ export const useTileGrid = ({
     if (totalCells <= 0) {
       return;
     }
+    const selectionSet = selectionBounds ? new Set(getSelectionCellIndices()) : null;
     if (brush.mode === 'erase') {
-      withBulkUpdate(() => {
-        applyTiles(buildInitialTiles(totalCells));
-      });
+      if (selectionSet && selectionSet.size > 0) {
+        const empty = { imageIndex: -1, rotation: 0, mirrorX: false, mirrorY: false };
+        withBulkUpdate(() => {
+          setTiles((prev) => {
+            const next = [...normalizeTiles(prev, totalCells, tileSourcesLength)];
+            selectionSet.forEach((index) => {
+              next[index] = { ...empty };
+            });
+            return next;
+          });
+        });
+      } else if (!selectionBounds) {
+        withBulkUpdate(() => {
+          applyTiles(buildInitialTiles(totalCells));
+        });
+      }
       return;
     }
     if (brush.mode === 'clone') {
       return;
     }
+    const drivenSet = new Set(getIndicesToProcess());
     if (brush.mode === 'pattern') {
       if (!pattern || pattern.width <= 0 || pattern.height <= 0) {
         return;
       }
       const nextTiles = [...normalizeTiles(tiles, totalCells, tileSourcesLength)];
-      const drivenSet = new Set(getDrivenCellIndices());
-      if (mirrorHorizontal || mirrorVertical) {
+      if ((mirrorHorizontal || mirrorVertical) && !selectionBounds) {
         for (let index = 0; index < totalCells; index += 1) {
           if (nextTiles[index].imageIndex >= 0) {
             continue;
@@ -1106,27 +1273,26 @@ export const useTileGrid = ({
           if (!tile) {
             continue;
           }
-          applyPlacementsToArray(nextTiles, getMirroredPlacements(index, tile), index);
+          applyPlacementsToArray(nextTiles, getMirroredPlacements(index, tile), index, selectionSet ?? undefined);
         }
       } else {
-        for (let row = 0; row < gridLayout.rows; row += 1) {
-          for (let col = 0; col < gridLayout.columns; col += 1) {
-            const targetIndex = row * gridLayout.columns + col;
-            if (nextTiles[targetIndex].imageIndex >= 0) {
-              continue;
-            }
-            const tile = getPatternTileForPosition(row, col);
-            if (!tile) {
-              continue;
-            }
-            nextTiles[targetIndex] = {
-              imageIndex: tile.imageIndex,
-              rotation: tile.rotation,
-              mirrorX: tile.mirrorX,
-              mirrorY: tile.mirrorY,
-              name: tile.name,
-            };
+        for (const index of drivenSet) {
+          if (nextTiles[index].imageIndex >= 0) {
+            continue;
           }
+          const row = Math.floor(index / gridLayout.columns);
+          const col = index % gridLayout.columns;
+          const tile = getPatternTileForPosition(row, col);
+          if (!tile) {
+            continue;
+          }
+          nextTiles[index] = {
+            imageIndex: tile.imageIndex,
+            rotation: tile.rotation,
+            mirrorX: tile.mirrorX,
+            mirrorY: tile.mirrorY,
+            name: tile.name,
+          };
         }
       }
       withBulkUpdate(() => {
@@ -1134,13 +1300,12 @@ export const useTileGrid = ({
       });
       return;
     }
-    const drivenSet = new Set(getDrivenCellIndices());
     if (brush.mode === 'random') {
       const nextTiles = [...normalizeTiles(tiles, totalCells, tileSourcesLength)];
       if (tileSourcesLength <= 0) {
         return;
       }
-      if (mirrorHorizontal || mirrorVertical) {
+      if ((mirrorHorizontal || mirrorVertical) && !selectionBounds) {
         for (let index = 0; index < totalCells; index += 1) {
           if (nextTiles[index].imageIndex >= 0) {
             continue;
@@ -1155,8 +1320,13 @@ export const useTileGrid = ({
         if (nextTiles[index].imageIndex >= 0) {
           continue;
         }
-        const placement = getRandomPlacement(index, nextTiles);
-        applyPlacementsToArray(nextTiles, getMirroredPlacements(index, placement), index);
+        const placement = getRandomPlacement(
+          index,
+          nextTiles,
+          false,
+          selectionSet ?? undefined
+        );
+        applyPlacementsToArray(nextTiles, getMirroredPlacements(index, placement), index, selectionSet ?? undefined);
       }
       withBulkUpdate(() => {
         applyTiles(nextTiles);
@@ -1177,7 +1347,7 @@ export const useTileGrid = ({
     withBulkUpdate(() => {
       setTiles((prev) => {
       const nextTiles = [...normalizeTiles(prev, totalCells, tileSourcesLength)];
-      if (mirrorHorizontal || mirrorVertical) {
+      if ((mirrorHorizontal || mirrorVertical) && !selectionBounds) {
         for (let index = 0; index < totalCells; index += 1) {
           if (nextTiles[index].imageIndex >= 0) {
             continue;
@@ -1201,7 +1371,8 @@ export const useTileGrid = ({
             mirrorY: false,
             name: fixedNameRand,
           }),
-          index
+          index,
+          selectionSet ?? undefined
         );
       }
       return nextTiles;
@@ -1216,10 +1387,11 @@ export const useTileGrid = ({
     const snapshot = normalizeTiles(tiles, totalCells, tileSourcesLength);
     const nextTiles = [...snapshot];
     const allowedSet = randomSourceSet ?? null;
+    const selectionSet = selectionBounds ? new Set(getSelectionCellIndices()) : null;
     const maxPasses = Math.min(50, Math.max(8, gridLayout.rows + gridLayout.columns));
     for (let pass = 0; pass < maxPasses; pass += 1) {
       let changed = false;
-      const indices = [...getDrivenCellIndices()];
+      const indices = [...getIndicesToProcess()];
       for (let i = indices.length - 1; i > 0; i -= 1) {
         const j = Math.floor(Math.random() * (i + 1));
         [indices[i], indices[j]] = [indices[j], indices[i]];
@@ -1229,15 +1401,23 @@ export const useTileGrid = ({
         if (!tile || tile.imageIndex < 0) {
           continue;
         }
-        if (isPlacementValid(index, tile, nextTiles, true)) {
+        if (
+          isPlacementValid(index, tile, nextTiles, true, selectionSet ?? undefined)
+        ) {
           continue;
         }
-        const candidates = buildCompatibleCandidates(index, nextTiles, allowedSet, true);
+        const candidates = buildCompatibleCandidates(
+          index,
+          nextTiles,
+          allowedSet,
+          true,
+          selectionSet ?? undefined
+        );
         if (candidates.length === 0) {
           continue;
         }
         const pick = candidates[Math.floor(Math.random() * candidates.length)];
-        applyPlacementsToArrayOverride(nextTiles, getMirroredPlacements(index, pick));
+        applyPlacementsToArrayOverride(nextTiles, getMirroredPlacements(index, pick), selectionSet ?? undefined);
         changed = true;
       }
       if (!changed) {
@@ -1284,7 +1464,8 @@ export const useTileGrid = ({
       : compatTables.variantsByKey;
 
     const nextTiles = [...normalizeTiles(tiles, totalCells, tileSourcesLength)];
-    for (const index of getDrivenCellIndices()) {
+    const selectionSet = selectionBounds ? new Set(getSelectionCellIndices()) : null;
+    for (const index of getIndicesToProcess()) {
       const current = nextTiles[index];
       if (!current || current.imageIndex < 0) {
         continue;
@@ -1315,7 +1496,8 @@ export const useTileGrid = ({
           mirrorX: pick.mirrorX,
           mirrorY: pick.mirrorY,
           name: tileSources[pick.index]?.name,
-        })
+        }),
+        selectionSet ?? undefined
       );
     }
 
@@ -1326,9 +1508,32 @@ export const useTileGrid = ({
 
   const resetTiles = () => {
     markClear();
-    withBulkUpdate(() => {
-      applyTiles(buildInitialTiles(totalCells));
-    });
+    if (selectionBounds) {
+      const indices = getSelectionCellIndices();
+      if (indices.length === 0) {
+        requestAnimationFrame(() => clearLogDone());
+        return;
+      }
+      const empty = {
+        imageIndex: -1,
+        rotation: 0,
+        mirrorX: false,
+        mirrorY: false,
+      };
+      withBulkUpdate(() => {
+        setTiles((prev) => {
+          const next = [...normalizeTiles(prev, totalCells, tileSourcesLength)];
+          for (const index of indices) {
+            next[index] = { ...empty };
+          }
+          return next;
+        });
+      });
+    } else {
+      withBulkUpdate(() => {
+        applyTiles(buildInitialTiles(totalCells));
+      });
+    }
     requestAnimationFrame(() => {
       clearLogDone();
     });

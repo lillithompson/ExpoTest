@@ -736,6 +736,11 @@ export default function TestScreen() {
     start: number;
     end: number;
   } | null>(null);
+  const [isSelectionMode, setIsSelectionMode] = useState(false);
+  const [canvasSelection, setCanvasSelection] = useState<{
+    start: number;
+    end: number;
+  } | null>(null);
   const [patternAnchorIndex, setPatternAnchorIndex] = useState<number | null>(null);
   const [showPatternSaveModal, setShowPatternSaveModal] = useState(false);
   const [showPatternChooser, setShowPatternChooser] = useState(false);
@@ -1247,6 +1252,7 @@ export default function TestScreen() {
       : null,
     patternAnchorKey: selectedPattern?.id ?? null,
     getFixedBrushSourceName: () => fixedBrushSourceNameRef.current,
+    canvasSelection: viewMode === 'modify' ? canvasSelection : null,
   });
   const tilesSignature = useMemo(
     () =>
@@ -1260,6 +1266,12 @@ export default function TestScreen() {
         .join('|'),
     [tiles]
   );
+  useEffect(() => {
+    if (pendingPaletteFloodRef.current) {
+      pendingPaletteFloodRef.current = false;
+      floodFill();
+    }
+  }, [brush, floodFill]);
   useEffect(() => {
     if (prevTileSourcesKeyRef.current === tileSourcesKey) {
       return;
@@ -1346,6 +1358,10 @@ export default function TestScreen() {
   const longPressTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const longPressTriggeredRef = useRef(false);
   const isTouchDragActiveRef = useRef(false);
+  const lastCanvasTapTimeRef = useRef(0);
+  const canvasTouchDidMoveRef = useRef(false);
+  const lastCanvasClickTimeRef = useRef(0);
+  const canvasMouseDidMoveRef = useRef(false);
   const ignoreNextMouseRef = useRef(false);
   const ignoreMouseAfterTouchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1358,6 +1374,7 @@ export default function TestScreen() {
   const viewShotRef = useRef<ViewShot>(null);
   const downloadExpectedRef = useRef(0);
   const pendingFloodCompleteRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingPaletteFloodRef = useRef(false);
   const floodLongPressHandledRef = useRef(false);
   const suppressAutosaveRef = useRef(false);
   const clearSequenceRef = useRef(0);
@@ -2713,6 +2730,10 @@ export default function TestScreen() {
 
   const clearCanvas = () => {
     clearSequenceRef.current += 1;
+    if (canvasSelection) {
+      resetTiles();
+      return;
+    }
     const clearId = clearSequenceRef.current;
     suppressAutosaveRef.current = true;
     setIsClearing(true);
@@ -2791,6 +2812,26 @@ export default function TestScreen() {
       height,
     };
   }, [patternSelection, gridLayout.columns, gridLayout.tileSize, gridLayout.rows]);
+  const canvasSelectionRect = useMemo(() => {
+    if (!canvasSelection || gridLayout.columns === 0) {
+      return null;
+    }
+    const { minRow, maxRow, minCol, maxCol } = getSelectionBounds(
+      canvasSelection.start,
+      canvasSelection.end
+    );
+    const tileStride = gridLayout.tileSize + GRID_GAP;
+    const width =
+      (maxCol - minCol + 1) * tileStride - (GRID_GAP > 0 ? GRID_GAP : 0);
+    const height =
+      (maxRow - minRow + 1) * tileStride - (GRID_GAP > 0 ? GRID_GAP : 0);
+    return {
+      left: minCol * tileStride,
+      top: minRow * tileStride,
+      width,
+      height,
+    };
+  }, [canvasSelection, gridLayout.columns, gridLayout.tileSize, gridLayout.rows]);
   const patternAlignmentRect = useMemo(() => {
     if (
       brush.mode !== 'pattern' ||
@@ -4050,6 +4091,16 @@ export default function TestScreen() {
               }}
             />
             <ToolbarButton
+              key={`selection-${isSelectionMode}`}
+              label="Selection"
+              icon="select-drag"
+              active={isSelectionMode}
+              onPress={() => {
+                setIsSelectionMode((prev) => !prev);
+                setCanvasSelection(null);
+              }}
+            />
+            <ToolbarButton
               label="Mirror Horizontal"
               icon="flip-horizontal"
               active={settings.mirrorHorizontal}
@@ -4162,6 +4213,12 @@ export default function TestScreen() {
               style={[styles.patternSelection, patternSelectionRect]}
             />
           )}
+          {canvasSelectionRect && (
+            <View
+              pointerEvents="none"
+              style={[styles.canvasSelectionBox, canvasSelectionRect]}
+            />
+          )}
           {patternAlignmentRect && (
             <View
               pointerEvents="none"
@@ -4186,12 +4243,17 @@ export default function TestScreen() {
                   if (isWeb && ignoreNextMouseRef.current) {
                     return;
                   }
+                  canvasMouseDidMoveRef.current = false;
                   setInteracting(true);
                   markInteractionStart();
                   const point = getRelativePoint(event);
                 if (point) {
                   const cellIndex = getCellIndexForPoint(point.x, point.y);
                   if (cellIndex === null) {
+                    return;
+                  }
+                  if (isSelectionMode) {
+                    setCanvasSelection({ start: cellIndex, end: cellIndex });
                     return;
                   }
                   if (isPatternCreationMode) {
@@ -4208,8 +4270,18 @@ export default function TestScreen() {
               }}
               onMouseMove={(event: any) => {
                 if (event.buttons === 1) {
+                  canvasMouseDidMoveRef.current = true;
                   const point = getRelativePoint(event);
                   if (point) {
+                    if (isSelectionMode) {
+                      const cellIndex = getCellIndexForPoint(point.x, point.y);
+                      if (cellIndex !== null) {
+                        setCanvasSelection((prev) =>
+                          prev ? { ...prev, end: cellIndex } : prev
+                        );
+                      }
+                      return;
+                    }
                     if (isPatternCreationMode) {
                       const cellIndex = getCellIndexForPoint(point.x, point.y);
                       if (cellIndex !== null) {
@@ -4227,8 +4299,26 @@ export default function TestScreen() {
                 setInteracting(false);
                 lastPaintedRef.current = null;
               }}
-              onMouseUp={() => {
+              onMouseUp={(event: any) => {
                 setInteracting(false);
+                const now = Date.now();
+                if (
+                  isSelectionMode &&
+                  !canvasMouseDidMoveRef.current &&
+                  now - lastCanvasClickTimeRef.current < 400
+                ) {
+                  lastCanvasClickTimeRef.current = 0;
+                  setIsSelectionMode(false);
+                  setCanvasSelection(null);
+                  return;
+                }
+                lastCanvasClickTimeRef.current = now;
+                if (isSelectionMode) {
+                  if (canvasSelection && canvasSelection.start === canvasSelection.end) {
+                    setCanvasSelection(null);
+                  }
+                  return;
+                }
                 if (isPatternCreationMode) {
                   if (patternSelection) {
                     setShowPatternSaveModal(true);
@@ -4237,11 +4327,16 @@ export default function TestScreen() {
                 }
                 lastPaintedRef.current = null;
               }}
+              onDoubleClick={() => {
+                setIsSelectionMode(false);
+                setCanvasSelection(null);
+              }}
               onTouchStartCapture={(event: any) => {
                 // Use capture phase so we receive touchstart even when the target is a child
                 // (e.g. tile image). Otherwise on mobile web, starting a drag on an initialized
                 // tile only fires tap and touchmove never runs.
                 isTouchDragActiveRef.current = true;
+                canvasTouchDidMoveRef.current = false;
                 if (isWeb) {
                   ignoreNextMouseRef.current = true;
                   if (ignoreMouseAfterTouchTimeoutRef.current) {
@@ -4260,6 +4355,10 @@ export default function TestScreen() {
                   if (cellIndex === null) {
                     return;
                   }
+                  if (isSelectionMode) {
+                    setCanvasSelection({ start: cellIndex, end: cellIndex });
+                    return;
+                  }
                   if (isPatternCreationMode) {
                     setPatternSelection({ start: cellIndex, end: cellIndex });
                     return;
@@ -4276,8 +4375,18 @@ export default function TestScreen() {
                 if (!isTouchDragActiveRef.current) {
                   return;
                 }
+                canvasTouchDidMoveRef.current = true;
                 const point = getRelativePoint(event);
                 if (point) {
+                  if (isSelectionMode) {
+                    const cellIndex = getCellIndexForPoint(point.x, point.y);
+                    if (cellIndex !== null) {
+                      setCanvasSelection((prev) =>
+                        prev ? { ...prev, end: cellIndex } : prev
+                      );
+                    }
+                    return;
+                  }
                   if (isPatternCreationMode) {
                     const cellIndex = getCellIndexForPoint(point.x, point.y);
                     if (cellIndex !== null) {
@@ -4290,9 +4399,26 @@ export default function TestScreen() {
                   handlePaintAt(point.x, point.y);
                 }
               }}
-              onTouchEndCapture={() => {
+              onTouchEndCapture={(event: any) => {
                 isTouchDragActiveRef.current = false;
                 setInteracting(false);
+                const now = Date.now();
+                if (
+                  !canvasTouchDidMoveRef.current &&
+                  now - lastCanvasTapTimeRef.current < 400
+                ) {
+                  lastCanvasTapTimeRef.current = 0;
+                  setIsSelectionMode(false);
+                  setCanvasSelection(null);
+                  return;
+                }
+                lastCanvasTapTimeRef.current = now;
+                if (isSelectionMode) {
+                  if (canvasSelection && canvasSelection.start === canvasSelection.end) {
+                    setCanvasSelection(null);
+                  }
+                  return;
+                }
                 if (isPatternCreationMode) {
                   if (patternSelection) {
                     setShowPatternSaveModal(true);
@@ -4444,10 +4570,15 @@ export default function TestScreen() {
                 onResponderGrant={(event: any) => {
                   setInteracting(true);
                   markInteractionStart();
+                  canvasTouchDidMoveRef.current = false;
                   const point = getRelativePoint(event);
                   if (point) {
                     const cellIndex = getCellIndexForPoint(point.x, point.y);
                     if (cellIndex === null) {
+                      return;
+                    }
+                    if (isSelectionMode) {
+                      setCanvasSelection({ start: cellIndex, end: cellIndex });
                       return;
                     }
                     if (isPatternCreationMode) {
@@ -4474,8 +4605,18 @@ export default function TestScreen() {
                   }
                 }}
                 onResponderMove={(event: any) => {
+                  canvasTouchDidMoveRef.current = true;
                   const point = getRelativePoint(event);
                   if (point) {
+                    if (isSelectionMode) {
+                      const cellIndex = getCellIndexForPoint(point.x, point.y);
+                      if (cellIndex !== null) {
+                        setCanvasSelection((prev) =>
+                          prev ? { ...prev, end: cellIndex } : prev
+                        );
+                      }
+                      return;
+                    }
                     if (longPressTimeoutRef.current) {
                       clearTimeout(longPressTimeoutRef.current);
                       longPressTimeoutRef.current = null;
@@ -4492,8 +4633,25 @@ export default function TestScreen() {
                     handlePaintAt(point.x, point.y);
                   }
                 }}
-                onResponderRelease={() => {
+                onResponderRelease={(event: any) => {
                   setInteracting(false);
+                  const now = Date.now();
+                  if (
+                    !canvasTouchDidMoveRef.current &&
+                    now - lastCanvasTapTimeRef.current < 400
+                  ) {
+                    lastCanvasTapTimeRef.current = 0;
+                    setIsSelectionMode(false);
+                    setCanvasSelection(null);
+                    return;
+                  }
+                  lastCanvasTapTimeRef.current = now;
+                  if (isSelectionMode) {
+                    if (canvasSelection && canvasSelection.start === canvasSelection.end) {
+                      setCanvasSelection(null);
+                    }
+                    return;
+                  }
                   if (isPatternCreationMode) {
                     if (patternSelection) {
                       setShowPatternSaveModal(true);
@@ -4580,6 +4738,9 @@ export default function TestScreen() {
                 setShowPatternChooser(true);
               }
               setBrush(next);
+              if (isSelectionMode && canvasSelection) {
+                pendingPaletteFloodRef.current = true;
+              }
               return;
             }
             if (next.mode === 'fixed') {
@@ -4612,6 +4773,9 @@ export default function TestScreen() {
                 fixedBrushSourceNameRef.current = null;
               }
               setBrush(next);
+            }
+            if (isSelectionMode && canvasSelection) {
+              pendingPaletteFloodRef.current = true;
             }
           }}
           onRotate={(index) =>
@@ -6020,6 +6184,12 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
   },
   patternSelection: {
+    position: 'absolute',
+    borderWidth: 2,
+    borderColor: '#22c55e',
+    zIndex: 5,
+  },
+  canvasSelectionBox: {
     position: 'absolute',
     borderWidth: 2,
     borderColor: '#22c55e',
