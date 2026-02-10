@@ -36,6 +36,7 @@ import { TileAtlasSprite } from '@/components/tile-atlas-sprite';
 import { clearBrushFavorites, TileBrushPanel } from '@/components/tile-brush-panel';
 import { TileDebugOverlay } from '@/components/tile-debug-overlay';
 import { TileGridCanvas } from '@/components/tile-grid-canvas';
+import { useIsMobileWeb } from '@/hooks/use-is-mobile-web';
 import { usePersistedSettings } from '@/hooks/use-persisted-settings';
 import { useTileAtlas } from '@/hooks/use-tile-atlas';
 import { useTileFiles, type TileFile } from '@/hooks/use-tile-files';
@@ -741,8 +742,19 @@ export default function TestScreen() {
   const patternLastTapRef = useRef<{ id: string; time: number } | null>(null);
   // tileSources is set after we resolve the active file/category.
   const isWeb = Platform.OS === 'web';
+  const isMobileWeb = useIsMobileWeb();
   const isExpoGo = Constants.appOwnership === 'expo';
   const useSkiaGrid = Platform.OS !== 'web' && !isExpoGo;
+  const platformLabel =
+    Platform.OS === 'web'
+      ? isMobileWeb
+        ? 'Mobile Web'
+        : 'Desktop Web'
+      : isExpoGo
+        ? 'Expo Go'
+        : Platform.OS === 'ios'
+          ? 'iOS'
+          : 'Android';
   const shouldUseAspectRatio = false;
   const aspectRatio = null;
   const [webViewport, setWebViewport] = useState<{ w: number; h: number } | null>(null);
@@ -3927,6 +3939,9 @@ export default function TestScreen() {
                   thumbTintColor="#22c55e"
                 />
               </ThemedView>
+              <ThemedView style={styles.settingsPlatformFooter}>
+                <ThemedText style={styles.settingsPlatformLabel}>{platformLabel}</ThemedText>
+              </ThemedView>
             </ScrollView>
           </ThemedView>
         )}
@@ -5132,6 +5147,9 @@ export default function TestScreen() {
                   thumbTintColor="#22c55e"
                 />
               </ThemedView>
+              <ThemedView style={styles.settingsPlatformFooter}>
+                <ThemedText style={styles.settingsPlatformLabel}>{platformLabel}</ThemedText>
+              </ThemedView>
             </ScrollView>
           </ThemedView>
         )}
@@ -5448,6 +5466,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     borderBottomWidth: 1,
     borderBottomColor: '#e5e7eb',
+  },
+  settingsPlatformFooter: {
+    paddingTop: 16,
+    alignItems: 'center',
+  },
+  settingsPlatformLabel: {
+    color: '#9ca3af',
+    fontSize: 13,
   },
   settingsClose: {
     paddingHorizontal: 8,
