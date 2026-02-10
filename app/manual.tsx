@@ -170,12 +170,12 @@ export default function ManualScreen() {
 
         <ThemedText type="defaultSemiBold" style={styles.subsection}>Tile Set chooser</ThemedText>
         <ThemedText type="default" style={styles.para}>
-          Opened by double tap or long press on the Random brush. Shows built-in categories and your user tile sets. Select one or more to define the active palette. Selected items have a green border. Confirm to update the palette.
+          Opened by double tap or long press on the Random brush. At the top: Allow Border Connections — when on, tiles at the grid edge can use connections as if they had neighbors; when off, edges behave as empty. Shows built-in categories and your user tile sets. Select one or more to define the active palette. Selected items have a green border. Confirm to update the palette.
         </ThemedText>
 
         <ThemedText type="subtitle" style={styles.sectionTitle}>Settings</ThemedText>
         <ThemedText type="default" style={styles.para}>
-          View manual — Opens this manual. Allow Border Connections — when on, tiles at the grid edge can use connections as if they had neighbors; when off, edges behave as empty. Show Debug — shows a debug overlay on the grid. Download PNG (Modify view only) — downloads the current canvas. Background Color, Background Line Color, Line Width — customize the grid look. Delete all local data — permanently deletes all files, tile sets, patterns, and favorites (with confirmation). Settings are saved automatically.
+          View manual — Opens this manual. Show Debug — shows a debug overlay on the grid. Download PNG (Modify view only) — downloads the current canvas. Background Color, Background Line Color, Line Width — customize the grid look. Delete all local data — permanently deletes all files, tile sets, patterns, and favorites (with confirmation). Settings are saved automatically.
         </ThemedText>
 
         <ThemedText type="subtitle" style={styles.sectionTitle}>Tips</ThemedText>

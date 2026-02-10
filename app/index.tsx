@@ -3844,16 +3844,6 @@ export default function TestScreen() {
                 <ThemedText type="defaultSemiBold">View manual</ThemedText>
               </Pressable>
               <ThemedView style={styles.toggleRow}>
-                <ThemedText type="defaultSemiBold">Allow Border Connections</ThemedText>
-                <Switch
-                  value={settings.allowEdgeConnections}
-                  onValueChange={(value) =>
-                    setSettings((prev) => ({ ...prev, allowEdgeConnections: value }))
-                  }
-                  accessibilityLabel="Toggle edge connections"
-                />
-              </ThemedView>
-              <ThemedView style={styles.toggleRow}>
                 <ThemedText type="defaultSemiBold">Show Debug</ThemedText>
                 <Switch
                   value={settings.showDebug}
@@ -5076,16 +5066,6 @@ export default function TestScreen() {
               >
                 <ThemedText type="defaultSemiBold">View manual</ThemedText>
               </Pressable>
-              <ThemedView style={styles.toggleRow}>
-                <ThemedText type="defaultSemiBold">Allow Border Connections</ThemedText>
-                <Switch
-                  value={settings.allowEdgeConnections}
-                  onValueChange={(value) =>
-                    setSettings((prev) => ({ ...prev, allowEdgeConnections: value }))
-                  }
-                  accessibilityLabel="Toggle edge connections"
-                />
-              </ThemedView>
               <Pressable
                 onPress={handleDownloadPng}
                 style={styles.settingsAction}
@@ -5169,6 +5149,16 @@ export default function TestScreen() {
             />
             <ThemedView style={styles.overlayPanel}>
               <ThemedText type="title">Tile Sets</ThemedText>
+              <ThemedView style={styles.toggleRow}>
+                <ThemedText type="defaultSemiBold">Allow Border Connections</ThemedText>
+                <Switch
+                  value={settings.allowEdgeConnections}
+                  onValueChange={(value) =>
+                    setSettings((prev) => ({ ...prev, allowEdgeConnections: value }))
+                  }
+                  accessibilityLabel="Toggle edge connections"
+                />
+              </ThemedView>
               <ScrollView
                 style={styles.tileSetChooserScroll}
                 contentContainerStyle={styles.tileSetChooserScrollContent}
