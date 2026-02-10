@@ -19,9 +19,11 @@ import {
     TILE_CATEGORIES,
     TILE_MANIFEST
 } from '@/assets/images/tiles/manifest';
+import { DesktopNavTabs } from '@/components/desktop-nav-tabs';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { TileAsset } from '@/components/tile-asset';
+import { useIsMobileWeb } from '@/hooks/use-is-mobile-web';
 import { type TileSetTile, useTileSets } from '@/hooks/use-tile-sets';
 import { TAB_BAR_HEIGHT, useTabBarVisible } from '@/contexts/tab-bar-visible';
 import { renderTileCanvasToDataUrl } from '@/utils/tile-export';
@@ -52,6 +54,7 @@ export default function TileSetCreatorScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { tabBarVisible } = useTabBarVisible();
+  const isMobileWeb = useIsMobileWeb();
   const {
     tileSets,
     bakedSourcesBySetId,
@@ -377,15 +380,19 @@ export default function TileSetCreatorScreen() {
         <View pointerEvents="none" style={[styles.statusBarBackground, { height: insets.top }]} />
       )}
       <ThemedView style={styles.fileHeader}>
-        <Pressable
-          onPress={() => router.push('/')}
-          accessibilityRole="button"
-          accessibilityLabel="Go to files"
-        >
-          <ThemedText type="title" style={styles.fileTitle}>
-            Tile Sets
-          </ThemedText>
-        </Pressable>
+        {Platform.OS === 'web' && !isMobileWeb ? (
+          <DesktopNavTabs />
+        ) : (
+          <Pressable
+            onPress={() => router.push('/')}
+            accessibilityRole="button"
+            accessibilityLabel="Go to files"
+          >
+            <ThemedText type="title" style={styles.fileTitle}>
+              Tile Sets
+            </ThemedText>
+          </Pressable>
+        )}
         <ThemedView style={styles.fileHeaderActions}>
           <Pressable
             onPress={openCreateModal}

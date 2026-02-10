@@ -4,6 +4,7 @@ import { Platform, Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
+import { useTabBarVisible } from '@/contexts/tab-bar-visible';
 
 const FILES_ROUTE = '/';
 const TILE_SETS_ROUTE = '/tileSetCreator';
@@ -24,8 +25,13 @@ export function MobileTabBar() {
   const pathname = usePathname();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { hideTabBarOverModify } = useTabBarVisible();
 
   if (!isTabBarRoute(pathname)) {
+    return null;
+  }
+  const normalized = pathname.replace(/\/$/, '') || '/';
+  if (normalized === FILES_ROUTE && hideTabBarOverModify) {
     return null;
   }
 

@@ -1,6 +1,7 @@
 import { DefaultTheme, ThemeProvider } from '@react-navigation/native';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
+import { useState } from 'react';
 import { Platform, View } from 'react-native';
 import 'react-native-reanimated';
 
@@ -15,10 +16,15 @@ function useShowMobileTabBar(): boolean {
 
 export default function RootLayout() {
   const showMobileTabBar = useShowMobileTabBar();
+  const [hideTabBarOverModify, setHideTabBarOverModify] = useState(false);
 
   return (
     <ThemeProvider value={DefaultTheme}>
-      <TabBarVisibleProvider tabBarVisible={showMobileTabBar}>
+      <TabBarVisibleProvider
+        tabBarVisible={showMobileTabBar}
+        hideTabBarOverModify={hideTabBarOverModify}
+        setHideTabBarOverModify={setHideTabBarOverModify}
+      >
         <View style={{ flex: 1 }}>
           <View style={{ flex: 1 }}>
             <Stack>

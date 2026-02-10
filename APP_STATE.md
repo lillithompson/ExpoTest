@@ -18,7 +18,7 @@ Main Routes
 
 File View (viewMode = "file")
 - Status bar background strip at the top (white).
-- Header row: Title "Files" (press navigates to Tile Set Creator), actions on the right.
+- Header row: On desktop web, switchable tabs "Files" | "Tile Sets" (components/desktop-nav-tabs.tsx); active tab is highlighted with underline; inactive tab navigates on press. On mobile web and native, single title "Files" (press navigates to Tile Set Creator). Actions on the right.
 - Header actions: New File (plus), Select Mode (checkbox), Settings (cog).
 - Select mode bar: Animated bar with Delete button (left), selected count (center), Exit (right).
 - File grid: Scrollable list of file cards, sorted by `updatedAt` descending. Column count is computed from content width so as many columns as fit: on desktop web (width ≥ 768) at least FILE_GRID_MIN_CARD_WIDTH_DESKTOP_WEB (240px) per card for larger thumbnails; otherwise FILE_GRID_MIN_CARD_WIDTH (100px). Cards pack to the upper left with no extra horizontal spread. On web, file thumbnail display size is capped (aspect ratio preserved): FILE_THUMB_DISPLAY_SIZE (200 px) on narrow viewports, 400 px (2×) on desktop (content width ≥ 768). Generated thumbnail resolution is FILE_THUMB_SIZE 400 (2× display for sharp thumbnails on desktop); native ViewShot and web renderTileCanvasToDataUrl use 400. Cards show previews (thumbnail/preview if available, otherwise live tile grid on native; web uses placeholder).
@@ -42,7 +42,7 @@ Modify View (viewMode = "modify")
 - Download overlay (native): ViewShot capture with background toggle and PNG/SVG actions.
 
 Tile Set Creator List (tileSetCreator/index.tsx)
-- Header row: Title "Tile Sets" (tap returns to File view), actions for Create and Select Mode.
+- Header row: On desktop web, same switchable tabs "Files" | "Tile Sets" as File view; on mobile web and native, single title "Tile Sets" (tap returns to File view). Actions for Create and Select Mode.
 - Select mode bar: Animated bar with Delete, selected count, Exit.
 - Tile set grid: Cards with 2x2 previews (baked image or, on native, live grid). On web, a dark placeholder is shown until the baked preview is ready (no live grid) to avoid a white-border flash; baked previews are cached in a module-level map so they persist across navigations and are not regenerated when returning to the list. Long press (web only) opens download modal.
 - Create Tile Set modal: Name input and resolution options 2, 3, 4.

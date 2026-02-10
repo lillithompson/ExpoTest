@@ -29,6 +29,7 @@ import {
     type TileCategory,
     type TileSource,
 } from '@/assets/images/tiles/manifest';
+import { DesktopNavTabs } from '@/components/desktop-nav-tabs';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { clearTileAssetCache, prefetchTileAssets, TileAsset } from '@/components/tile-asset';
@@ -647,7 +648,7 @@ export default function TestScreen() {
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { tabBarVisible } = useTabBarVisible();
+  const { tabBarVisible, setHideTabBarOverModify } = useTabBarVisible();
   const gridRef = useRef<View>(null);
   const gridCaptureRef = useRef<ViewShot>(null);
   const gridOffsetRef = useRef({ x: 0, y: 0 });
@@ -717,6 +718,10 @@ export default function TestScreen() {
       fixedBrushSourceNameRef.current = brush.sourceName;
     }
   }, [brush.mode, brush.sourceName]);
+  useEffect(() => {
+    setHideTabBarOverModify(viewMode === 'modify');
+    return () => setHideTabBarOverModify(false);
+  }, [viewMode, setHideTabBarOverModify]);
   const [paletteRotations, setPaletteRotations] = useState<Record<number, number>>(
     {}
   );
@@ -3278,7 +3283,10 @@ export default function TestScreen() {
         styles.screen,
         {
           paddingTop: insets.top,
-          paddingBottom: tabBarVisible ? TAB_BAR_HEIGHT + insets.bottom : 0,
+          paddingBottom:
+            tabBarVisible && viewMode !== 'modify'
+              ? TAB_BAR_HEIGHT + insets.bottom
+              : 0,
           paddingLeft: 0,
           paddingRight: 0,
           display: viewMode === 'file' ? 'flex' : 'none',
@@ -3292,17 +3300,21 @@ export default function TestScreen() {
           />
         )}
         <ThemedView style={styles.fileHeader}>
-          <Pressable
-            onPress={() => {
-              router.push('/tileSetCreator');
-            }}
-            accessibilityRole="button"
-            accessibilityLabel="Open tile sets"
-          >
-            <ThemedText type="title" style={styles.fileTitle}>
-              Files
-            </ThemedText>
-          </Pressable>
+          {Platform.OS === 'web' && !useIsMobileWeb() ? (
+            <DesktopNavTabs />
+          ) : (
+            <Pressable
+              onPress={() => {
+                router.push('/tileSetCreator');
+              }}
+              accessibilityRole="button"
+              accessibilityLabel="Open tile sets"
+            >
+              <ThemedText type="title" style={styles.fileTitle}>
+                Files
+              </ThemedText>
+            </Pressable>
+          )}
           <ThemedView style={styles.fileHeaderActions}>
             <ToolbarButton
               label="Create new tile canvas file"
@@ -3946,7 +3958,10 @@ export default function TestScreen() {
         styles.screen,
         {
           paddingTop: insets.top,
-          paddingBottom: tabBarVisible ? TAB_BAR_HEIGHT + insets.bottom : 0,
+          paddingBottom:
+            tabBarVisible && viewMode !== 'modify'
+              ? TAB_BAR_HEIGHT + insets.bottom
+              : 0,
           paddingLeft: 0,
           paddingRight: 0,
           display: viewMode === 'file' ? 'none' : 'flex',
