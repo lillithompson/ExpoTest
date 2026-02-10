@@ -25,13 +25,17 @@ export function MobileTabBar() {
   const pathname = usePathname();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { hideTabBarOverModify } = useTabBarVisible();
+  const { hideTabBarOverModify, hideTabBarOverOverlay } = useTabBarVisible();
 
   if (!isTabBarRoute(pathname)) {
     return null;
   }
   const normalized = pathname.replace(/\/$/, '') || '/';
-  if (normalized === FILES_ROUTE && hideTabBarOverModify) {
+  const hideOnFiles = hideTabBarOverModify || hideTabBarOverOverlay;
+  if (normalized === FILES_ROUTE && hideOnFiles) {
+    return null;
+  }
+  if (normalized === TILE_SETS_ROUTE && hideTabBarOverOverlay) {
     return null;
   }
 

@@ -648,7 +648,8 @@ export default function TestScreen() {
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { tabBarVisible, setHideTabBarOverModify } = useTabBarVisible();
+  const { tabBarVisible, setHideTabBarOverModify, setHideTabBarOverOverlay } =
+    useTabBarVisible();
   const gridRef = useRef<View>(null);
   const gridCaptureRef = useRef<ViewShot>(null);
   const gridOffsetRef = useRef({ x: 0, y: 0 });
@@ -722,6 +723,10 @@ export default function TestScreen() {
     setHideTabBarOverModify(viewMode === 'modify');
     return () => setHideTabBarOverModify(false);
   }, [viewMode, setHideTabBarOverModify]);
+  useEffect(() => {
+    setHideTabBarOverOverlay(showSettingsOverlay);
+    return () => setHideTabBarOverOverlay(false);
+  }, [showSettingsOverlay, setHideTabBarOverOverlay]);
   const [paletteRotations, setPaletteRotations] = useState<Record<number, number>>(
     {}
   );

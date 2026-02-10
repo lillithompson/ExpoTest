@@ -17,6 +17,7 @@ function useShowMobileTabBar(): boolean {
 export default function RootLayout() {
   const showMobileTabBar = useShowMobileTabBar();
   const [hideTabBarOverModify, setHideTabBarOverModify] = useState(false);
+  const [hideTabBarOverOverlay, setHideTabBarOverOverlay] = useState(false);
 
   return (
     <ThemeProvider value={DefaultTheme}>
@@ -24,6 +25,8 @@ export default function RootLayout() {
         tabBarVisible={showMobileTabBar}
         hideTabBarOverModify={hideTabBarOverModify}
         setHideTabBarOverModify={setHideTabBarOverModify}
+        hideTabBarOverOverlay={hideTabBarOverOverlay}
+        setHideTabBarOverOverlay={setHideTabBarOverOverlay}
       >
         <View style={{ flex: 1 }}>
           <View style={{ flex: 1 }}>
