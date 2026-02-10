@@ -17,7 +17,7 @@ export type AppSettings = {
 
 const STORAGE_KEY = 'tile-settings-v1';
 
-const getDefaultSettings = (): AppSettings => ({
+export const getDefaultSettings = (): AppSettings => ({
   preferredTileSize: 45,
   showDebug: false,
   allowEdgeConnections: true,

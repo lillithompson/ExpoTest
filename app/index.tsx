@@ -39,7 +39,7 @@ import { TileDebugOverlay } from '@/components/tile-debug-overlay';
 import { TileGridCanvas } from '@/components/tile-grid-canvas';
 import { useIsMobileWeb } from '@/hooks/use-is-mobile-web';
 import { TAB_BAR_HEIGHT, useTabBarVisible } from '@/contexts/tab-bar-visible';
-import { usePersistedSettings } from '@/hooks/use-persisted-settings';
+import { getDefaultSettings, usePersistedSettings } from '@/hooks/use-persisted-settings';
 import { useTileAtlas } from '@/hooks/use-tile-atlas';
 import { useTileFiles, type TileFile } from '@/hooks/use-tile-files';
 import { useTileGrid } from '@/hooks/use-tile-grid';
@@ -60,7 +60,9 @@ import {
 } from '@/utils/preview-state';
 import { getTransformedConnectionsForName, parseTileConnections, transformConnections } from '@/utils/tile-compat';
 import {
+    buildSourceXmlCache,
     exportTileCanvasAsSvg,
+    getSourceUri,
     renderTileCanvasToDataUrl,
     renderTileCanvasToSvg,
 } from '@/utils/tile-export';
@@ -100,10 +102,12 @@ const FILE_THUMB_SIZE = 400;
 /** Min content width to treat as desktop (web); above this, thumbnails use 2× display size. */
 const FILE_VIEW_DESKTOP_BREAKPOINT = 768;
 const buildUserTileSourceFromName = (name: string): TileSource | null => {
-  if (!name.includes(':')) {
+  const colonIndex = name.indexOf(':');
+  if (colonIndex < 0) {
     return null;
   }
-  const [setId, fileName] = name.split(':');
+  const setId = name.slice(0, colonIndex);
+  const fileName = name.slice(colonIndex + 1);
   if (!setId || !fileName) {
     return null;
   }
@@ -998,12 +1002,13 @@ export default function TestScreen() {
       if (Array.isArray(file.sourceNames) && file.sourceNames.length > 0) {
         return file.sourceNames.map((name) => {
           const resolved = resolveSourceName(name, file.tileSetIds ?? []);
-          return (
-            resolved ?? {
-              name,
-              source: ERROR_TILE,
+          if (name.includes(':') && Platform.OS !== 'web') {
+            const ugcFallback = buildUserTileSourceFromName(name);
+            if (ugcFallback && (!resolved || resolved.source === ERROR_TILE)) {
+              return ugcFallback;
             }
-          );
+          }
+          return resolved ?? { name, source: ERROR_TILE };
         });
       }
       if (file.tiles.length > 0) {
@@ -3282,13 +3287,177 @@ export default function TestScreen() {
     }
   };
 
+  /**
+   * Build the source list for SVG export so every UGC tile in the file has a source.
+   * getSourcesForFile(file) can miss UGC names if file.sourceNames is empty or out of sync.
+   * We merge in buildUserTileSourceFromName(tile.name) for every tile.name that contains ':'
+   * and isn't already in the list.
+   */
+  const getSourcesForSvgExport = useCallback(
+    (file: TileFile): Array<{ name?: string; source?: unknown }> => {
+      const base = getSourcesForFile(file);
+      if (Platform.OS === 'web') {
+        return base;
+      }
+      const namesInBase = new Set(
+        base.map((s) => (s && typeof s.name === 'string' ? s.name : null)).filter(Boolean) as string[]
+      );
+      const ugcNamesFromTiles = new Set<string>();
+      if (Array.isArray(file.tiles)) {
+        for (const tile of file.tiles) {
+          if (tile?.name && tile.name.includes(':')) {
+            ugcNamesFromTiles.add(tile.name);
+          }
+        }
+      }
+      const toAdd: Array<{ name: string; source: unknown }> = [];
+      ugcNamesFromTiles.forEach((name) => {
+        if (namesInBase.has(name)) {
+          return;
+        }
+        const ugcSource = buildUserTileSourceFromName(name);
+        if (ugcSource) {
+          toAdd.push(ugcSource);
+        }
+      });
+      return toAdd.length === 0 ? base : [...base, ...toAdd];
+    },
+    [getSourcesForFile]
+  );
+
+  /**
+   * Decode data:image/svg+xml URI to raw XML string.
+   */
+  const decodeDataSvgUri = useCallback((uri: string): string | null => {
+    const comma = uri.indexOf(',');
+    if (comma < 0) return null;
+    const meta = uri.slice(0, comma).toLowerCase();
+    const data = uri.slice(comma + 1);
+    try {
+      if (meta.includes(';base64')) return atob(data);
+      return decodeURIComponent(data);
+    } catch {
+      return null;
+    }
+  }, []);
+
+  /**
+   * Build a map of UGC source name → SVG XML.
+   * On native: read each UGC file from disk (file.tiles + sources).
+   * On web: decode baked data URIs from sources so UGC is in the map.
+   * Passed to renderTileCanvasToSvg as ugcXmlBySourceName so export uses this XML directly.
+   */
+  const buildUgcXmlBySourceName = useCallback(
+    async (
+      file: TileFile,
+      sources?: Array<{ name?: string; source?: unknown }>
+    ): Promise<Map<string, string>> => {
+      const map = new Map<string, string>();
+      const add = (name: string, xml: string) => {
+        if (name && xml) map.set(name, xml);
+      };
+      if (Platform.OS !== 'web') {
+        const readAndSet = async (name: string, uri: string): Promise<void> => {
+          if (map.has(name) || !uri.includes('/tile-sets/')) return;
+          try {
+            const xml = await FileSystem.readAsStringAsync(uri);
+            if (xml) map.set(name, xml);
+          } catch {
+            try {
+              const alt = uri.startsWith('file://') ? uri.slice(7) : `file://${uri}`;
+              const xml = await FileSystem.readAsStringAsync(alt);
+              if (xml) map.set(name, xml);
+            } catch {
+              // skip
+            }
+          }
+        };
+        if (Array.isArray(file.tiles)) {
+          for (const tile of file.tiles) {
+            if (!tile?.name || !tile.name.includes(':')) continue;
+            const ugcSource = buildUserTileSourceFromName(tile.name);
+            const uri = ugcSource?.source && typeof ugcSource.source === 'object'
+              ? (ugcSource.source as { uri?: string }).uri
+              : undefined;
+            if (uri) await readAndSet(tile.name, uri);
+          }
+        }
+        if (Array.isArray(sources)) {
+          for (const s of sources) {
+            if (!s?.name || !s.name.includes(':')) continue;
+            const uri = getSourceUri(s.source);
+            if (uri) await readAndSet(s.name, uri);
+          }
+        }
+      } else {
+        if (Array.isArray(sources)) {
+          for (const s of sources) {
+            if (!s?.name || !s.name.includes(':')) continue;
+            const uri = getSourceUri(s.source);
+            if (uri?.startsWith('data:image/svg+xml')) {
+              const xml = decodeDataSvgUri(uri);
+              if (xml) add(s.name, xml);
+            }
+          }
+        }
+      }
+      return map;
+    },
+    [decodeDataSvgUri]
+  );
+
+  /**
+   * Replace UGC file-path sources with data URI sources by reading each UGC file
+   * and inlining its SVG. This ensures the SVG export never has to read files by path
+   * (which can fail); it only decodes data URIs.
+   */
+  const replaceUgcSourcesWithDataUris = useCallback(
+    async (
+      sources: Array<{ name?: string; source?: unknown }>
+    ): Promise<Array<{ name?: string; source?: unknown }>> => {
+      const result: Array<{ name?: string; source?: unknown }> = [];
+      for (const s of sources) {
+        const uri = getSourceUri(s.source);
+        const isUgcPath =
+          uri &&
+          uri.toLowerCase().includes('.svg') &&
+          uri.includes('/tile-sets/');
+        if (isUgcPath && Platform.OS !== 'web') {
+          let xml = '';
+          try {
+            xml = await FileSystem.readAsStringAsync(uri);
+          } catch {
+            try {
+              xml = uri.startsWith('file://')
+                ? await FileSystem.readAsStringAsync(uri.slice(7))
+                : await FileSystem.readAsStringAsync(`file://${uri}`);
+            } catch {
+              // keep original source on read failure
+            }
+          }
+          if (xml) {
+            const dataUri = `data:image/svg+xml;utf8,${encodeURIComponent(xml)}`;
+            result.push({ name: s.name, source: { uri: dataUri } });
+            continue;
+          }
+        }
+        result.push(s);
+      }
+      return result;
+    },
+    []
+  );
+
   const handleDownloadSvg = async () => {
     if (!downloadTargetFile) {
       return;
     }
     setIsDownloading(true);
     try {
-      const sources = getSourcesForFile(downloadTargetFile);
+      const sources = getSourcesForSvgExport(downloadTargetFile);
+      const ugcXmlBySourceName = await buildUgcXmlBySourceName(downloadTargetFile, sources);
+      const sourcesWithInlineUgc = await replaceUgcSourcesWithDataUris(sources);
+      const sourceXmlCache = await buildSourceXmlCache(sourcesWithInlineUgc);
       const svg = await renderTileCanvasToSvg({
         tiles: downloadTargetFile.tiles,
         gridLayout: {
@@ -3296,7 +3465,7 @@ export default function TestScreen() {
           columns: downloadTargetFile.grid.columns,
           tileSize: downloadTargetFile.preferredTileSize,
         },
-        tileSources: sources,
+        tileSources: sourcesWithInlineUgc,
         gridGap: GRID_GAP,
         errorSource: ERROR_TILE,
         lineColor: downloadTargetFile.lineColor,
@@ -3304,6 +3473,8 @@ export default function TestScreen() {
         backgroundColor: includeDownloadBackground
           ? settings.backgroundColor
           : undefined,
+        sourceXmlCache,
+        ugcXmlBySourceName,
         strokeScaleByName,
       });
       if (!svg) {
@@ -3804,25 +3975,32 @@ export default function TestScreen() {
                   onPress={() => {
                     const file = files.find((entry) => entry.id === fileMenuTargetId);
                     if (file) {
-                      const sources = getSourcesForFile(file);
-                      void exportTileCanvasAsSvg({
-                        tiles: file.tiles,
-                        gridLayout: {
-                          rows: file.grid.rows,
-                          columns: file.grid.columns,
-                          tileSize: file.preferredTileSize,
-                        },
-                        tileSources: sources,
-                        gridGap: GRID_GAP,
-                        errorSource: ERROR_TILE,
-                        lineColor: file.lineColor,
-                        lineWidth: file.lineWidth,
-                        backgroundColor: includeDownloadBackground
-                          ? settings.backgroundColor
-                          : undefined,
-                        strokeScaleByName,
-                        fileName: `${file.name}.svg`,
-                      });
+                      const sources = getSourcesForSvgExport(file);
+                      void (async () => {
+                        const ugcXmlBySourceName = await buildUgcXmlBySourceName(file, sources);
+                        const sourcesWithInlineUgc = await replaceUgcSourcesWithDataUris(sources);
+                        const sourceXmlCache = await buildSourceXmlCache(sourcesWithInlineUgc);
+                        await exportTileCanvasAsSvg({
+                          tiles: file.tiles,
+                          gridLayout: {
+                            rows: file.grid.rows,
+                            columns: file.grid.columns,
+                            tileSize: file.preferredTileSize,
+                          },
+                          tileSources: sourcesWithInlineUgc,
+                          gridGap: GRID_GAP,
+                          errorSource: ERROR_TILE,
+                          lineColor: file.lineColor,
+                          lineWidth: file.lineWidth,
+                          backgroundColor: includeDownloadBackground
+                            ? settings.backgroundColor
+                            : undefined,
+                          strokeScaleByName,
+                          sourceXmlCache,
+                          ugcXmlBySourceName,
+                          fileName: `${file.name}.svg`,
+                        });
+                      })();
                     }
                     setFileMenuTargetId(null);
                   }}
@@ -3959,9 +4137,10 @@ export default function TestScreen() {
                 style={[styles.settingsAction, styles.settingsActionDanger]}
                 onPress={() => {
                   const message =
-                    'Delete all local data? This will permanently delete all saved files, tile sets, patterns, and favorites. This cannot be undone.';
+                    'Delete all local data? This will permanently delete all saved files, tile sets, patterns, and favorites, and reset all settings to their defaults. This cannot be undone.';
                   const doDelete = async () => {
                     await clearAllLocalData();
+                    setSettings(getDefaultSettings());
                     await clearAllFiles();
                     await reloadTileSets();
                     clearBrushFavorites();

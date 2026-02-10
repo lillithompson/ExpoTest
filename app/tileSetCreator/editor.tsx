@@ -1,36 +1,36 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  Animated,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  TextInput,
-  useWindowDimensions,
-  View,
-} from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+    Animated,
+    Platform,
+    Pressable,
+    ScrollView,
+    StyleSheet,
+    TextInput,
+    useWindowDimensions,
+    View,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import {
-  TILE_CATEGORIES,
-  TILE_MANIFEST,
-  type TileCategory,
+    TILE_CATEGORIES,
+    TILE_MANIFEST,
+    type TileCategory,
 } from '@/assets/images/tiles/manifest';
-import { TileAsset } from '@/components/tile-asset';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { TileAsset } from '@/components/tile-asset';
 import { useTileFiles } from '@/hooks/use-tile-files';
 import { useTileSets, type TileSetTile } from '@/hooks/use-tile-sets';
 import {
-  getTransformedConnectionsForName,
-  parseTileConnections,
-  transformConnections,
+    getTransformedConnectionsForName,
+    parseTileConnections,
+    transformConnections,
 } from '@/utils/tile-compat';
-import { normalizeTiles, type Tile } from '@/utils/tile-grid';
 import { exportTileCanvasAsSvg } from '@/utils/tile-export';
+import { normalizeTiles, type Tile } from '@/utils/tile-grid';
 
 const HEADER_HEIGHT = 50;
 const FILE_GRID_COLUMNS_MOBILE = 4;

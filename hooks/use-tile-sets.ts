@@ -1,13 +1,13 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from 'expo-file-system';
-import { Platform } from 'react-native';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { Platform } from 'react-native';
 
 import {
-  TILE_CATEGORIES,
-  TILE_MANIFEST,
-  type TileCategory,
-  type TileSource,
+    TILE_CATEGORIES,
+    TILE_MANIFEST,
+    type TileCategory,
+    type TileSource,
 } from '@/assets/images/tiles/manifest';
 import { parseTileConnections, transformConnections } from '@/utils/tile-compat';
 import { renderTileCanvasToSvg } from '@/utils/tile-export';

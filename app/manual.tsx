@@ -175,7 +175,7 @@ export default function ManualScreen() {
 
         <ThemedText type="subtitle" style={styles.sectionTitle}>Settings</ThemedText>
         <ThemedText type="default" style={styles.para}>
-          View manual — Opens this manual. Show Debug — shows a debug overlay on the grid. Download PNG (Modify view only) — downloads the current canvas. Background Color, Background Line Color, Line Width — customize the grid look. Delete all local data — permanently deletes all files, tile sets, patterns, and favorites (with confirmation). Settings are saved automatically.
+          View manual — Opens this manual. Show Debug — shows a debug overlay on the grid. Download PNG (Modify view only) — downloads the current canvas. Background Color, Background Line Color, Line Width — customize the grid look. Delete all local data — permanently deletes all files, tile sets, patterns, and favorites and resets all settings to their defaults (with confirmation). Settings are saved automatically.
         </ThemedText>
 
         <ThemedText type="subtitle" style={styles.sectionTitle}>Tips</ThemedText>

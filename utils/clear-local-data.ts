@@ -10,10 +10,13 @@ const TILE_SETS_BAKES_KEY = 'tile-sets-bakes-v1';
 const FAVORITES_KEY = 'tile-brush-favorites-v1';
 /** AsyncStorage key for patterns (must match use-tile-patterns). */
 const PATTERNS_KEY = 'tile-patterns-v1';
+/** AsyncStorage key for settings (must match use-persisted-settings). */
+const SETTINGS_KEY = 'tile-settings-v1';
 
 /**
- * Removes all local data from AsyncStorage: saved files, tile sets (and bakes), favorites, and patterns.
- * Callers should then reset in-memory state (e.g. clearAllFiles, reloadTileSets, clearFavorites, clearAllPatterns).
+ * Removes all local data from AsyncStorage: saved files, tile sets (and bakes), favorites, patterns, and settings.
+ * Callers should then reset in-memory state (e.g. clearAllFiles, reloadTileSets, clearFavorites, clearAllPatterns)
+ * and reset settings to defaults (e.g. setSettings(getDefaultSettings())).
  */
 export async function clearAllLocalData(): Promise<void> {
   await Promise.all([
@@ -23,5 +26,6 @@ export async function clearAllLocalData(): Promise<void> {
     AsyncStorage.removeItem(TILE_SETS_BAKES_KEY),
     AsyncStorage.removeItem(FAVORITES_KEY),
     AsyncStorage.removeItem(PATTERNS_KEY),
+    AsyncStorage.removeItem(SETTINGS_KEY),
   ]);
 }

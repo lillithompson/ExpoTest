@@ -120,7 +120,7 @@ Opened from the **Settings (gear)** button — in **File** view or in **Modify**
 - **Background Color** — Color of the grid background.
 - **Background Line Color** — Color of the grid lines.
 - **Line Width** — Thickness of the grid lines.
-- **Delete all local data** — Permanently deletes all saved files, tile sets, patterns, and favorites. You’ll get a confirmation before anything is removed.
+- **Delete all local data** — Permanently deletes all saved files, tile sets, patterns, and favorites, and resets all settings to their defaults. You’ll get a confirmation before anything is removed.
 
 Settings are saved automatically and apply across the app.
 

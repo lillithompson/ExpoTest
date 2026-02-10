@@ -3,11 +3,11 @@
  * are deleted. Sequence under test: tile set with two tiles, file uses both;
  * delete first tile -> file still loads; delete second tile -> file still loads.
  */
-import type { Tile } from '../tile-grid';
 import {
-  applyRemovedSourcesToFile,
-  isRemovedSourceName,
+    applyRemovedSourcesToFile,
+    isRemovedSourceName,
 } from '../tile-file-sync';
+import type { Tile } from '../tile-grid';
 
 const emptyTile = (overrides: Partial<Tile> = {}): Tile => ({
   imageIndex: -1,

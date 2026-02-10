@@ -48,6 +48,85 @@ const resolveSourceUri = (source: unknown) => {
   return null;
 };
 
+/** Exported so the app can resolve URIs when building the source XML cache (e.g. for UGC file reads). */
+export const getSourceUri = resolveSourceUri;
+
+const decodeDataSvgFromUri = (uri: string): string | null => {
+  const commaIndex = uri.indexOf(',');
+  if (commaIndex < 0) {
+    return null;
+  }
+  const meta = uri.slice(0, commaIndex).toLowerCase();
+  const data = uri.slice(commaIndex + 1);
+  try {
+    if (meta.includes(';base64')) {
+      return atob(data);
+    }
+    return decodeURIComponent(data);
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * Load SVG XML from a URI (data:, file path on native, or fetch on web).
+ * Used to pre-fill sourceXmlCache so UGC and other tiles are available when exporting SVG.
+ */
+export const loadSvgXmlForUri = async (uri: string): Promise<string> => {
+  if (uri.startsWith('data:image/svg+xml')) {
+    return decodeDataSvgFromUri(uri) ?? '';
+  }
+  if (Platform.OS === 'web') {
+    try {
+      const response = await fetch(uri);
+      return await response.text();
+    } catch {
+      return '';
+    }
+  }
+  try {
+    return await FileSystem.readAsStringAsync(uri);
+  } catch {
+    if (uri.startsWith('file://')) {
+      try {
+        return await FileSystem.readAsStringAsync(uri.slice(7));
+      } catch {
+        return '';
+      }
+    }
+    return '';
+  }
+};
+
+/**
+ * Build a cache of URI -> SVG XML for the given sources so that renderTileCanvasToSvg
+ * can inline UGC and other tiles when exporting (avoids missing tiles when fetch/file read
+ * would fail or when URIs are not loadable in the export context).
+ */
+export const buildSourceXmlCache = async (
+  sources: Array<{ source?: unknown }>
+): Promise<Map<string, string>> => {
+  const cache = new Map<string, string>();
+  for (const { source } of sources) {
+    const uri = resolveSourceUri(source);
+    if (!uri || !uri.toLowerCase().includes('.svg')) {
+      continue;
+    }
+    const xml = await loadSvgXmlForUri(uri);
+    if (xml) {
+      cache.set(uri, xml);
+      if (Platform.OS !== 'web' && uri.includes('/tile-sets/')) {
+        if (uri.startsWith('file://')) {
+          cache.set(uri.slice(7), xml);
+        } else {
+          cache.set(`file://${uri}`, xml);
+        }
+      }
+    }
+  }
+  return cache;
+};
+
 const loadImage = (uri: string) =>
   new Promise<HTMLImageElement>((resolve, reject) => {
     const img = new window.Image();
@@ -59,6 +138,21 @@ const loadImage = (uri: string) =>
 
 const stripOuterBorder = (xml: string) =>
   xml.replace(/<rect\b[^>]*(x=["']0\.5["']|y=["']0\.5["'])[^>]*\/?>/gi, '');
+
+/**
+ * Baked UGC SVGs are built with an outer <g transform="scale(s)"> so the inner
+ * content is in 0..(viewBoxSize/s). When we strip <g> we keep content in that
+ * inner space, so we must use effective viewBox = viewBoxSize/s for scaling.
+ * Returns the scale factor if found (e.g. 4), else 1.
+ */
+const getOuterScaleFromSvgContent = (content: string): number => {
+  const gMatch = content.match(/<g\b[^>]*\btransform\s*=\s*["']([^"']+)["']/i);
+  if (!gMatch) return 1;
+  const scaleMatch = gMatch[1].match(/scale\s*\(\s*([\d.]+)/i);
+  if (!scaleMatch) return 1;
+  const s = Number(scaleMatch[1]);
+  return Number.isFinite(s) && s > 0 ? s : 1;
+};
 
 const extractSvgContent = (xml: string) => {
   const cleaned = xml
@@ -215,10 +309,13 @@ export const renderTileCanvasToSvg = async ({
   lineWidth,
   backgroundColor,
   sourceXmlCache,
+  ugcXmlBySourceName,
   outputSize,
   strokeScaleByName,
 }: Omit<ExportParams, 'blankSource' | 'backgroundLineColor' | 'backgroundLineWidth' | 'fileName'> & {
   sourceXmlCache?: Map<string, string>;
+  /** Pre-read UGC SVG XML by source name; used first so export never relies on file/URI load for UGC. */
+  ugcXmlBySourceName?: Map<string, string>;
   outputSize?: number;
   strokeScaleByName?: Map<string, number>;
 }): Promise<string | null> => {
@@ -272,7 +369,13 @@ export const renderTileCanvasToSvg = async ({
     }
   };
   const getRawSvg = async (uri: string) => {
-    const cached = rawSvgCache.get(uri);
+    const cached =
+      rawSvgCache.get(uri) ??
+      (uri.startsWith('file://')
+        ? rawSvgCache.get(uri.slice(7))
+        : Platform.OS !== 'web' && uri.includes('/tile-sets/')
+          ? rawSvgCache.get(`file://${uri}`)
+          : undefined);
     if (cached) {
       return cached;
     }
@@ -280,16 +383,36 @@ export const renderTileCanvasToSvg = async ({
     if (uri.startsWith('data:image/svg+xml')) {
       xml = decodeDataSvg(uri) ?? '';
     } else if (Platform.OS === 'web') {
-      const response = await fetch(uri);
-      xml = await response.text();
+      try {
+        const response = await fetch(uri);
+        xml = await response.text();
+      } catch {
+        xml = '';
+      }
     } else {
       try {
         xml = await FileSystem.readAsStringAsync(uri);
       } catch {
-        xml = '';
+        if (uri.startsWith('file://')) {
+          try {
+            xml = await FileSystem.readAsStringAsync(uri.slice(7));
+          } catch {
+            xml = '';
+          }
+        } else {
+          xml = '';
+        }
       }
     }
-    rawSvgCache.set(uri, xml);
+    if (xml) {
+      rawSvgCache.set(uri, xml);
+      if (Platform.OS !== 'web' && uri.includes('/tile-sets/') && !uri.startsWith('file://')) {
+        rawSvgCache.set(`file://${uri}`, xml);
+      }
+      if (uri.startsWith('file://')) {
+        rawSvgCache.set(uri.slice(7), xml);
+      }
+    }
     return xml;
   };
   const toDataUri = async (
@@ -395,8 +518,44 @@ export const renderTileCanvasToSvg = async ({
       `translate(${-center} ${-center})`,
     ].join(' ');
 
+    const ugcXml =
+      (tileName ? ugcXmlBySourceName?.get(tileName) : undefined) ??
+      (tile.name ? ugcXmlBySourceName?.get(tile.name) : undefined) ??
+      (resolvedSource?.name ? ugcXmlBySourceName?.get(resolvedSource.name) : undefined);
+    if (ugcXml) {
+      let nextXml = stripOuterBorder(ugcXml);
+      if (overrides) {
+        nextXml = applySvgOverrides(nextXml, overrides.strokeColor, overrides.strokeWidth);
+      }
+      const extracted = extractSvgContent(nextXml);
+      const content = extracted.content && extracted.content.trim() ? extracted.content : nextXml;
+      if (content) {
+        const viewBox = extracted.viewBox ?? `0 0 ${gridLayout.tileSize} ${gridLayout.tileSize}`;
+        const viewParts = viewBox.split(/\s+/).map((part) => Number(part));
+        let vbWidth = Number.isFinite(viewParts[2]) ? viewParts[2] : gridLayout.tileSize;
+        let vbHeight = Number.isFinite(viewParts[3]) ? viewParts[3] : gridLayout.tileSize;
+        const outerScale = getOuterScaleFromSvgContent(content);
+        if (outerScale !== 1) {
+          vbWidth = vbWidth / outerScale;
+          vbHeight = vbHeight / outerScale;
+        }
+        const scaleXToTile = gridLayout.tileSize / vbWidth;
+        const scaleYToTile = gridLayout.tileSize / vbHeight;
+        const tileTransform = [
+          `translate(${x} ${y})`,
+          `translate(${center} ${center})`,
+          `scale(${scaleX} ${scaleY})`,
+          `rotate(${rotation})`,
+          `translate(${-center} ${-center})`,
+        ].join(' ');
+        const fullTransform = `${tileTransform} scale(${scaleXToTile} ${scaleYToTile})`;
+        svgParts.push(applyTransformToSvgContent(content, fullTransform));
+        continue;
+      }
+    }
+
     const inline = await toInlineSvg(source, overrides);
-    if (inline) {
+    if (inline && inline.content) {
       const viewBox = inline.viewBox ?? `0 0 ${gridLayout.tileSize} ${gridLayout.tileSize}`;
       const viewParts = viewBox.split(/\s+/).map((part) => Number(part));
       const vbWidth = Number.isFinite(viewParts[2]) ? viewParts[2] : gridLayout.tileSize;
@@ -441,9 +600,13 @@ export const exportTileCanvasAsSvg = async ({
   lineWidth,
   backgroundColor,
   strokeScaleByName,
+  sourceXmlCache,
+  ugcXmlBySourceName,
   fileName = 'tile-canvas.svg',
 }: Omit<ExportParams, 'blankSource' | 'backgroundLineColor' | 'backgroundLineWidth'> & {
   strokeScaleByName?: Map<string, number>;
+  sourceXmlCache?: Map<string, string>;
+  ugcXmlBySourceName?: Map<string, string>;
 }): Promise<ExportResult> => {
   if (typeof document === 'undefined') {
     return { ok: false, error: 'Unable to export SVG.' };
@@ -457,6 +620,8 @@ export const exportTileCanvasAsSvg = async ({
     lineColor,
     lineWidth,
     backgroundColor,
+    sourceXmlCache,
+    ugcXmlBySourceName,
     strokeScaleByName,
   });
   if (!svg) {

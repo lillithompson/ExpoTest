@@ -24,10 +24,10 @@ import { DesktopNavTabs } from '@/components/desktop-nav-tabs';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { TileAsset } from '@/components/tile-asset';
+import { TAB_BAR_HEIGHT, useTabBarVisible } from '@/contexts/tab-bar-visible';
 import { useIsMobileWeb } from '@/hooks/use-is-mobile-web';
 import { useTileFiles } from '@/hooks/use-tile-files';
 import { type TileSetTile, useTileSets } from '@/hooks/use-tile-sets';
-import { TAB_BAR_HEIGHT, useTabBarVisible } from '@/contexts/tab-bar-visible';
 import { renderTileCanvasToDataUrl } from '@/utils/tile-export';
 import { type Tile } from '@/utils/tile-grid';
 
