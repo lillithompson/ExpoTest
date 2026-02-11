@@ -1337,6 +1337,20 @@ export const useTileGrid = ({
     const stroke = drawStrokeRef.current;
     const isDrawFirst = brush.mode === 'draw' && stroke.length === 0;
     const isDrawSubsequent = brush.mode === 'draw' && stroke.length >= 1;
+    // When starting a draw stroke (first tile or new stroke on non-adjacent cell), treat all tiles as empty so we overwrite regardless of existing content.
+    const drawOverwriteTilesState: Tile[] | null =
+      brush.mode === 'draw'
+        ? Array.from(
+            { length: totalCells },
+            () =>
+              ({
+                imageIndex: -1,
+                rotation: 0,
+                mirrorX: false,
+                mirrorY: false,
+              }) as Tile
+          )
+        : null;
 
     const getConnectionCount = (t: Tile): number => {
       const conn = compatTables.getConnectionsForPlacement(
@@ -1350,17 +1364,20 @@ export const useTileGrid = ({
 
     let selection: Tile | null;
     if (isDrawFirst) {
-      // First tile: exactly one connection; use palette first, then all sources if none
+      // First tile: exactly one connection; use palette first, then all sources if none.
+      // Use drawOverwriteTilesState so preexisting tiles do not constrain placement (always overwrite).
       let candidates = getCandidatesWithConnectionCount(1, randomSourceSet);
       if (candidates.length === 0) {
         candidates = getCandidatesWithConnectionCount(1, null);
       }
+      const tilesForFirst =
+        drawOverwriteTilesState ?? renderTiles;
       const validFirst = candidates.filter((t) =>
         isPlacementValid(
           cellIndex,
           t,
-          renderTiles,
-          treatUninitForRandomBrush,
+          tilesForFirst,
+          drawOverwriteTilesState ? false : treatUninitForRandomBrush,
           selectionSet
         )
       );
@@ -1377,9 +1394,15 @@ export const useTileGrid = ({
         selectionSet
       );
     }
+    const tilesForValidation =
+      isDrawFirst && drawOverwriteTilesState
+        ? drawOverwriteTilesState
+        : renderTiles;
+    const treatUninitForValidation =
+      isDrawFirst && drawOverwriteTilesState ? false : treatUninitForRandomBrush;
     if (
       !selection ||
-      !isPlacementValid(cellIndex, selection, renderTiles, treatUninitForRandomBrush, selectionSet)
+      !isPlacementValid(cellIndex, selection, tilesForValidation, treatUninitForValidation, selectionSet)
     ) {
       if (randomRequiresLegal) {
         return;
@@ -1412,8 +1435,8 @@ export const useTileGrid = ({
           isPlacementValid(
             cellIndex,
             t,
-            renderTiles,
-            treatUninitForRandomBrush,
+            drawOverwriteTilesState ?? renderTiles,
+            drawOverwriteTilesState ? false : treatUninitForRandomBrush,
             selectionSet
           )
         );
