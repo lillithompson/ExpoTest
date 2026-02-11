@@ -76,7 +76,7 @@ The in-app manual (Settings → **View manual**) shows the same icons used in th
 - **Reset** (⟳ refresh icon) — Clears the entire grid (or the whole tile in Modify Tile). Use with care.
 - **Flood** (fill icon) — **Tap:** Fills the whole grid using the current brush (random, fixed, pattern, or erase). **Long press:** “Flood Complete” — fills only *empty* cells; already placed tiles are left as-is. Helpful for filling gaps without overwriting.
 - **Reconcile** (puzzle icon) — **Tap:** Fixes invalid tile connections by replacing bad tiles with compatible ones. Empty cells are never changed. **Long press:** “Controlled Randomize” — replaces tiles with connection-compatible alternatives (same “shape,” different look).
-- **Mirror** (single cycling button) — **Tap** to cycle: no mirroring → horizontal → horizontal + vertical → vertical → no mirroring. When any mirroring is on, the icon is green and guide lines show the mirror axes. Icons: grey horizontal flip when off; horizontal flip (green) for horizontal only; arrow-all for both axes; vertical flip for vertical only.
+- **Mirror** (single cycling button) — **Tap** to cycle: no mirroring → horizontal → horizontal + vertical → vertical → no mirroring. When any mirroring is on, the icon is blue (same as the guide lines) and guide lines show the mirror axes. Icons: grey horizontal flip when off; horizontal flip (green) for horizontal only; arrow-all for both axes; vertical flip for vertical only.
 
 ---
 

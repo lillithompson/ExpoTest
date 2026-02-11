@@ -1878,7 +1878,10 @@ export const useTileGrid = ({
         return;
       }
       if (brush.mode === 'draw') {
-        const nextTiles = buildInitialTiles(totalCells);
+        const nextTiles =
+          lockedCellIndices?.size
+            ? [...normalizeTiles(tiles, totalCells, tileSourcesLength)]
+            : buildInitialTiles(totalCells);
         const strokeOrder = getSpiralCellOrder(
           gridLayout.columns,
           gridLayout.rows
@@ -2213,6 +2216,10 @@ export const useTileGrid = ({
     const snapshot = normalizeTiles(tiles, totalCells, tileSourcesLength);
     const nextTiles = [...snapshot];
     const allowedSet = randomSourceSet ?? null;
+    const reconcileAllowSet =
+      (mirrorHorizontal || mirrorVertical) && !selectionBounds
+        ? (lockedCellIndices ? allNonLockedIndicesSet : undefined)
+        : modifiableIndicesSet;
     const maxPasses = Math.min(50, Math.max(8, gridLayout.rows + gridLayout.columns));
     for (let pass = 0; pass < maxPasses; pass += 1) {
       let changed = false;
@@ -2245,7 +2252,7 @@ export const useTileGrid = ({
           continue;
         }
         const pick = candidates[Math.floor(Math.random() * candidates.length)];
-        applyPlacementsToArrayOverride(nextTiles, getMirroredPlacements(index, pick), modifiableIndicesSet);
+        applyPlacementsToArrayOverride(nextTiles, getMirroredPlacements(index, pick), reconcileAllowSet);
         changed = true;
       }
       if (!changed) {

@@ -127,7 +127,7 @@ export default function ManualScreen() {
         <ToolRow
           icon="flip-horizontal"
           label="Mirror"
-          description="Tap to cycle: off → horizontal → horizontal + vertical → vertical → off. Icon is green when any mirroring is on; guide lines show axes."
+          description="Tap to cycle: off → horizontal → horizontal + vertical → vertical → off. Icon is blue when any mirroring is on (matches guide lines); guide lines show axes."
         />
 
         <ThemedText type="defaultSemiBold" style={styles.subsection}>Brush panel</ThemedText>

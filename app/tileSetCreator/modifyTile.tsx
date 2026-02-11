@@ -810,6 +810,11 @@ export default function ModifyTileScreen() {
                       : 'flip-vertical'
               }
               active={settings.mirrorHorizontal || settings.mirrorVertical}
+              color={
+                settings.mirrorHorizontal || settings.mirrorVertical
+                  ? '#3b82f6'
+                  : undefined
+              }
               onPress={() =>
                 setSettings((prev) => {
                   const { mirrorHorizontal: h, mirrorVertical: v } = prev;
