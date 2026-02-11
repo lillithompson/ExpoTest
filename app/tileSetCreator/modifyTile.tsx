@@ -1120,46 +1120,52 @@ export default function ModifyTileScreen() {
               };
             })
           }
-          onMirror={(index) =>
-            setPaletteMirrors((prev) => {
-              const nextMirror = !(prev[index] ?? false);
-              if (brush.mode === 'fixed' && brush.index === index) {
-                const src = tileSources[index];
-                setBrush({
-                  mode: 'fixed',
-                  index,
-                  sourceName: src?.name,
-                  rotation: brush.rotation,
-                  mirrorX: nextMirror,
-                  mirrorY: brush.mirrorY,
-                });
-              }
-              return {
-                ...prev,
-                [index]: nextMirror,
-              };
-            })
-          }
-          onMirrorVertical={(index) =>
-            setPaletteMirrorsY((prev) => {
-              const nextMirror = !(prev[index] ?? false);
-              if (brush.mode === 'fixed' && brush.index === index) {
-                const src = tileSources[index];
-                setBrush({
-                  mode: 'fixed',
-                  index,
-                  sourceName: src?.name,
-                  rotation: brush.rotation,
-                  mirrorX: brush.mirrorX,
-                  mirrorY: nextMirror,
-                });
-              }
-              return {
-                ...prev,
-                [index]: nextMirror,
-              };
-            })
-          }
+          onMirror={(index) => {
+            const rotation = paletteRotations[index] ?? 0;
+            const curX = paletteMirrors[index] ?? false;
+            const curY = paletteMirrorsY[index] ?? false;
+            const horizontalInR0 = rotation === 0 || rotation === 180 ? curX : curY;
+            const verticalInR0 = rotation === 0 || rotation === 180 ? curY : curX;
+            const newH = !horizontalInR0;
+            const newMirrorX = rotation === 0 || rotation === 180 ? newH : verticalInR0;
+            const newMirrorY = rotation === 0 || rotation === 180 ? verticalInR0 : newH;
+            setPaletteMirrors((prev) => ({ ...prev, [index]: newMirrorX }));
+            setPaletteMirrorsY((prev) => ({ ...prev, [index]: newMirrorY }));
+            if (brush.mode === 'fixed' && brush.index === index) {
+              const src = tileSources[index];
+              setBrush({
+                mode: 'fixed',
+                index,
+                sourceName: src?.name,
+                rotation: brush.rotation,
+                mirrorX: newMirrorX,
+                mirrorY: newMirrorY,
+              });
+            }
+          }}
+          onMirrorVertical={(index) => {
+            const rotation = paletteRotations[index] ?? 0;
+            const curX = paletteMirrors[index] ?? false;
+            const curY = paletteMirrorsY[index] ?? false;
+            const horizontalInR0 = rotation === 0 || rotation === 180 ? curX : curY;
+            const verticalInR0 = rotation === 0 || rotation === 180 ? curY : curX;
+            const newV = !verticalInR0;
+            const newMirrorX = rotation === 0 || rotation === 180 ? horizontalInR0 : newV;
+            const newMirrorY = rotation === 0 || rotation === 180 ? newV : horizontalInR0;
+            setPaletteMirrors((prev) => ({ ...prev, [index]: newMirrorX }));
+            setPaletteMirrorsY((prev) => ({ ...prev, [index]: newMirrorY }));
+            if (brush.mode === 'fixed' && brush.index === index) {
+              const src = tileSources[index];
+              setBrush({
+                mode: 'fixed',
+                index,
+                sourceName: src?.name,
+                rotation: brush.rotation,
+                mirrorX: newMirrorX,
+                mirrorY: newMirrorY,
+              });
+            }
+          }}
           getRotation={(index) => paletteRotations[index] ?? 0}
           getMirror={(index) => paletteMirrors[index] ?? false}
           getMirrorVertical={(index) => paletteMirrorsY[index] ?? false}

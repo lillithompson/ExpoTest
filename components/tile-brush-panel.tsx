@@ -7,7 +7,6 @@ import {
     Pressable,
     ScrollView,
     StyleSheet,
-    TextInput,
     View,
 } from 'react-native';
 
@@ -199,26 +198,44 @@ export function TileBrushPanel({
     () => ['#ef4444', '#f59e0b', '#22c55e', '#3b82f6', '#a855f7', '#e5e7eb'],
     []
   );
-  const orderedTileEntries = useMemo(
-    () =>
-      [...tileEntries].sort((a, b) => {
-        if (a.isFavorite === b.isFavorite) {
-          return a.index - b.index;
-        }
-        return a.isFavorite ? -1 : 1;
-      }),
-    [tileEntries]
-  );
+  const orderedTileEntries = useMemo(() => {
+    const colorRank = (color: string) => {
+      const i = favoriteColorOptions.indexOf(color);
+      return i >= 0 ? i : favoriteColorOptions.length;
+    };
+    return [...tileEntries].sort((a, b) => {
+      if (a.isFavorite === b.isFavorite) {
+        if (!a.isFavorite) return a.index - b.index;
+        const rankA = colorRank(favorites[a.tile.name] ?? '');
+        const rankB = colorRank(favorites[b.tile.name] ?? '');
+        if (rankA !== rankB) return rankA - rankB;
+        return a.index - b.index;
+      }
+      return a.isFavorite ? -1 : 1;
+    });
+  }, [tileEntries, favorites, favoriteColorOptions]);
   const cycleRef = useRef<Record<string, number>>({});
 
   const openFavoriteDialog = (entry: { tile: TileSource; index: number }) => {
     const existing = favorites[entry.tile.name];
     if (existing) {
+      setFavoriteColorDraft(existing);
       setFavoriteDialog({ name: entry.tile.name, index: entry.index, mode: 'remove' });
       return;
     }
     setFavoriteColorDraft(lastFavoriteColorRef.current);
     setFavoriteDialog({ name: entry.tile.name, index: entry.index, mode: 'add' });
+  };
+
+  const applyFavoriteColorImmediate = (color: string) => {
+    if (!favoriteDialog) return;
+    const trimmed = color.trim();
+    if (!trimmed) return;
+    const current = favoritesStore.getState();
+    favoritesStore.setState({
+      favorites: { ...current.favorites, [favoriteDialog.name]: trimmed },
+      lastColor: trimmed,
+    });
   };
 
   const closeFavoriteDialog = () => {
@@ -670,17 +687,21 @@ export function TileBrushPanel({
           <View style={styles.modalPanel}>
             <ThemedText type="title" style={styles.modalTitle}>
               {favoriteDialog?.mode === 'remove'
-                ? 'Unfavorite?'
-                : 'Favorite this tile?'}
+                ? 'Unfavorite Tile?'
+                : 'Favorite Tile?'}
             </ThemedText>
-            {favoriteDialog?.mode === 'add' && (
+            {(favoriteDialog?.mode === 'add' || favoriteDialog?.mode === 'remove') && (
               <View style={styles.modalSection}>
-                <ThemedText type="defaultSemiBold">Color</ThemedText>
                 <View style={styles.colorOptions}>
                   {favoriteColorOptions.map((color) => (
                     <Pressable
                       key={color}
-                      onPress={() => setFavoriteColorDraft(color)}
+                      onPress={() => {
+                        setFavoriteColorDraft(color);
+                        if (favoriteDialog?.mode === 'remove') {
+                          applyFavoriteColorImmediate(color);
+                        }
+                      }}
                       style={[
                         styles.colorSwatch,
                         { backgroundColor: color },
@@ -691,15 +712,6 @@ export function TileBrushPanel({
                     />
                   ))}
                 </View>
-                <TextInput
-                  value={favoriteColorDraft}
-                  onChangeText={setFavoriteColorDraft}
-                  style={styles.colorInput}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  placeholder="#f59e0b"
-                  placeholderTextColor="#9ca3af"
-                />
               </View>
             )}
             <View style={styles.modalActions}>
@@ -865,15 +877,6 @@ const styles = StyleSheet.create({
   colorSwatchSelected: {
     borderColor: '#111',
     borderWidth: 2,
-  },
-  colorInput: {
-    borderWidth: 1,
-    borderColor: '#1f1f1f',
-    borderRadius: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    color: '#111',
-    backgroundColor: '#fff',
   },
   modalActions: {
     flexDirection: 'row',

@@ -2177,6 +2177,9 @@ export default function TestScreen() {
     setHydrating(true);
     setSuspendTiles(true);
     clearCloneSource();
+    setIsSelectionMode(false);
+    setCanvasSelection(null);
+    updateActiveFileLockedCells([]);
     if (brush.mode === 'clone' || brush.mode === 'pattern') {
       setBrush({ mode: 'random' });
     }
@@ -2195,7 +2198,7 @@ export default function TestScreen() {
       preview: Boolean(previewUri),
       sourceNames: fileSourceNames.length > 0 ? fileSourceNames : undefined,
     };
-  }, [activeFileId, loadRequestId, ready, viewMode, clearCloneSource]);
+  }, [activeFileId, loadRequestId, ready, viewMode, clearCloneSource, updateActiveFileLockedCells]);
 
   useEffect(() => {
     setGridStabilized(false);
@@ -5316,54 +5319,60 @@ export default function TestScreen() {
               };
             })
           }
-          onMirror={(index) =>
-            setPaletteMirrors((prev) => {
-              const nextMirror = !(prev[index] ?? false);
-              const source = paletteSources[index];
-              const fileIndex = source ? tileIndexByName.get(source.name) ?? -1 : -1;
-              if (brush.mode === 'fixed' && fileIndex >= 0 && brush.index === fileIndex) {
-                if (source?.name != null) {
-                  fixedBrushSourceNameRef.current = source.name;
-                }
-                setBrush({
-                  mode: 'fixed',
-                  index: fileIndex,
-                  sourceName: source?.name,
-                  rotation: brush.rotation,
-                  mirrorX: nextMirror,
-                  mirrorY: brush.mirrorY,
-                });
+          onMirror={(index) => {
+            const rotation = paletteRotations[index] ?? 0;
+            const curX = paletteMirrors[index] ?? false;
+            const curY = paletteMirrorsY[index] ?? false;
+            const horizontalInR0 = rotation === 0 || rotation === 180 ? curX : curY;
+            const verticalInR0 = rotation === 0 || rotation === 180 ? curY : curX;
+            const newH = !horizontalInR0;
+            const newMirrorX = rotation === 0 || rotation === 180 ? newH : verticalInR0;
+            const newMirrorY = rotation === 0 || rotation === 180 ? verticalInR0 : newH;
+            setPaletteMirrors((prev) => ({ ...prev, [index]: newMirrorX }));
+            setPaletteMirrorsY((prev) => ({ ...prev, [index]: newMirrorY }));
+            const source = paletteSources[index];
+            const fileIndex = source ? tileIndexByName.get(source.name) ?? -1 : -1;
+            if (brush.mode === 'fixed' && fileIndex >= 0 && brush.index === fileIndex) {
+              if (source?.name != null) {
+                fixedBrushSourceNameRef.current = source.name;
               }
-              return {
-                ...prev,
-                [index]: nextMirror,
-              };
-            })
-          }
-          onMirrorVertical={(index) =>
-            setPaletteMirrorsY((prev) => {
-              const nextMirror = !(prev[index] ?? false);
-              const source = paletteSources[index];
-              const fileIndex = source ? tileIndexByName.get(source.name) ?? -1 : -1;
-              if (brush.mode === 'fixed' && fileIndex >= 0 && brush.index === fileIndex) {
-                if (source?.name != null) {
-                  fixedBrushSourceNameRef.current = source.name;
-                }
-                setBrush({
-                  mode: 'fixed',
-                  index: fileIndex,
-                  sourceName: source?.name,
-                  rotation: brush.rotation,
-                  mirrorX: brush.mirrorX,
-                  mirrorY: nextMirror,
-                });
+              setBrush({
+                mode: 'fixed',
+                index: fileIndex,
+                sourceName: source?.name,
+                rotation: brush.rotation,
+                mirrorX: newMirrorX,
+                mirrorY: newMirrorY,
+              });
+            }
+          }}
+          onMirrorVertical={(index) => {
+            const rotation = paletteRotations[index] ?? 0;
+            const curX = paletteMirrors[index] ?? false;
+            const curY = paletteMirrorsY[index] ?? false;
+            const horizontalInR0 = rotation === 0 || rotation === 180 ? curX : curY;
+            const verticalInR0 = rotation === 0 || rotation === 180 ? curY : curX;
+            const newV = !verticalInR0;
+            const newMirrorX = rotation === 0 || rotation === 180 ? horizontalInR0 : newV;
+            const newMirrorY = rotation === 0 || rotation === 180 ? newV : horizontalInR0;
+            setPaletteMirrors((prev) => ({ ...prev, [index]: newMirrorX }));
+            setPaletteMirrorsY((prev) => ({ ...prev, [index]: newMirrorY }));
+            const source = paletteSources[index];
+            const fileIndex = source ? tileIndexByName.get(source.name) ?? -1 : -1;
+            if (brush.mode === 'fixed' && fileIndex >= 0 && brush.index === fileIndex) {
+              if (source?.name != null) {
+                fixedBrushSourceNameRef.current = source.name;
               }
-              return {
-                ...prev,
-                [index]: nextMirror,
-              };
-            })
-          }
+              setBrush({
+                mode: 'fixed',
+                index: fileIndex,
+                sourceName: source?.name,
+                rotation: brush.rotation,
+                mirrorX: newMirrorX,
+                mirrorY: newMirrorY,
+              });
+            }
+          }}
           getRotation={(index) => paletteRotations[index] ?? 0}
           getMirror={(index) => paletteMirrors[index] ?? false}
           getMirrorVertical={(index) => paletteMirrorsY[index] ?? false}
