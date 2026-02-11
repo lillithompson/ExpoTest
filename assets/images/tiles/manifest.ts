@@ -125,6 +125,12 @@ export const TILE_MANIFEST = {
   ]
 } as const;
 
+/** Thumbnail for each built-in tile set; null if directory has no thumbnail.svg. Not included as a tile option. */
+export const TILE_CATEGORY_THUMBNAILS: Record<keyof typeof TILE_MANIFEST, { name: string; source: unknown } | null> = {
+  "angular": { name: "thumbnail.svg", source: require('@/assets/images/tiles/angular/thumbnail.svg') },
+  "curved": { name: "thumbnail.svg", source: require('@/assets/images/tiles/curved/thumbnail.svg') }
+};
+
 export type TileCategory = keyof typeof TILE_MANIFEST;
 export type TileSource = (typeof TILE_MANIFEST)[TileCategory][number];
 export const TILE_CATEGORIES = Object.keys(TILE_MANIFEST) as TileCategory[];

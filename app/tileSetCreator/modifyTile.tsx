@@ -14,6 +14,7 @@ import ViewShot from 'react-native-view-shot';
 
 import {
     TILE_CATEGORIES,
+    TILE_CATEGORY_THUMBNAILS,
     TILE_MANIFEST,
     type TileCategory,
 } from '@/assets/images/tiles/manifest';
@@ -1146,7 +1147,8 @@ export default function ModifyTileScreen() {
                 <ThemedView style={styles.tileSetChooserGrid}>
                   {TILE_CATEGORIES.map((category) => {
                     const isSelected = selectedCategories.includes(category);
-                    const firstTile = TILE_MANIFEST[category]?.[0];
+                    const firstTile =
+                      TILE_CATEGORY_THUMBNAILS[category] ?? TILE_MANIFEST[category]?.[0];
                     return (
                       <Pressable
                         key={category}
