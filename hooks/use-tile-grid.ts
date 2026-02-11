@@ -2,6 +2,7 @@ import { type MutableRefObject, useCallback, useEffect, useMemo, useRef, useStat
 
 import { type TileSource } from '@/assets/images/tiles/manifest';
 import { buildCompatibilityTables } from '@/utils/tile-compat';
+import { validateDrawStroke } from '@/utils/draw-stroke';
 import {
     buildInitialTiles,
     computeFixedGridLayout,
@@ -27,6 +28,7 @@ type Params = {
   fixedColumns?: number;
   brush:
     | { mode: 'random' }
+    | { mode: 'draw' }
     | { mode: 'erase' }
     | { mode: 'clone' }
     | { mode: 'pattern' }
@@ -84,6 +86,8 @@ type Result = {
   cloneAnchorIndex: number | null;
   cloneCursorIndex: number | null;
   totalCells: number;
+  /** Call when pointer/touch releases so the next draw stroke starts fresh. */
+  clearDrawStroke: () => void;
 };
 
 const toConnectionKey = (connections: boolean[] | null) =>
@@ -181,6 +185,7 @@ export const useTileGrid = ({
   const [cloneAnchorIndex, setCloneAnchorIndex] = useState<number | null>(null);
   const [cloneCursorIndex, setCloneCursorIndex] = useState<number | null>(null);
   const patternAnchorRef = useRef<number | null>(null);
+  const drawStrokeRef = useRef<number[]>([]);
 
   const renderTiles = useMemo(
     () => normalizeTiles(tiles, totalCells, tileSourcesLength),
@@ -392,6 +397,16 @@ export const useTileGrid = ({
     patternAnchorRef.current = null;
   }, [brush.mode, patternAnchorKey]);
 
+  useEffect(() => {
+    if (brush.mode !== 'draw') {
+      drawStrokeRef.current = [];
+    }
+  }, [brush.mode]);
+
+  const clearDrawStroke = useCallback(() => {
+    drawStrokeRef.current = [];
+  }, []);
+
   const compatTables = useMemo(
     () => buildCompatibilityTables(tileSources),
     [tileSourcesKey]
@@ -419,6 +434,120 @@ export const useTileGrid = ({
       default:
         return [];
     }
+  };
+
+  /** Direction 0..7 from fromCell to toCell (N=0, NE=1, E=2, SE=3, S=4, SW=5, W=6, NW=7). Returns -1 if not adjacent. */
+  const getDirectionFromTo = (fromCell: number, toCell: number): number => {
+    const cols = gridLayout.columns;
+    const fromRow = Math.floor(fromCell / cols);
+    const fromCol = fromCell % cols;
+    const toRow = Math.floor(toCell / cols);
+    const toCol = toCell % cols;
+    const dr = toRow - fromRow;
+    const dc = toCol - fromCol;
+    if (Math.abs(dr) > 1 || Math.abs(dc) > 1) {
+      return -1;
+    }
+    const n = dr === -1 && dc === 0 ? 0 : undefined;
+    const ne = dr === -1 && dc === 1 ? 1 : undefined;
+    const e = dr === 0 && dc === 1 ? 2 : undefined;
+    const se = dr === 1 && dc === 1 ? 3 : undefined;
+    const s = dr === 1 && dc === 0 ? 4 : undefined;
+    const sw = dr === 1 && dc === -1 ? 5 : undefined;
+    const w = dr === 0 && dc === -1 ? 6 : undefined;
+    const nw = dr === -1 && dc === -1 ? 7 : undefined;
+    const d = n ?? ne ?? e ?? se ?? s ?? sw ?? w ?? nw;
+    return d ?? -1;
+  };
+
+  const isStrokeValid = (strokeOrder: number[], tilesState: Tile[]): boolean =>
+    validateDrawStroke(
+      strokeOrder,
+      tilesState,
+      gridLayout.columns,
+      (index, rotation, mirrorX, mirrorY) =>
+        compatTables.getConnectionsForPlacement(index, rotation, mirrorX, mirrorY)
+    );
+
+  /** All variants (from allowed indices or all) that have exactly n connections. */
+  const getCandidatesWithConnectionCount = (
+    n: number,
+    allowedIndices: Set<number> | null
+  ): Tile[] => {
+    const candidates: Tile[] = [];
+    connectionsByIndex.forEach((_, imageIndex) => {
+      if (allowedIndices && !allowedIndices.has(imageIndex)) return;
+      const variants = compatTables.variantsByIndex[imageIndex] ?? [];
+      variants.forEach((variant) => {
+        const count = variant.connections.filter(Boolean).length;
+        if (count !== n) return;
+        candidates.push({
+          imageIndex,
+          rotation: variant.rotation,
+          mirrorX: variant.mirrorX,
+          mirrorY: variant.mirrorY,
+          name: tileSources[imageIndex]?.name,
+        });
+      });
+    });
+    return candidates;
+  };
+
+  /** Candidates that have exactly two connections, one of which is requiredDirection (0..7). */
+  const getCandidatesWithTwoConnectionsOneBeing = (
+    requiredDirection: number,
+    allowedIndices: Set<number> | null
+  ): Tile[] => {
+    const candidates: Tile[] = [];
+    connectionsByIndex.forEach((_, imageIndex) => {
+      if (allowedIndices && !allowedIndices.has(imageIndex)) return;
+      const variants = compatTables.variantsByIndex[imageIndex] ?? [];
+      variants.forEach((variant) => {
+        const conn = variant.connections;
+        const count = conn.filter(Boolean).length;
+        if (count !== 2 || !conn[requiredDirection]) return;
+        candidates.push({
+          imageIndex,
+          rotation: variant.rotation,
+          mirrorX: variant.mirrorX,
+          mirrorY: variant.mirrorY,
+          name: tileSources[imageIndex]?.name,
+        });
+      });
+    });
+    return candidates;
+  };
+
+  /** Candidates whose connections are true exactly in requiredTrueDirections (0..7) and false elsewhere. */
+  const getCandidatesWithExactConnections = (
+    requiredTrueDirections: Set<number>,
+    allowedIndices: Set<number> | null
+  ): Tile[] => {
+    const candidates: Tile[] = [];
+    connectionsByIndex.forEach((_, imageIndex) => {
+      if (allowedIndices && !allowedIndices.has(imageIndex)) return;
+      const variants = compatTables.variantsByIndex[imageIndex] ?? [];
+      variants.forEach((variant) => {
+        const conn = variant.connections;
+        let match = true;
+        for (let d = 0; d < 8; d += 1) {
+          if (conn[d] !== requiredTrueDirections.has(d)) {
+            match = false;
+            break;
+          }
+        }
+        if (match) {
+          candidates.push({
+            imageIndex,
+            rotation: variant.rotation,
+            mirrorX: variant.mirrorX,
+            mirrorY: variant.mirrorY,
+            name: tileSources[imageIndex]?.name,
+          });
+        }
+      });
+    });
+    return candidates;
   };
 
   const buildCompatibleCandidates = (
@@ -944,6 +1073,9 @@ export const useTileGrid = ({
     }
     if (!isPartOfDragRef?.current) {
       pushUndo();
+      if (brush.mode === 'draw') {
+        drawStrokeRef.current = [];
+      }
     }
     if (brush.mode === 'erase') {
       applyPlacement(cellIndex, {
@@ -1059,6 +1191,10 @@ export const useTileGrid = ({
       }
       return;
     }
+    const isRandomOrDraw = brush.mode === 'random' || brush.mode === 'draw';
+    if (!isRandomOrDraw) {
+      return;
+    }
     const current = renderTiles[cellIndex];
     if (!current) {
       return;
@@ -1091,17 +1227,60 @@ export const useTileGrid = ({
     const treatUninitForRandomBrush =
       !allowEdgeConnections &&
       getInitializedNeighborCount(cellIndex, renderTiles) > 0;
-    const selection = selectCompatibleTile(
-      cellIndex,
-      renderTiles,
-      randomSourceSet,
-      treatUninitForRandomBrush
-    );
+    const selectionSet = selectionBounds
+      ? new Set(getSelectionCellIndices())
+      : null;
+    const stroke = drawStrokeRef.current;
+    const isDrawFirst = brush.mode === 'draw' && stroke.length === 0;
+    const isDrawSubsequent = brush.mode === 'draw' && stroke.length >= 1;
+
+    const getConnectionCount = (t: Tile): number => {
+      const conn = compatTables.getConnectionsForPlacement(
+        t.imageIndex,
+        t.rotation,
+        t.mirrorX,
+        t.mirrorY
+      );
+      return conn ? conn.filter(Boolean).length : 0;
+    };
+
+    let selection: Tile | null;
+    if (isDrawFirst) {
+      // First tile: exactly one connection; use palette first, then all sources if none
+      let candidates = getCandidatesWithConnectionCount(1, randomSourceSet);
+      if (candidates.length === 0) {
+        candidates = getCandidatesWithConnectionCount(1, null);
+      }
+      const validFirst = candidates.filter((t) =>
+        isPlacementValid(
+          cellIndex,
+          t,
+          renderTiles,
+          treatUninitForRandomBrush,
+          selectionSet
+        )
+      );
+      selection =
+        validFirst.length > 0
+          ? validFirst[Math.floor(Math.random() * validFirst.length)]
+          : null;
+    } else {
+      selection = selectCompatibleTile(
+        cellIndex,
+        renderTiles,
+        randomSourceSet,
+        treatUninitForRandomBrush,
+        selectionSet
+      );
+    }
     if (
       !selection ||
-      !isPlacementValid(cellIndex, selection, renderTiles, treatUninitForRandomBrush)
+      !isPlacementValid(cellIndex, selection, renderTiles, treatUninitForRandomBrush, selectionSet)
     ) {
       if (randomRequiresLegal) {
+        return;
+      }
+      if (brush.mode === 'draw') {
         return;
       }
       setTiles((prev) =>
@@ -1114,6 +1293,93 @@ export const useTileGrid = ({
       return;
     }
 
+    if (isDrawSubsequent) {
+      const prevIndex = stroke[stroke.length - 1];
+      const prevPrevIndex = stroke.length >= 2 ? stroke[stroke.length - 2] : undefined;
+      const dirToPrev = getDirectionFromTo(cellIndex, prevIndex);
+      if (dirToPrev < 0) {
+        return;
+      }
+      // Nth tile: exactly 2 connections, one toward n-1 (and one “free” for the path)
+      let nthCandidates = getCandidatesWithTwoConnectionsOneBeing(
+        dirToPrev,
+        randomSourceSet
+      );
+      if (nthCandidates.length === 0) {
+        nthCandidates = getCandidatesWithTwoConnectionsOneBeing(dirToPrev, null);
+      }
+      const drawSelection =
+        nthCandidates.length > 0
+          ? nthCandidates[Math.floor(Math.random() * nthCandidates.length)]
+          : null;
+      if (!drawSelection) {
+        return;
+      }
+      // Update n-1 first so it connects only to n-2 and n; only n-1 is changed (nothing further back)
+      const dirFromPrevToN = getDirectionFromTo(prevIndex, cellIndex);
+      const dirFromPrevToN2 =
+        prevPrevIndex !== undefined
+          ? getDirectionFromTo(prevIndex, prevPrevIndex)
+          : -1;
+      const requiredPrevDirections = new Set<number>([dirFromPrevToN]);
+      if (dirFromPrevToN2 >= 0) requiredPrevDirections.add(dirFromPrevToN2);
+      let prevCandidates = getCandidatesWithExactConnections(
+        requiredPrevDirections,
+        randomSourceSet
+      );
+      if (prevCandidates.length === 0) {
+        prevCandidates = getCandidatesWithExactConnections(
+          requiredPrevDirections,
+          null
+        );
+      }
+      if (prevCandidates.length === 0) {
+        return;
+      }
+      const prevTile =
+        prevCandidates[Math.floor(Math.random() * prevCandidates.length)];
+      const nextTiles = lastTilesRef.current.map((t) => ({ ...t }));
+      applyPlacementsToArrayOverride(
+        nextTiles,
+        getMirroredPlacements(prevIndex, prevTile),
+        selectionSet ?? undefined
+      );
+      applyPlacementsToArrayOverride(
+        nextTiles,
+        getMirroredPlacements(cellIndex, {
+          imageIndex: drawSelection.imageIndex,
+          rotation: drawSelection.rotation,
+          mirrorX: drawSelection.mirrorX,
+          mirrorY: drawSelection.mirrorY,
+          name: drawSelection.name,
+        }),
+        selectionSet ?? undefined
+      );
+      const normalizedNext = normalizeTiles(
+        nextTiles,
+        totalCells,
+        tileSourcesLength
+      );
+      const newStroke = [...stroke, cellIndex];
+      if (!isStrokeValid(newStroke, normalizedNext)) {
+        return;
+      }
+      setTiles((prev) => {
+        if (tilesEqual(prev, normalizedNext)) return prev;
+        return normalizedNext;
+      });
+      drawStrokeRef.current = newStroke;
+      lastPressRef.current = {
+        cellIndex,
+        imageIndex: drawSelection.imageIndex,
+        rotation: drawSelection.rotation,
+        mirrorX: drawSelection.mirrorX,
+        mirrorY: drawSelection.mirrorY,
+        time: now,
+      };
+      return;
+    }
+
     lastPressRef.current = {
       cellIndex,
       imageIndex: selection.imageIndex,
@@ -1123,13 +1389,10 @@ export const useTileGrid = ({
       time: now,
     };
 
-    const placements = getMirroredPlacements(cellIndex, {
-      imageIndex: selection.imageIndex,
-      rotation: selection.rotation,
-      mirrorX: selection.mirrorX,
-      mirrorY: selection.mirrorY,
-      name: selection.name,
-    });
+    if (brush.mode === 'draw') {
+      drawStrokeRef.current = [...stroke, cellIndex];
+    }
+
     applyPlacement(cellIndex, {
       imageIndex: selection.imageIndex,
       rotation: selection.rotation,
@@ -1237,7 +1500,7 @@ export const useTileGrid = ({
       });
       return;
     }
-    if (brush.mode === 'random') {
+    if (brush.mode === 'random' || brush.mode === 'draw') {
       if (tileSourcesLength <= 0) {
         return;
       }
@@ -1419,7 +1682,7 @@ export const useTileGrid = ({
       });
       return;
     }
-    if (brush.mode === 'random') {
+    if (brush.mode === 'random' || brush.mode === 'draw') {
       const nextTiles = [...normalizeTiles(tiles, totalCells, tileSourcesLength)];
       if (tileSourcesLength <= 0) {
         return;
@@ -1702,5 +1965,6 @@ export const useTileGrid = ({
     cloneAnchorIndex: brush.mode === 'clone' ? cloneAnchorIndex : null,
     cloneCursorIndex: brush.mode === 'clone' ? cloneCursorIndex : null,
     totalCells,
+    clearDrawStroke,
   };
 };

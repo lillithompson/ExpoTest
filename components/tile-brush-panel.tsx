@@ -19,6 +19,7 @@ import { type TileAtlas } from '@/utils/tile-atlas';
 
 type Brush =
   | { mode: 'random' }
+  | { mode: 'draw' }
   | { mode: 'erase' }
   | { mode: 'clone' }
   | { mode: 'pattern' }
@@ -275,46 +276,41 @@ export function TileBrushPanel({
         <View style={[styles.column, { height: columnHeight }]}>
           {[
             { type: 'random' as const },
+            { type: 'draw' as const },
             { type: 'clone' as const },
             { type: 'erase' as const },
             ...(showPattern ? [{ type: 'pattern' as const }] : []),
             ...orderedTileEntries,
           ].map((entry, idx) => {
             const isRandom = entry.type === 'random';
+            const isDraw = entry.type === 'draw';
             const isErase = entry.type === 'erase';
             const isClone = entry.type === 'clone';
             const isPattern = entry.type === 'pattern';
             const isSelected = isRandom
               ? selected.mode === 'random'
-              : isErase
-                ? selected.mode === 'erase'
-                : isClone
-                  ? selected.mode === 'clone'
-                  : isPattern
-                    ? selected.mode === 'pattern'
-                    : selected.mode === 'fixed' && selected.index === entry.index;
+              : isDraw
+                ? selected.mode === 'draw'
+                : isErase
+                  ? selected.mode === 'erase'
+                  : isClone
+                    ? selected.mode === 'clone'
+                    : isPattern
+                      ? selected.mode === 'pattern'
+                      : selected.mode === 'fixed' && selected.index === entry.index;
             const rowIndex = idx % rowCount;
             const isLastRow = rowIndex === rowCount - 1;
+            const isLabelMode = isRandom || isDraw || isErase || isClone || isPattern;
             const rotation =
-              !isRandom && !isErase && !isClone && !isPattern
-                ? getRotation(entry.index)
-                : 0;
+              !isLabelMode ? getRotation(entry.index) : 0;
             const mirrorX =
-              !isRandom && !isErase && !isClone && !isPattern
-                ? getMirror(entry.index)
-                : false;
+              !isLabelMode ? getMirror(entry.index) : false;
             const mirrorY =
-              !isRandom && !isErase && !isClone && !isPattern
-                ? getMirrorVertical(entry.index)
-                : false;
+              !isLabelMode ? getMirrorVertical(entry.index) : false;
             const favoriteColor =
-              !isRandom && !isErase && !isClone && !isPattern
-                ? favorites[entry.tile.name]
-                : null;
+              !isLabelMode ? favorites[entry.tile.name] : null;
             const tileScale =
-              !isRandom && !isErase && !isClone && !isPattern
-                ? strokeScaleByName?.get(entry.tile.name) ?? 1
-                : 1;
+              !isLabelMode ? strokeScaleByName?.get(entry.tile.name) ?? 1 : 1;
             const previewRotationCW = ((selectedPattern?.rotation ?? 0) + 360) % 360;
             const previewRotationCCW = (360 - previewRotationCW) % 360;
             const previewMirrorX = selectedPattern?.mirrorX ?? false;
@@ -352,25 +348,29 @@ export function TileBrushPanel({
                 key={
                   isRandom
                     ? 'random'
-                    : isErase
-                      ? 'erase'
-                      : isClone
-                        ? 'clone'
-                        : isPattern
-                          ? 'pattern'
-                          : `tile-${entry.index}`
+                    : isDraw
+                      ? 'draw'
+                      : isErase
+                        ? 'erase'
+                        : isClone
+                          ? 'clone'
+                          : isPattern
+                            ? 'pattern'
+                            : `tile-${entry.index}`
                 }
                 onPressIn={() =>
                   onSelect(
                     isRandom
                       ? { mode: 'random' }
-                      : isErase
-                        ? { mode: 'erase' }
-                        : isClone
-                          ? { mode: 'clone' }
-                    : isPattern
-                      ? { mode: 'pattern' }
-                      : { mode: 'fixed', index: entry.index, rotation, mirrorX, mirrorY }
+                      : isDraw
+                        ? { mode: 'draw' }
+                        : isErase
+                          ? { mode: 'erase' }
+                          : isClone
+                            ? { mode: 'clone' }
+                            : isPattern
+                              ? { mode: 'pattern' }
+                              : { mode: 'fixed', index: entry.index, rotation, mirrorX, mirrorY }
                   )
                 }
                 onPress={() => {
@@ -438,7 +438,7 @@ export function TileBrushPanel({
                 style={[
                   styles.item,
                   { width: itemSize, height: itemSize },
-                  (isRandom || isErase || isClone || isPattern) && styles.itemLabelMode,
+                  isLabelMode && styles.itemLabelMode,
                   isSelected ? styles.itemSelected : styles.itemDimmed,
                   !isLastRow ? { marginBottom: rowGap } : styles.itemBottom,
                 ]}
@@ -446,13 +446,15 @@ export function TileBrushPanel({
                 accessibilityLabel={
                   isRandom
                     ? 'Random brush'
-                    : isErase
-                      ? 'Erase brush'
-                      : isClone
-                        ? 'Clone brush'
-                        : isPattern
-                          ? 'Pattern brush'
-                          : `Brush ${entry.tile.name}`
+                    : isDraw
+                      ? 'Draw brush'
+                      : isErase
+                        ? 'Erase brush'
+                        : isClone
+                          ? 'Clone brush'
+                          : isPattern
+                            ? 'Pattern brush'
+                            : `Brush ${entry.tile.name}`
                 }
               >
                 <View
@@ -474,6 +476,18 @@ export function TileBrushPanel({
                     />
                     <ThemedText type="default" style={styles.labelTextSmall}>
                       Random
+                    </ThemedText>
+                  </View>
+                ) : isDraw ? (
+                  <View style={styles.labelButton}>
+                    <MaterialCommunityIcons
+                      name="pencil"
+                      size={itemSize * 0.4}
+                      color="#fff"
+                      style={styles.labelIcon}
+                    />
+                    <ThemedText type="default" style={styles.labelTextSmall}>
+                      Draw
                     </ThemedText>
                   </View>
                 ) : isErase ? (

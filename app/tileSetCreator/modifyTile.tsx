@@ -358,6 +358,7 @@ export default function ModifyTileScreen() {
 
   const [brush, setBrush] = useState<
     | { mode: 'random' }
+    | { mode: 'draw' }
     | { mode: 'erase' }
     | { mode: 'clone' }
     | { mode: 'pattern' }
@@ -413,6 +414,7 @@ export default function ModifyTileScreen() {
     cloneSampleIndex,
     cloneAnchorIndex,
     cloneCursorIndex,
+    clearDrawStroke,
   } = useTileGrid({
     tileSources,
     availableWidth,
@@ -942,6 +944,7 @@ export default function ModifyTileScreen() {
             }}
             onResponderRelease={() => {
               isPartOfDragRef.current = false;
+              clearDrawStroke();
               if (longPressTimeoutRef.current) {
                 clearTimeout(longPressTimeoutRef.current);
                 longPressTimeoutRef.current = null;
@@ -953,6 +956,7 @@ export default function ModifyTileScreen() {
             }}
             onResponderTerminate={() => {
               isPartOfDragRef.current = false;
+              clearDrawStroke();
               if (longPressTimeoutRef.current) {
                 clearTimeout(longPressTimeoutRef.current);
                 longPressTimeoutRef.current = null;

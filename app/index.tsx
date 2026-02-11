@@ -718,6 +718,7 @@ export default function TestScreen() {
   const [viewMode, setViewMode] = useState<'modify' | 'file'>('file');
   const [brush, setBrush] = useState<
     | { mode: 'random' }
+    | { mode: 'draw' }
     | { mode: 'erase' }
     | { mode: 'clone' }
     | { mode: 'pattern' }
@@ -1272,6 +1273,7 @@ export default function TestScreen() {
     cloneSampleIndex,
     cloneAnchorIndex,
     cloneCursorIndex,
+    clearDrawStroke,
   } = useTileGrid({
     tileSources,
     availableWidth,
@@ -4572,11 +4574,13 @@ export default function TestScreen() {
               }}
               onMouseLeave={() => {
                 isPartOfDragRef.current = false;
+                clearDrawStroke();
                 setInteracting(false);
                 lastPaintedRef.current = null;
               }}
               onMouseUp={(event: any) => {
                 isPartOfDragRef.current = false;
+                clearDrawStroke();
                 setInteracting(false);
                 const now = Date.now();
                 if (
@@ -4772,6 +4776,7 @@ export default function TestScreen() {
                   }
                 }
                 isPartOfDragRef.current = false;
+                clearDrawStroke();
                 isTouchDragActiveRef.current = false;
                 setInteracting(false);
                 const now = Date.now();
@@ -4804,6 +4809,7 @@ export default function TestScreen() {
                 pendingSingleTouchStartTimeRef.current = 0;
                 multiFingerTouchCountRef.current = 0;
                 isPartOfDragRef.current = false;
+                clearDrawStroke();
                 isTouchDragActiveRef.current = false;
                 setInteracting(false);
                 lastPaintedRef.current = null;
@@ -5015,6 +5021,7 @@ export default function TestScreen() {
                 }}
                 onResponderRelease={(event: any) => {
                   isPartOfDragRef.current = false;
+                  clearDrawStroke();
                   setInteracting(false);
                   const now = Date.now();
                   if (
@@ -5050,6 +5057,7 @@ export default function TestScreen() {
                 }}
                 onResponderTerminate={() => {
                   isPartOfDragRef.current = false;
+                  clearDrawStroke();
                   setInteracting(false);
                   if (longPressTimeoutRef.current) {
                     clearTimeout(longPressTimeoutRef.current);
