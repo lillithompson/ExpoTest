@@ -5663,7 +5663,10 @@ export default function TestScreen() {
                   <ThemedView style={styles.tileSetChooserGrid}>
                 {userTileSets.map((set) => {
                   const isSelected = selectedTileSetIds.includes(set.id);
-                  const firstTile = set.tiles[0];
+                  const firstTile =
+                    [...set.tiles].sort((a, b) =>
+                      (a.name ?? '').localeCompare(b.name ?? '')
+                    )[0] ?? null;
                   const thumbUri = firstTile?.thumbnailUri ?? firstTile?.previewUri ?? null;
                   return (
                     <Pressable

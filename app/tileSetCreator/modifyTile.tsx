@@ -4,6 +4,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
     Platform,
     Pressable,
+    ScrollView,
     StyleSheet,
     useWindowDimensions,
     View,
@@ -16,6 +17,7 @@ import {
     TILE_MANIFEST,
     type TileCategory,
 } from '@/assets/images/tiles/manifest';
+import { TileAsset } from '@/components/tile-asset';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { TileAtlasSprite } from '@/components/tile-atlas-sprite';
@@ -1135,42 +1137,77 @@ export default function ModifyTileScreen() {
           />
           <View style={styles.overlayPanel}>
             <ThemedText type="title">Tile Sets</ThemedText>
-            <ThemedView style={styles.sectionGroup}>
-              <ThemedText type="defaultSemiBold">Tile Sets</ThemedText>
-              <ThemedView style={styles.overlayList}>
-                {TILE_CATEGORIES.map((category) => (
-                  <Pressable
-                    key={category}
-                    onPress={() => {
-                      const isSelected = selectedCategories.includes(category);
-                      if (isSelected && selectedCategories.length === 1) {
-                        setTileSetSelectionError('Select at least one tile set.');
-                        return;
-                      }
-                      const nextCategories = isSelected
-                        ? selectedCategories.filter((entry) => entry !== category)
-                        : [...selectedCategories, category];
-                      setTileSetSelectionError(null);
-                      setSettings((prev) => ({
-                        ...prev,
-                        tileModifyCategories: nextCategories,
-                      }));
-                    }}
-                    style={[
-                      styles.overlayItem,
-                      selectedCategories.includes(category) && styles.overlayItemSelected,
-                    ]}
-                  >
-                    <ThemedText type="defaultSemiBold">{category}</ThemedText>
-                  </Pressable>
-                ))}
+            <ScrollView
+              style={styles.tileSetChooserScroll}
+              contentContainerStyle={styles.tileSetChooserScrollContent}
+              showsVerticalScrollIndicator
+            >
+              <ThemedView style={styles.tileSetChooserSection}>
+                <ThemedView style={styles.tileSetChooserGrid}>
+                  {TILE_CATEGORIES.map((category) => {
+                    const isSelected = selectedCategories.includes(category);
+                    const firstTile = TILE_MANIFEST[category]?.[0];
+                    return (
+                      <Pressable
+                        key={category}
+                        onPress={() => {
+                          if (isSelected && selectedCategories.length === 1) {
+                            setTileSetSelectionError('Select at least one tile set.');
+                            return;
+                          }
+                          const nextCategories = isSelected
+                            ? selectedCategories.filter((entry) => entry !== category)
+                            : [...selectedCategories, category];
+                          setTileSetSelectionError(null);
+                          setSettings((prev) => ({
+                            ...prev,
+                            tileModifyCategories: nextCategories,
+                          }));
+                          if (tileSet) {
+                            updateTileSet(tileSet.id, (set) => ({
+                              ...set,
+                              categories: nextCategories,
+                              updatedAt: Date.now(),
+                            }));
+                          }
+                        }}
+                        style={styles.tileSetChooserCard}
+                        accessibilityState={{ selected: isSelected }}
+                      >
+                        <View
+                          style={[
+                            styles.tileSetChooserThumb,
+                            !isSelected && styles.tileSetChooserThumbUnselected,
+                            isSelected && styles.tileSetChooserThumbSelected,
+                          ]}
+                        >
+                          {firstTile && (
+                            <TileAsset
+                              source={firstTile.source}
+                              name={firstTile.name}
+                              style={styles.tileSetChooserThumbImage}
+                              resizeMode="cover"
+                            />
+                          )}
+                        </View>
+                        <ThemedText
+                          type="defaultSemiBold"
+                          style={styles.tileSetChooserLabel}
+                          numberOfLines={2}
+                        >
+                          {category}
+                        </ThemedText>
+                      </Pressable>
+                    );
+                  })}
+                </ThemedView>
               </ThemedView>
-              {tileSetSelectionError && (
-                <ThemedText type="defaultSemiBold" style={styles.errorText}>
-                  {tileSetSelectionError}
-                </ThemedText>
-              )}
-            </ThemedView>
+            </ScrollView>
+            {tileSetSelectionError && (
+              <ThemedText type="defaultSemiBold" style={styles.errorText}>
+                {tileSetSelectionError}
+              </ThemedText>
+            )}
           </View>
         </View>
       )}
@@ -1299,6 +1336,49 @@ const styles = StyleSheet.create({
     backgroundColor: '#ffffff',
     borderRadius: 12,
     padding: 16,
+  },
+  tileSetChooserScroll: {
+    maxHeight: 320,
+  },
+  tileSetChooserScrollContent: {
+    paddingVertical: 8,
+    gap: 16,
+  },
+  tileSetChooserSection: {},
+  tileSetChooserGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+  },
+  tileSetChooserCard: {
+    width: 96,
+    alignItems: 'center',
+    padding: 6,
+  },
+  tileSetChooserThumb: {
+    width: 72,
+    height: 72,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#1f1f1f',
+    backgroundColor: '#111',
+    overflow: 'hidden',
+  },
+  tileSetChooserThumbUnselected: {
+    opacity: 0.5,
+  },
+  tileSetChooserThumbSelected: {
+    borderColor: '#22c55e',
+    borderWidth: 2,
+  },
+  tileSetChooserThumbImage: {
+    width: '100%',
+    height: '100%',
+  },
+  tileSetChooserLabel: {
+    marginTop: 6,
+    textAlign: 'center',
+    fontSize: 12,
   },
   overlayList: {
     gap: 8,

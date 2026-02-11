@@ -42,6 +42,13 @@ type BakedPreview = { uri: string; signature: string };
 /** Persist baked previews across navigations so we avoid flashing the live grid. */
 const bakedPreviewCache = new Map<string, BakedPreview>();
 
+/** First four tiles when sorted by name (alphabetically), for set thumbnail. */
+function getPreviewTilesForSet(tiles: TileSetTile[]): TileSetTile[] {
+  return [...tiles]
+    .sort((a, b) => (a.name ?? '').localeCompare(b.name ?? ''))
+    .slice(0, 4);
+}
+
 type TileSetPreviewProps = {
   setId: string;
   previewTiles: TileSetTile[];
@@ -121,7 +128,7 @@ export default function TileSetCreatorScreen() {
     }
     let cancelled = false;
     const buildSignature = (set: (typeof tileSets)[number]) => {
-      const previewTiles = set.tiles.slice(0, 4);
+      const previewTiles = getPreviewTilesForSet(set.tiles);
       const tileTokens = previewTiles
         .map((tile) => `${tile.id}:${tile.updatedAt}:${tile.thumbnailUri ?? ''}`)
         .join('|');
@@ -148,7 +155,7 @@ export default function TileSetCreatorScreen() {
     }
     const buildPreviews = async () => {
       for (const set of tileSets) {
-        const previewTiles = set.tiles.slice(0, 4);
+        const previewTiles = getPreviewTilesForSet(set.tiles);
         const signature = signatures[set.id];
         if (next[set.id]) {
           continue;
@@ -491,7 +498,7 @@ export default function TileSetCreatorScreen() {
         {[...tileSets]
           .sort((a, b) => b.updatedAt - a.updatedAt)
           .map((set) => {
-            const previewTiles = set.tiles.slice(0, 4);
+            const previewTiles = getPreviewTilesForSet(set.tiles);
             const categories =
               set.categories && set.categories.length > 0
                 ? set.categories

@@ -38,14 +38,14 @@ Modify View (viewMode = "modify")
 - Brush panel: Scrollable tile palette (2–5 rows; when row height would exceed 120px another row is added) plus Random, Clone, Erase, and Pattern buttons. Random, Erase, Clone, and Pattern (when no pattern selected) show a centered icon above smaller, unbold label text. The Pattern button shows the same icon+label style when no pattern is selected; when a pattern is selected it shows the pattern thumbnail. Palette tiles use an absolutely positioned 4px border overlay (dark when unselected, green when selected) and a full-size (itemSize × itemSize) content wrapper so tile images stay centered with no shift on selection or when switching from cached/loading image to atlas canvas.
 - Pattern chooser modal: Lists patterns for the active category with actions for create and select mode.
 - Pattern save modal: Preview of the selection with Save/Cancel.
-- Tile Set chooser overlay: Grid of thumbnails (first tile per set) with name below. At top: Allow Border Connections toggle. Built-in categories then user tile sets. Selected items are brighter with green border (#22c55e, 2px); multi-select to define the active palette.
+- Tile Set chooser overlay: Grid of thumbnails (alphabetically first tile per set) with name below. At top: Allow Border Connections toggle. Built-in categories then user tile sets. Selected items are brighter with green border (#22c55e, 2px); multi-select to define the active palette.
 - Settings overlay (modify view): First option "View manual" opens the in-app manual. Then Download PNG action, Show Debug toggle, background color and line controls. Bottom of settings: light grey platform label (Desktop Web, Mobile Web, Expo Go, iOS, or Android).
 - Download overlay (native): ViewShot capture with background toggle and PNG/SVG actions.
 
 Tile Set Creator List (tileSetCreator/index.tsx)
 - Header row: On desktop web, same switchable tabs "Files" | "Tile Sets" as File view; on mobile web and native, single title "Tile Sets" (tap returns to File view). Actions for Create and Select Mode.
 - Select mode bar: Animated bar with Delete, selected count, Exit.
-- Tile set grid: Cards with 2x2 previews (baked image or, on native, live grid). On web, a dark placeholder is shown until the baked preview is ready (no live grid) to avoid a white-border flash; baked previews are cached in a module-level map so they persist across navigations and are not regenerated when returning to the list. Long press (web only) opens download modal.
+- Tile set grid: Cards with 2x2 previews (baked image or, on native, live grid). The thumbnail uses the four tiles that are alphabetically first by name in the set (same order in Tile Set chooser). On web, a dark placeholder is shown until the baked preview is ready (no live grid) to avoid a white-border flash; baked previews are cached in a module-level map so they persist across navigations and are not regenerated when returning to the list. Long press (web only) opens download modal.
 - Create Tile Set modal: Name input and resolution options 2, 3, 4.
 - Download Tile Set modal (web only): Downloads all tiles in the set as a ZIP of SVGs. Each SVG is named `{tile set name}_{connectivity}.svg` (spaces in the tile set name become underscores). If multiple tiles share the same connectivity, they are named `{tile set name}_01_{connectivity}.svg`, `{tile set name}_02_{connectivity}.svg`, etc.
 
@@ -60,6 +60,7 @@ Tile Modify View (tileSetCreator/modifyTile.tsx)
 - Header row: back button label "Modify Tile" (upper left); toolbar actions similar to Modify View.
 - Grid background and optional debug overlay.
 - Brush panel: 2–5 rows (row count increases when row height would exceed 120px); for editing the tile template.
+- Tile Set chooser (double tap or long press Random): Same thumbnail grid styling as the File/Modify view Tile Set chooser (card, 72×72 thumb, alphabetically first tile per set/category, green border when selected). Only built-in categories are shown; UGC tile sets are not selectable in this modal.
 
 Core Behaviors and Tool Rules
 - Tile connectivity is driven by `tile_########.png/svg` naming (see AI_ASSET_RULES). Connections are used to validate random placements and compatibility.
