@@ -67,7 +67,10 @@ import {
     renderTileCanvasToDataUrl,
     renderTileCanvasToSvg,
 } from '@/utils/tile-export';
-import { getCellIndicesInRegion } from '@/utils/locked-regions';
+import {
+  getCellIndicesInRegion,
+  getLockedBoundaryEdges,
+} from '@/utils/locked-regions';
 import { hydrateTilesWithSourceNames, normalizeTiles, type Tile } from '@/utils/tile-grid';
 
 const GRID_GAP = 0;
@@ -2916,6 +2919,28 @@ export default function TestScreen() {
     }
     return new Set(cells);
   }, [activeFile?.lockedCells]);
+  const lockedCellIndicesArray = useMemo(
+    () => (lockedCellIndicesSet ? Array.from(lockedCellIndicesSet) : null),
+    [lockedCellIndicesSet]
+  );
+  const lockedBoundaryEdges = useMemo(() => {
+    const cells = activeFile?.lockedCells ?? [];
+    if (cells.length === 0 || gridLayout.columns <= 0 || gridLayout.rows <= 0) {
+      return [];
+    }
+    return getLockedBoundaryEdges(
+      cells,
+      gridLayout.columns,
+      gridLayout.rows,
+      gridLayout.tileSize,
+      GRID_GAP
+    );
+  }, [
+    activeFile?.lockedCells,
+    gridLayout.columns,
+    gridLayout.rows,
+    gridLayout.tileSize,
+  ]);
   const patternAlignmentRect = useMemo(() => {
     if (
       brush.mode !== 'pattern' ||
@@ -4318,15 +4343,17 @@ export default function TestScreen() {
                       gridLayout.columns
                     )
                   : [];
-              const lockedSet = new Set(activeFile?.lockedCells ?? []);
               const allSelectedLocked =
                 selectionIndices.length > 0 &&
-                selectionIndices.every((i) => lockedSet.has(i));
+                (lockedCellIndicesSet
+                  ? selectionIndices.every((i) => lockedCellIndicesSet.has(i))
+                  : false);
               return (
                 <ToolbarButton
                   label={allSelectedLocked ? 'Unlock region' : 'Lock region'}
                   icon="lock"
                   active={allSelectedLocked}
+                  color={allSelectedLocked ? '#dc2626' : undefined}
                   onPress={() => {
                     if (!canvasSelection || gridLayout.columns === 0) {
                       return;
@@ -4336,8 +4363,7 @@ export default function TestScreen() {
                       canvasSelection.end,
                       gridLayout.columns
                     );
-                    const currentLocked = new Set(activeFile?.lockedCells ?? []);
-                    if (indices.every((i) => currentLocked.has(i))) {
+                    if (lockedCellIndicesSet && indices.every((i) => lockedCellIndicesSet.has(i))) {
                       const next = (activeFile?.lockedCells ?? []).filter(
                         (i) => !indices.includes(i)
                       );
@@ -4550,6 +4576,13 @@ export default function TestScreen() {
               style={[styles.canvasSelectionBox, canvasSelectionRect]}
             />
           )}
+          {lockedBoundaryEdges.map((rect, idx) => (
+            <View
+              key={`locked-edge-${idx}`}
+              pointerEvents="none"
+              style={[styles.lockedBoundaryEdge, rect]}
+            />
+          ))}
           {patternAlignmentRect && (
             <View
               pointerEvents="none"
@@ -4961,11 +4994,8 @@ export default function TestScreen() {
                   cloneSampleIndex={brush.mode === 'clone' ? cloneSampleIndex : null}
                   cloneAnchorIndex={brush.mode === 'clone' ? cloneAnchorIndex : null}
                   cloneCursorIndex={brush.mode === 'clone' ? cloneCursorIndex : null}
-                  lockedCellIndices={
-                    lockedCellIndicesSet
-                      ? Array.from(lockedCellIndicesSet)
-                      : null
-                  }
+                  lockedCellIndices={lockedCellIndicesArray}
+                  lockedBoundaryEdges={lockedBoundaryEdges}
                   onPaintReady={
                     Platform.OS !== 'web'
                       ? () => setNativeCanvasPaintReady(true)
@@ -6668,7 +6698,12 @@ const styles = StyleSheet.create({
     position: 'absolute',
     borderWidth: 2,
     borderColor: '#22c55e',
-    zIndex: 5,
+    zIndex: 3,
+  },
+  lockedBoundaryEdge: {
+    position: 'absolute',
+    backgroundColor: '#dc2626',
+    zIndex: 15,
   },
   patternAlignment: {
     position: 'absolute',

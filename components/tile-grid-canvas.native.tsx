@@ -26,6 +26,8 @@ type Props = {
   cloneCursorIndex: number | null;
   /** Cell indices that are locked (drawn at 0.5 opacity). */
   lockedCellIndices?: number[] | null;
+  /** Pixel rects for the outside border of locked cells (grey 2px segments). */
+  lockedBoundaryEdges?: Array<{ left: number; top: number; width: number; height: number }> | null;
   /** Called when the canvas has loaded SVGs and painted (so a cached preview can be hidden). */
   onPaintReady?: () => void;
 };
@@ -56,6 +58,7 @@ export function TileGridCanvas({
   cloneAnchorIndex,
   cloneCursorIndex,
   lockedCellIndices = null,
+  lockedBoundaryEdges = null,
   onPaintReady,
 }: Props) {
   const lockedSet = useMemo(() => {
@@ -322,10 +325,26 @@ export function TileGridCanvas({
     });
   }, [overlayRects, columns, tileSize, showOverlays]);
 
+  const lockedBorderNodes = useMemo(() => {
+    if (!lockedBoundaryEdges?.length) return [] as Array<JSX.Element>;
+    const color = '#dc2626';
+    return lockedBoundaryEdges.map((rect, idx) => (
+      <Rect
+        key={`locked-edge-${idx}`}
+        x={rect.left}
+        y={rect.top}
+        width={rect.width}
+        height={rect.height}
+        color={color}
+      />
+    ));
+  }, [lockedBoundaryEdges]);
+
   return (
     <Canvas style={{ width, height }}>
       {drawTiles}
       {overlayNodes}
+      {lockedBorderNodes}
       {debugDots}
     </Canvas>
   );

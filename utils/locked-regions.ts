@@ -101,3 +101,62 @@ export function regionsEqual(
   const nb = normalizeRegion(b.start, b.end, columns);
   return na.start === nb.start && na.end === nb.end;
 }
+
+const LOCKED_BORDER_WIDTH = 2;
+
+/**
+ * Returns rects for the outside border of the locked cells only (edges between
+ * a locked cell and a non-locked cell or grid edge). Each rect is a 2px grey
+ * border segment in pixel coordinates.
+ */
+export function getLockedBoundaryEdges(
+  lockedCells: number[],
+  columns: number,
+  rows: number,
+  tileSize: number,
+  gap: number
+): Array<{ left: number; top: number; width: number; height: number }> {
+  if (lockedCells.length === 0 || columns <= 0 || rows <= 0) {
+    return [];
+  }
+  const lockedSet = new Set(lockedCells);
+  const stride = tileSize + gap;
+  const edges: Array<{ left: number; top: number; width: number; height: number }> = [];
+
+  for (const index of lockedCells) {
+    const row = Math.floor(index / columns);
+    const col = index % columns;
+    const left = col * stride;
+    const top = row * stride;
+
+    const topNeighbor = row > 0 ? index - columns : -1;
+    const bottomNeighbor = row < rows - 1 ? index + columns : -1;
+    const leftNeighbor = col > 0 ? index - 1 : -1;
+    const rightNeighbor = col < columns - 1 ? index + 1 : -1;
+
+    if (topNeighbor < 0 || !lockedSet.has(topNeighbor)) {
+      edges.push({ left, top, width: tileSize, height: LOCKED_BORDER_WIDTH });
+    }
+    if (bottomNeighbor < 0 || !lockedSet.has(bottomNeighbor)) {
+      edges.push({
+        left,
+        top: top + tileSize - LOCKED_BORDER_WIDTH,
+        width: tileSize,
+        height: LOCKED_BORDER_WIDTH,
+      });
+    }
+    if (leftNeighbor < 0 || !lockedSet.has(leftNeighbor)) {
+      edges.push({ left, top, width: LOCKED_BORDER_WIDTH, height: tileSize });
+    }
+    if (rightNeighbor < 0 || !lockedSet.has(rightNeighbor)) {
+      edges.push({
+        left: left + tileSize - LOCKED_BORDER_WIDTH,
+        top,
+        width: LOCKED_BORDER_WIDTH,
+        height: tileSize,
+      });
+    }
+  }
+
+  return edges;
+}
