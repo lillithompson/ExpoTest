@@ -495,6 +495,7 @@ export default function TileSetEditorScreen() {
                   setContextTileId(tile.id);
                   setShowContextMenu(true);
                 }}
+                onContextMenu={Platform.OS === 'web' ? (e) => e.preventDefault() : undefined}
                 accessibilityRole="button"
                 accessibilityLabel={`Open ${tile.name}`}
               >

@@ -48,7 +48,8 @@ import { useTileGrid } from '@/hooks/use-tile-grid';
 import { useTilePatterns } from '@/hooks/use-tile-patterns';
 import { useTileSets } from '@/hooks/use-tile-sets';
 import { clearAllLocalData } from '@/utils/clear-local-data';
-import { deserializeTileFile } from '@/utils/tile-format';
+import { deserializeTileFile, serializeTileFile } from '@/utils/tile-format';
+import JSZip from 'jszip';
 import {
     canApplyEmptyNewFileRestore,
     canApplyNonEmptyRestore,
@@ -709,6 +710,8 @@ export default function TestScreen() {
   const [includeDownloadBackground, setIncludeDownloadBackground] = useState(true);
   const [isSelectMode, setIsSelectMode] = useState(false);
   const [selectedFileIds, setSelectedFileIds] = useState<Set<string>>(new Set());
+  const [showExportMenu, setShowExportMenu] = useState(false);
+  const [exportModeForDownload, setExportModeForDownload] = useState(false);
   const selectBarAnim = useRef(new Animated.Value(0)).current;
   const [isHydratingFile, setIsHydratingFile] = useState(false);
   const [gridStabilized, setGridStabilized] = useState(false);
@@ -3387,6 +3390,11 @@ export default function TestScreen() {
     clearSelection();
   };
 
+  const selectedFiles = useMemo(
+    () => files.filter((f) => selectedFileIds.has(f.id)),
+    [files, selectedFileIds]
+  );
+
   const toggleSelectPattern = (patternId: string) => {
     setSelectedPatternIds((prev) => {
       const next = new Set(prev);
@@ -3444,6 +3452,7 @@ export default function TestScreen() {
       setIsDownloading(false);
       setDownloadTargetId(null);
       setShowDownloadOverlay(false);
+      setExportModeForDownload(false);
     }
   };
 
@@ -3608,6 +3617,193 @@ export default function TestScreen() {
     []
   );
 
+  const exportSelectedAsPng = useCallback(async () => {
+    if (selectedFiles.length === 0) {
+      setShowExportMenu(false);
+      return;
+    }
+    if (selectedFiles.length === 1) {
+      const file = selectedFiles[0];
+      if (Platform.OS === 'web') {
+        const sources = getSourcesForFile(file);
+        void downloadFile(file, sources, {
+          backgroundColor: settings.backgroundColor,
+          strokeScaleByName,
+        });
+      } else {
+        setIncludeDownloadBackground(true);
+        setExportModeForDownload(true);
+        setDownloadTargetId(file.id);
+        setShowDownloadOverlay(true);
+      }
+      setShowExportMenu(false);
+      return;
+    }
+    if (Platform.OS !== 'web') {
+      setShowExportMenu(false);
+      return;
+    }
+    setShowExportMenu(false);
+    const zip = new JSZip();
+    for (const file of selectedFiles) {
+      const sources = getSourcesForFile(file);
+      const dataUrl = await renderTileCanvasToDataUrl({
+        tiles: file.tiles,
+        gridLayout: {
+          rows: file.grid.rows,
+          columns: file.grid.columns,
+          tileSize: file.preferredTileSize,
+        },
+        tileSources: sources as any,
+        gridGap: 0,
+        blankSource: null,
+        errorSource: null,
+        lineColor: file.lineColor,
+        lineWidth: file.lineWidth,
+        backgroundColor: settings.backgroundColor,
+        strokeScaleByName,
+        maxDimension: 0,
+      });
+      if (dataUrl) {
+        const base64 = dataUrl.replace(/^data:image\/\w+;base64,/, '');
+        const safeName = file.name.replace(/[^\w-]+/g, '_');
+        zip.file(`${safeName}.png`, base64, { base64: true });
+      }
+    }
+    const blob = await zip.generateAsync({ type: 'blob' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'exports.zip';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  }, [selectedFiles, getSourcesForFile, downloadFile, strokeScaleByName, settings.backgroundColor]);
+
+  const exportSelectedAsSvg = useCallback(async () => {
+    if (selectedFiles.length === 0) {
+      setShowExportMenu(false);
+      return;
+    }
+    if (selectedFiles.length === 1) {
+      const file = selectedFiles[0];
+      if (Platform.OS === 'web') {
+        const sources = getSourcesForSvgExport(file);
+        const ugcXmlBySourceName = await buildUgcXmlBySourceName(file, sources);
+        const sourcesWithInlineUgc = await replaceUgcSourcesWithDataUris(sources);
+        const sourceXmlCache = await buildSourceXmlCache(sourcesWithInlineUgc);
+        await exportTileCanvasAsSvg({
+          tiles: file.tiles,
+          gridLayout: {
+            rows: file.grid.rows,
+            columns: file.grid.columns,
+            tileSize: file.preferredTileSize,
+          },
+          tileSources: sourcesWithInlineUgc,
+          gridGap: GRID_GAP,
+          errorSource: ERROR_TILE,
+          lineColor: file.lineColor,
+          lineWidth: file.lineWidth,
+          backgroundColor: settings.backgroundColor,
+          strokeScaleByName,
+          sourceXmlCache,
+          ugcXmlBySourceName,
+          fileName: `${file.name.replace(/[^\w-]+/g, '_')}.svg`,
+        });
+      } else {
+        setIncludeDownloadBackground(true);
+        setExportModeForDownload(true);
+        setDownloadTargetId(file.id);
+        setShowDownloadOverlay(true);
+      }
+      setShowExportMenu(false);
+      return;
+    }
+    if (Platform.OS !== 'web') {
+      setShowExportMenu(false);
+      return;
+    }
+    setShowExportMenu(false);
+    const zip = new JSZip();
+    for (const file of selectedFiles) {
+      const sources = getSourcesForSvgExport(file);
+      const ugcXmlBySourceName = await buildUgcXmlBySourceName(file, sources);
+      const sourcesWithInlineUgc = await replaceUgcSourcesWithDataUris(sources);
+      const sourceXmlCache = await buildSourceXmlCache(sourcesWithInlineUgc);
+      const svg = await renderTileCanvasToSvg({
+        tiles: file.tiles,
+        gridLayout: {
+          rows: file.grid.rows,
+          columns: file.grid.columns,
+          tileSize: file.preferredTileSize,
+        },
+        tileSources: sourcesWithInlineUgc,
+        gridGap: GRID_GAP,
+        errorSource: ERROR_TILE,
+        lineColor: file.lineColor,
+        lineWidth: file.lineWidth,
+        backgroundColor: settings.backgroundColor,
+        sourceXmlCache,
+        ugcXmlBySourceName,
+        strokeScaleByName,
+      });
+      if (svg) {
+        const safeName = file.name.replace(/[^\w-]+/g, '_');
+        zip.file(`${safeName}.svg`, svg);
+      }
+    }
+    const blob = await zip.generateAsync({ type: 'blob' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'exports.zip';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  }, [
+    selectedFiles,
+    getSourcesForSvgExport,
+    buildUgcXmlBySourceName,
+    replaceUgcSourcesWithDataUris,
+    buildSourceXmlCache,
+    settings.backgroundColor,
+    strokeScaleByName,
+  ]);
+
+  const exportSelectedAsTile = useCallback(async () => {
+    if (selectedFiles.length === 0) {
+      setShowExportMenu(false);
+      return;
+    }
+    if (selectedFiles.length === 1) {
+      void downloadTileFile(selectedFiles[0]);
+      setShowExportMenu(false);
+      return;
+    }
+    if (Platform.OS !== 'web') {
+      setShowExportMenu(false);
+      return;
+    }
+    setShowExportMenu(false);
+    const zip = new JSZip();
+    for (const file of selectedFiles) {
+      const content = serializeTileFile(file);
+      const safeName = file.name.replace(/[^\w\s-]+/g, '').trim() || 'canvas';
+      zip.file(`${safeName}.tile`, content);
+    }
+    const blob = await zip.generateAsync({ type: 'blob' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'exports.zip';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  }, [selectedFiles, downloadTileFile]);
+
   const handleDownloadSvg = async () => {
     if (!downloadTargetFile) {
       return;
@@ -3656,6 +3852,7 @@ export default function TestScreen() {
       setIsDownloading(false);
       setDownloadTargetId(null);
       setShowDownloadOverlay(false);
+      setExportModeForDownload(false);
     }
   };
 
@@ -3762,19 +3959,36 @@ export default function TestScreen() {
           ]}
           pointerEvents={isSelectMode ? 'auto' : 'none'}
         >
-          <Pressable
-            onPress={deleteSelectedFiles}
-            style={styles.fileSelectDelete}
-            accessibilityRole="button"
-            accessibilityLabel="Delete selected files"
-          >
-            <ThemedText type="defaultSemiBold" style={styles.fileSelectDeleteText}>
-              Delete
+          <View style={styles.fileSelectDeleteExportRow}>
+            <Pressable
+              onPress={deleteSelectedFiles}
+              style={styles.fileSelectDelete}
+              accessibilityRole="button"
+              accessibilityLabel="Delete selected files"
+            >
+              <ThemedText type="defaultSemiBold" style={styles.fileSelectDeleteText}>
+                Delete
+              </ThemedText>
+            </Pressable>
+            <ThemedText type="defaultSemiBold" style={styles.fileSelectPipe}>
+              {' | '}
             </ThemedText>
-          </Pressable>
-          <ThemedText type="defaultSemiBold" style={styles.fileSelectCount}>
-            {selectedFileIds.size > 0 ? `${selectedFileIds.size} selected` : ''}
-          </ThemedText>
+            <Pressable
+              onPress={() => setShowExportMenu(true)}
+              style={styles.fileSelectExport}
+              accessibilityRole="button"
+              accessibilityLabel="Export selected files"
+            >
+              <ThemedText type="defaultSemiBold" style={styles.fileSelectExportText}>
+                Export
+              </ThemedText>
+            </Pressable>
+          </View>
+          {!isMobileWeb && (
+            <ThemedText type="defaultSemiBold" style={styles.fileSelectCount}>
+              {selectedFileIds.size > 0 ? `${selectedFileIds.size} selected` : ''}
+            </ThemedText>
+          )}
           <Pressable
             onPress={clearSelection}
             style={styles.fileSelectButton}
@@ -3834,6 +4048,7 @@ export default function TestScreen() {
                   setIncludeDownloadBackground(true);
                   setFileMenuTargetId(file.id);
                 }}
+                onContextMenu={Platform.OS === 'web' ? (e) => e.preventDefault() : undefined}
                 delayLongPress={320}
                 accessibilityRole="button"
                 accessibilityLabel={`Open ${file.name}`}
@@ -4013,14 +4228,16 @@ export default function TestScreen() {
                   })()
                 )}
               </ViewShot>
-              <ThemedView style={styles.downloadOptions}>
-                <ThemedText type="defaultSemiBold">Include background color</ThemedText>
-                <Switch
-                  value={includeDownloadBackground}
-                  onValueChange={(value) => setIncludeDownloadBackground(value)}
-                  accessibilityLabel="Include background color in download"
-                />
-              </ThemedView>
+              {!exportModeForDownload && (
+                <ThemedView style={styles.downloadOptions}>
+                  <ThemedText type="defaultSemiBold">Include background color</ThemedText>
+                  <Switch
+                    value={includeDownloadBackground}
+                    onValueChange={(value) => setIncludeDownloadBackground(value)}
+                    accessibilityLabel="Include background color in download"
+                  />
+                </ThemedView>
+              )}
               <ThemedView style={styles.downloadActions}>
                 <Pressable
                   style={[
@@ -4030,6 +4247,7 @@ export default function TestScreen() {
                   onPress={() => {
                     setShowDownloadOverlay(false);
                     setDownloadTargetId(null);
+                    setExportModeForDownload(false);
                   }}
                   disabled={isDownloading}
                   accessibilityRole="button"
@@ -4213,6 +4431,42 @@ export default function TestScreen() {
                 <ThemedText type="defaultSemiBold" style={styles.fileMenuDeleteText}>
                   Delete
                 </ThemedText>
+              </Pressable>
+            </ThemedView>
+          </ThemedView>
+        )}
+        {showExportMenu && (
+          <ThemedView style={styles.overlay} accessibilityRole="dialog">
+            <Pressable
+              style={styles.overlayBackdrop}
+              onPress={() => setShowExportMenu(false)}
+              accessibilityRole="button"
+              accessibilityLabel="Close export options"
+            />
+            <ThemedView style={styles.fileMenuPanel}>
+              <Pressable
+                style={styles.fileMenuButton}
+                onPress={() => void exportSelectedAsPng()}
+                accessibilityRole="button"
+                accessibilityLabel="Download PNG"
+              >
+                <ThemedText type="defaultSemiBold">Download PNG</ThemedText>
+              </Pressable>
+              <Pressable
+                style={styles.fileMenuButton}
+                onPress={() => void exportSelectedAsSvg()}
+                accessibilityRole="button"
+                accessibilityLabel="Download SVG"
+              >
+                <ThemedText type="defaultSemiBold">Download SVG</ThemedText>
+              </Pressable>
+              <Pressable
+                style={[styles.fileMenuButton, styles.fileMenuButtonLast]}
+                onPress={() => void exportSelectedAsTile()}
+                accessibilityRole="button"
+                accessibilityLabel="Download .tile file"
+              >
+                <ThemedText type="defaultSemiBold">Download .tile</ThemedText>
               </Pressable>
             </ThemedView>
           </ThemedView>
@@ -6456,12 +6710,26 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     paddingHorizontal: 8,
   },
+  fileSelectDeleteExportRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
   fileSelectDelete: {
     paddingVertical: 8,
     paddingHorizontal: 8,
   },
   fileSelectDeleteText: {
     color: '#dc2626',
+  },
+  fileSelectPipe: {
+    color: '#9ca3af',
+  },
+  fileSelectExport: {
+    paddingVertical: 8,
+    paddingHorizontal: 8,
+  },
+  fileSelectExportText: {
+    color: '#9ca3af',
   },
   fileSelectExitText: {
     color: '#fff',

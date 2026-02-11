@@ -532,6 +532,7 @@ export default function TileSetCreatorScreen() {
                   setDownloadError(null);
                   setDownloadSetId(set.id);
                 }}
+                onContextMenu={Platform.OS === 'web' ? (e) => e.preventDefault() : undefined}
                 accessibilityRole="button"
                 accessibilityLabel={`Open ${set.name}`}
               >
