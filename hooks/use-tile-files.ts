@@ -5,6 +5,7 @@ import { TILE_CATEGORIES, type TileCategory } from '@/assets/images/tiles/manife
 import { renderTileCanvasToDataUrl } from '@/utils/tile-export';
 import { applyRemovedSourcesToFile } from '@/utils/tile-file-sync';
 import { type GridLayout, type Tile } from '@/utils/tile-grid';
+import { getCellIndicesInRegion } from '@/utils/locked-regions';
 
 export type TileFile = {
   id: string;
@@ -21,6 +22,8 @@ export type TileFile = {
   thumbnailUri: string | null;
   previewUri: string | null;
   updatedAt: number;
+  /** Cell indices that are locked (cannot be modified by any tool). */
+  lockedCells?: number[];
 };
 
 const FILES_KEY = 'tile-files-v1';
@@ -91,6 +94,37 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
                 typeof file.grid.columns === 'number'
                   ? file.grid
                   : { rows: 0, columns: 0 };
+              const totalCells =
+                typeof grid.rows === 'number' && typeof grid.columns === 'number'
+                  ? grid.rows * grid.columns
+                  : 0;
+              let lockedCells: number[] = Array.isArray(file.lockedCells)
+                ? file.lockedCells.filter(
+                    (i): i is number =>
+                      typeof i === 'number' &&
+                      Number.isInteger(i) &&
+                      i >= 0 &&
+                      (totalCells <= 0 || i < totalCells)
+                  )
+                : [];
+              const legacyRegions = (file as { lockedRegions?: Array<{ start: number; end: number }> }).lockedRegions;
+              if (lockedCells.length === 0 && Array.isArray(legacyRegions)) {
+                const cols = grid.columns ?? 0;
+                const seen = new Set<number>();
+                for (const r of legacyRegions) {
+                  if (
+                    r != null &&
+                    typeof r.start === 'number' &&
+                    typeof r.end === 'number' &&
+                    cols > 0
+                  ) {
+                    getCellIndicesInRegion(r.start, r.end, cols).forEach((i) =>
+                      seen.add(i)
+                    );
+                  }
+                }
+                lockedCells = Array.from(seen);
+              }
               return {
                 id: file.id ?? createId(),
                 name: file.name ?? 'Canvas',
@@ -110,6 +144,7 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
                 thumbnailUri: file.thumbnailUri ?? null,
                 previewUri: file.previewUri ?? null,
                 updatedAt: file.updatedAt ?? Date.now(),
+                lockedCells,
               };
             })
           : [];
@@ -170,6 +205,7 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
       lineColor?: string;
       thumbnailUri?: string | null;
       previewUri?: string | null;
+      lockedCells?: number[];
     }) => {
       if (!activeFileId) {
         return;
@@ -201,8 +237,30 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
                     : file.thumbnailUri,
                 previewUri:
                   payload.previewUri !== undefined ? payload.previewUri : file.previewUri,
+                lockedCells:
+                  payload.lockedCells !== undefined
+                    ? payload.lockedCells
+                    : file.lockedCells,
                 updatedAt: Date.now(),
               }
+            : file
+        );
+        void persistFiles(next, activeFileId);
+        return next;
+      });
+    },
+    [activeFileId, persistFiles]
+  );
+
+  const updateActiveFileLockedCells = useCallback(
+    (lockedCells: number[]) => {
+      if (!activeFileId) {
+        return;
+      }
+      setFiles((prev) => {
+        const next = prev.map((file) =>
+          file.id === activeFileId
+            ? { ...file, lockedCells, updatedAt: Date.now() }
             : file
         );
         void persistFiles(next, activeFileId);
@@ -244,7 +302,7 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
         options?.categories && options.categories.length > 0
           ? options.categories
           : [category];
-      const nextFile: TileFile = {
+        const nextFile: TileFile = {
         id: createId(),
         name: `Canvas ${Date.now()}`,
         tiles: [],
@@ -259,6 +317,7 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
         thumbnailUri: null,
         previewUri: null,
         updatedAt: Date.now(),
+                lockedCells: [],
       };
       setFiles((prev) => {
         const next = [nextFile, ...prev];
@@ -285,6 +344,9 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
           name: `${source.name} Copy`,
           tiles: source.tiles.map((tile) => ({ ...tile })),
           updatedAt: Date.now(),
+          lockedCells: Array.isArray(source.lockedCells)
+            ? [...source.lockedCells]
+            : [],
         };
         setActiveFileId(nextFile.id);
         void AsyncStorage.setItem(ACTIVE_KEY, nextFile.id);
@@ -473,6 +535,7 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
     deleteFile,
     clearAllFiles,
     upsertActiveFile,
+    updateActiveFileLockedCells,
     replaceTileSourceNames,
     replaceTileSourceNamesWithError,
     ready,

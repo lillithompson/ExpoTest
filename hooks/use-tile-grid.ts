@@ -58,6 +58,8 @@ type Params = {
   }) => void;
   /** When set, clear/flood/reconcile apply only to cells in this rect (start/end cell indices). */
   canvasSelection?: { start: number; end: number } | null;
+  /** Locked cell indices. Tiles at these indices cannot be modified. */
+  lockedCells?: number[] | null;
   /** When true, handlePress does not push undo (caller pushes once at drag start via pushUndoForDragStart). */
   isPartOfDragRef?: MutableRefObject<boolean>;
 };
@@ -115,6 +117,7 @@ export const useTileGrid = ({
   getFixedBrushSourceName,
   onFixedPlacementDebug,
   canvasSelection = null,
+  lockedCells = null,
   isPartOfDragRef,
 }: Params): Result => {
   const clearLogRef = useRef<{ clearId: number } | null>(null);
@@ -169,6 +172,13 @@ export const useTileGrid = ({
       maxCol: Math.max(startCol, endCol),
     };
   }, [canvasSelection, gridLayout.columns]);
+
+  const lockedCellIndices = useMemo(() => {
+    if (!lockedCells?.length) {
+      return null;
+    }
+    return new Set(lockedCells);
+  }, [lockedCells]);
   const [tiles, setTiles] = useState<Tile[]>(() =>
     buildInitialTiles(totalCells)
   );
@@ -964,7 +974,10 @@ export const useTileGrid = ({
     const indices: number[] = [];
     for (let row = 0; row < maxRow; row += 1) {
       for (let col = 0; col < maxCol; col += 1) {
-        indices.push(row * gridLayout.columns + col);
+        const index = row * gridLayout.columns + col;
+        if (!lockedCellIndices?.has(index)) {
+          indices.push(index);
+        }
       }
     }
     return indices;
@@ -978,7 +991,10 @@ export const useTileGrid = ({
     const indices: number[] = [];
     for (let row = minRow; row <= maxRow; row += 1) {
       for (let col = minCol; col <= maxCol; col += 1) {
-        indices.push(row * gridLayout.columns + col);
+        const index = row * gridLayout.columns + col;
+        if (!lockedCellIndices?.has(index)) {
+          indices.push(index);
+        }
       }
     }
     return indices;
@@ -1029,6 +1045,9 @@ export const useTileGrid = ({
     setTiles((prev) =>
       normalizeTiles(prev, totalCells, tileSourcesLength).map((tile, index) => {
         const p = placements.get(index);
+        if (p && lockedCellIndices?.has(index)) {
+          return tile;
+        }
         return p ? { ...p, placedOrder: order } : tile;
       })
     );
@@ -1148,6 +1167,9 @@ export const useTileGrid = ({
   };
 
   const handlePress = (cellIndex: number) => {
+    if (lockedCellIndices?.has(cellIndex)) {
+      return;
+    }
     if (bulkUpdateRef.current) {
       return;
     }
@@ -1584,9 +1606,10 @@ export const useTileGrid = ({
       if (!pattern || pattern.width <= 0 || pattern.height <= 0) {
         return;
       }
-      const nextTiles = selectionSet
-        ? [...normalizeTiles(tiles, totalCells, tileSourcesLength)]
-        : buildInitialTiles(totalCells);
+      const nextTiles =
+        selectionSet || lockedCellIndices?.size
+          ? [...normalizeTiles(tiles, totalCells, tileSourcesLength)]
+          : buildInitialTiles(totalCells);
       if (selectionSet && !mirrorHorizontal && !mirrorVertical) {
         selectionSet.forEach((index) => {
           const row = Math.floor(index / gridLayout.columns);
@@ -1643,9 +1666,10 @@ export const useTileGrid = ({
         return;
       }
       if (mirrorHorizontal || mirrorVertical || selectionSet) {
-        const nextTiles = selectionSet
-          ? [...normalizeTiles(tiles, totalCells, tileSourcesLength)]
-          : buildInitialTiles(totalCells);
+        const nextTiles =
+          selectionSet || lockedCellIndices?.size
+            ? [...normalizeTiles(tiles, totalCells, tileSourcesLength)]
+            : buildInitialTiles(totalCells);
         const empty = {
           imageIndex: -1,
           rotation: 0,
@@ -1666,7 +1690,7 @@ export const useTileGrid = ({
                   selectionBounds.maxRow,
                   selectionBounds.maxCol,
                   gridLayout.columns
-                )
+                ).filter((i) => !lockedCellIndices?.has(i))
               : (() => {
                   const spiralOrder = getSpiralCellOrder(
                     gridLayout.columns,
@@ -1878,9 +1902,10 @@ export const useTileGrid = ({
       return;
     }
     if (mirrorHorizontal || mirrorVertical || selectionSet) {
-      const nextTiles = selectionSet
-        ? [...normalizeTiles(tiles, totalCells, tileSourcesLength)]
-        : buildInitialTiles(totalCells);
+      const nextTiles =
+        selectionSet || lockedCellIndices?.size
+          ? [...normalizeTiles(tiles, totalCells, tileSourcesLength)]
+          : buildInitialTiles(totalCells);
       const fixedTile = {
         imageIndex: fixedIndex,
         rotation: brush.rotation,
@@ -1906,17 +1931,35 @@ export const useTileGrid = ({
       });
       return;
     }
-    withBulkUpdate(() => {
-      applyTiles(
-        Array.from({ length: totalCells }, () => ({
-          imageIndex: fixedIndex,
-          rotation: brush.rotation,
-          mirrorX: false,
-          mirrorY: false,
-          name: tileSources[fixedIndex]?.name,
-        }))
-      );
-    });
+    if (lockedCellIndices?.size) {
+      const nextTiles = [...normalizeTiles(tiles, totalCells, tileSourcesLength)];
+      const fixedTile = {
+        imageIndex: fixedIndex,
+        rotation: brush.rotation,
+        mirrorX: false,
+        mirrorY: false,
+        name: tileSources[fixedIndex]?.name,
+        placedOrder: placementOrderRef.current,
+      };
+      indicesToProcess.forEach((index) => {
+        nextTiles[index] = { ...fixedTile };
+      });
+      withBulkUpdate(() => {
+        applyTiles(nextTiles);
+      });
+    } else {
+      withBulkUpdate(() => {
+        applyTiles(
+          Array.from({ length: totalCells }, () => ({
+            imageIndex: fixedIndex,
+            rotation: brush.rotation,
+            mirrorX: false,
+            mirrorY: false,
+            name: tileSources[fixedIndex]?.name,
+          }))
+        );
+      });
+    }
   };
 
   const floodComplete = () => {

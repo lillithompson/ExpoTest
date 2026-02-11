@@ -24,6 +24,8 @@ type Props = {
   cloneSampleIndex: number | null;
   cloneAnchorIndex: number | null;
   cloneCursorIndex: number | null;
+  /** Cell indices that are locked (drawn at 0.5 opacity). */
+  lockedCellIndices?: number[] | null;
   /** Called when the canvas has loaded SVGs and painted (so a cached preview can be hidden). */
   onPaintReady?: () => void;
 };
@@ -53,8 +55,13 @@ export function TileGridCanvas({
   cloneSampleIndex,
   cloneAnchorIndex,
   cloneCursorIndex,
+  lockedCellIndices = null,
   onPaintReady,
 }: Props) {
+  const lockedSet = useMemo(() => {
+    if (!lockedCellIndices?.length) return null;
+    return new Set(lockedCellIndices);
+  }, [lockedCellIndices]);
   const paintReadyCalledRef = useRef(false);
   const sources = useMemo(() => {
     const entries: Array<{ key: string; name: string; source: unknown; strokeWidth: number }> = [];
@@ -205,15 +212,17 @@ export function TileGridCanvas({
             const col = index % columns;
             const x = col * tileSize;
             const y = row * tileSize;
+            const tileOpacity = lockedSet?.has(index) ? 0.5 : 1;
             nodes.push(
-              <ImageSVG
-                key={`error-${index}`}
-                svg={svg}
-                x={x}
-                y={y}
-                width={tileSize}
-                height={tileSize}
-              />
+              <Group key={`error-${index}`} opacity={tileOpacity}>
+                <ImageSVG
+                  svg={svg}
+                  x={x}
+                  y={y}
+                  width={tileSize}
+                  height={tileSize}
+                />
+              </Group>
             );
           }
         }
@@ -232,9 +241,11 @@ export function TileGridCanvas({
       const y = row * tileSize;
       const cx = x + tileSize / 2;
       const cy = y + tileSize / 2;
+      const tileOpacity = lockedSet?.has(index) ? 0.5 : 1;
       nodes.push(
         <Group
           key={`tile-${index}`}
+          opacity={tileOpacity}
           transform={[
             { translateX: cx },
             { translateY: cy },
@@ -250,7 +261,7 @@ export function TileGridCanvas({
       );
     }
     return nodes;
-  }, [tiles, tileSources, svgMap, columns, tileSize]);
+  }, [tiles, tileSources, svgMap, columns, tileSize, lockedSet]);
 
   const debugDots = useMemo(() => {
     if (!showDebug) {

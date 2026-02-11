@@ -38,8 +38,8 @@ import { TileAtlasSprite } from '@/components/tile-atlas-sprite';
 import { clearBrushFavorites, TileBrushPanel } from '@/components/tile-brush-panel';
 import { TileDebugOverlay } from '@/components/tile-debug-overlay';
 import { TileGridCanvas } from '@/components/tile-grid-canvas';
-import { useIsMobileWeb } from '@/hooks/use-is-mobile-web';
 import { TAB_BAR_HEIGHT, useTabBarVisible } from '@/contexts/tab-bar-visible';
+import { useIsMobileWeb } from '@/hooks/use-is-mobile-web';
 import { getDefaultSettings, usePersistedSettings } from '@/hooks/use-persisted-settings';
 import { useTileAtlas } from '@/hooks/use-tile-atlas';
 import { useTileFiles, type TileFile } from '@/hooks/use-tile-files';
@@ -67,6 +67,7 @@ import {
     renderTileCanvasToDataUrl,
     renderTileCanvasToSvg,
 } from '@/utils/tile-export';
+import { getCellIndicesInRegion } from '@/utils/locked-regions';
 import { hydrateTilesWithSourceNames, normalizeTiles, type Tile } from '@/utils/tile-grid';
 
 const GRID_GAP = 0;
@@ -453,6 +454,7 @@ type TileCellProps = {
   isCloneTargetOrigin: boolean;
   isCloneCursor: boolean;
   showOverlays: boolean;
+  isLocked?: boolean;
 };
 
 type GridBackgroundProps = {
@@ -542,6 +544,7 @@ const TileCell = memo(
     isCloneTargetOrigin,
     isCloneCursor,
     showOverlays,
+    isLocked = false,
   }: TileCellProps) => {
     const resolvedByName =
       tile.name && resolveSourceForName ? resolveSourceForName(tile.name) : null;
@@ -612,38 +615,41 @@ const TileCell = memo(
     ) : null;
 
     return (
-      <View
-        key={`cell-${cellIndex}`}
-        accessibilityRole="button"
-        accessibilityLabel={`Tile ${cellIndex + 1}`}
-        style={[
-          styles.tile,
-          { width: tileSize, height: tileSize },
-          showOverlays && isCloneSource && styles.cloneSource,
-        ]}
-      >
-        {tileContent != null ? (
-          <View
-            style={StyleSheet.absoluteFill}
-            pointerEvents={Platform.OS === 'web' ? 'none' : 'auto'}
-          >
-            {tileContent}
-          </View>
-        ) : null}
-        {showOverlays && isCloneTargetOrigin && (
-          <View pointerEvents="none" style={styles.cloneTargetOrigin} />
-        )}
-        {showOverlays && isCloneCursor && (
-          <View pointerEvents="none" style={styles.cloneCursor} />
-        )}
-        {showOverlays && isCloneSample && (
-          <View pointerEvents="none" style={styles.cloneSample} />
-        )}
-        {showOverlays && showDebug && <TileDebugOverlay connections={connections} />}
+      <View style={isLocked ? { opacity: 0.5 } : undefined}>
+        <View
+          key={`cell-${cellIndex}`}
+          accessibilityRole="button"
+          accessibilityLabel={`Tile ${cellIndex + 1}`}
+          style={[
+            styles.tile,
+            { width: tileSize, height: tileSize },
+            showOverlays && isCloneSource && styles.cloneSource,
+          ]}
+        >
+          {tileContent != null ? (
+            <View
+              style={StyleSheet.absoluteFill}
+              pointerEvents={Platform.OS === 'web' ? 'none' : 'auto'}
+            >
+              {tileContent}
+            </View>
+          ) : null}
+          {showOverlays && isCloneTargetOrigin && (
+            <View pointerEvents="none" style={styles.cloneTargetOrigin} />
+          )}
+          {showOverlays && isCloneCursor && (
+            <View pointerEvents="none" style={styles.cloneCursor} />
+          )}
+          {showOverlays && isCloneSample && (
+            <View pointerEvents="none" style={styles.cloneSample} />
+          )}
+          {showOverlays && showDebug && <TileDebugOverlay connections={connections} />}
+        </View>
       </View>
     );
   },
   (prev, next) =>
+    prev.isLocked === next.isLocked &&
     prev.tile.imageIndex === next.tile.imageIndex &&
     prev.tile.rotation === next.tile.rotation &&
     prev.tile.mirrorX === next.tile.mirrorX &&
@@ -849,6 +855,7 @@ export default function TestScreen() {
     deleteFile,
     clearAllFiles,
     upsertActiveFile,
+    updateActiveFileLockedCells,
     replaceTileSourceNames,
     replaceTileSourceNamesWithError,
     ready,
@@ -1300,8 +1307,11 @@ export default function TestScreen() {
     patternAnchorKey: selectedPattern?.id ?? null,
     getFixedBrushSourceName: () => fixedBrushSourceNameRef.current,
     canvasSelection: viewMode === 'modify' ? canvasSelection : null,
+    lockedCells:
+      viewMode === 'modify' ? (activeFile?.lockedCells ?? null) : null,
     isPartOfDragRef: viewMode === 'modify' ? isPartOfDragRef : undefined,
   });
+  const showLockButton = viewMode === 'modify' && !!(canvasSelection && gridLayout.columns > 0);
   const tilesSignature = useMemo(
     () =>
       tiles
@@ -2899,6 +2909,13 @@ export default function TestScreen() {
       height,
     };
   }, [canvasSelection, gridLayout.columns, gridLayout.tileSize, gridLayout.rows]);
+  const lockedCellIndicesSet = useMemo(() => {
+    const cells = activeFile?.lockedCells ?? [];
+    if (cells.length === 0) {
+      return null;
+    }
+    return new Set(cells);
+  }, [activeFile?.lockedCells]);
   const patternAlignmentRect = useMemo(() => {
     if (
       brush.mode !== 'pattern' ||
@@ -4292,6 +4309,47 @@ export default function TestScreen() {
                 },
               ]}
             >
+            {showLockButton && (() => {
+              const selectionIndices =
+                canvasSelection && gridLayout.columns > 0
+                  ? getCellIndicesInRegion(
+                      canvasSelection.start,
+                      canvasSelection.end,
+                      gridLayout.columns
+                    )
+                  : [];
+              const lockedSet = new Set(activeFile?.lockedCells ?? []);
+              const allSelectedLocked =
+                selectionIndices.length > 0 &&
+                selectionIndices.every((i) => lockedSet.has(i));
+              return (
+                <ToolbarButton
+                  label={allSelectedLocked ? 'Unlock region' : 'Lock region'}
+                  icon="lock"
+                  active={allSelectedLocked}
+                  onPress={() => {
+                    if (!canvasSelection || gridLayout.columns === 0) {
+                      return;
+                    }
+                    const indices = getCellIndicesInRegion(
+                      canvasSelection.start,
+                      canvasSelection.end,
+                      gridLayout.columns
+                    );
+                    const currentLocked = new Set(activeFile?.lockedCells ?? []);
+                    if (indices.every((i) => currentLocked.has(i))) {
+                      const next = (activeFile?.lockedCells ?? []).filter(
+                        (i) => !indices.includes(i)
+                      );
+                      updateActiveFileLockedCells(next);
+                    } else {
+                      const next = [...new Set([...(activeFile?.lockedCells ?? []), ...indices])];
+                      updateActiveFileLockedCells(next);
+                    }
+                  }}
+                />
+              );
+            })()}
             {!(isWeb && isMobileWeb) && (
               <>
                 <ToolbarButton
@@ -4533,6 +4591,11 @@ export default function TestScreen() {
                     setPatternSelection({ start: cellIndex, end: cellIndex });
                     return;
                   }
+                  if (lockedCellIndicesSet?.has(cellIndex)) {
+                    setIsSelectionMode(true);
+                    setCanvasSelection({ start: cellIndex, end: cellIndex });
+                    return;
+                  }
                   if (brush.mode === 'clone' && cloneSourceIndex === null) {
                     setCloneSource(cellIndex);
                     lastPaintedRef.current = null;
@@ -4645,6 +4708,12 @@ export default function TestScreen() {
                   if (point) {
                     const cellIndex = getCellIndexForPoint(point.x, point.y);
                     if (cellIndex !== null && !isSelectionMode && !isPatternCreationMode && !(brush.mode === 'clone' && cloneSourceIndex === null)) {
+                      if (lockedCellIndicesSet?.has(cellIndex)) {
+                        multiFingerTouchCountRef.current = 0;
+                        setIsSelectionMode(true);
+                        setCanvasSelection({ start: cellIndex, end: cellIndex });
+                        return;
+                      }
                       pendingSingleTouchPointRef.current = { x: point.x, y: point.y };
                       pendingSingleTouchStartTimeRef.current = Date.now();
                       multiFingerTouchCountRef.current = 0;
@@ -4679,6 +4748,11 @@ export default function TestScreen() {
                   }
                   if (isPatternCreationMode) {
                     setPatternSelection({ start: cellIndex, end: cellIndex });
+                    return;
+                  }
+                  if (lockedCellIndicesSet?.has(cellIndex)) {
+                    setIsSelectionMode(true);
+                    setCanvasSelection({ start: cellIndex, end: cellIndex });
                     return;
                   }
                   if (brush.mode === 'clone' && cloneSourceIndex === null) {
@@ -4847,6 +4921,7 @@ export default function TestScreen() {
                         isCloneCursor={
                           brush.mode === 'clone' && cloneCursorIndex === cellIndex
                         }
+                        isLocked={lockedCellIndicesSet?.has(cellIndex)}
                       />
                     );
                   })}
@@ -4886,6 +4961,11 @@ export default function TestScreen() {
                   cloneSampleIndex={brush.mode === 'clone' ? cloneSampleIndex : null}
                   cloneAnchorIndex={brush.mode === 'clone' ? cloneAnchorIndex : null}
                   cloneCursorIndex={brush.mode === 'clone' ? cloneCursorIndex : null}
+                  lockedCellIndices={
+                    lockedCellIndicesSet
+                      ? Array.from(lockedCellIndicesSet)
+                      : null
+                  }
                   onPaintReady={
                     Platform.OS !== 'web'
                       ? () => setNativeCanvasPaintReady(true)
@@ -4925,6 +5005,7 @@ export default function TestScreen() {
                           isCloneCursor={
                             brush.mode === 'clone' && cloneCursorIndex === cellIndex
                           }
+                          isLocked={lockedCellIndicesSet?.has(cellIndex)}
                         />
                       );
                     })}

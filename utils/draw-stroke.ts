@@ -3,8 +3,8 @@
  * 1) the first tile has exactly one connection,
  * 2) every other tile has exactly two connections (only toward stroke neighbors).
  */
-import type { Tile } from './tile-grid';
 import type { TileConnections } from './tile-compat';
+import type { Tile } from './tile-grid';
 
 export function getDirectionFromTo(
   fromCell: number,
