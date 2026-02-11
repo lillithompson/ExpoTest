@@ -80,6 +80,8 @@ const PATTERN_THUMB_PADDING = 4;
 const BRUSH_PANEL_ROW_GAP = 1;
 /** Reserve space for horizontal scrollbar so the bottom row is not cut off on desktop web. */
 const WEB_SCROLLBAR_HEIGHT = 17;
+/** On mobile web, wait this long (ms) for a second finger before treating as single-finger paint (for 2/3-finger undo/redo). */
+const MOBILE_WEB_MULTI_FINGER_WAIT_MS = 100;
 const FILE_GRID_MIN_CARD_WIDTH = 100;
 /** On desktop web, use larger min card width so thumbnails display bigger (fewer columns). */
 const FILE_GRID_MIN_CARD_WIDTH_DESKTOP_WEB = 240;
@@ -376,6 +378,7 @@ type ToolbarButtonProps = {
   icon: React.ComponentProps<typeof MaterialCommunityIcons>['name'];
   active?: boolean;
   color?: string;
+  disabled?: boolean;
 };
 
 function ToolbarButton({
@@ -385,22 +388,27 @@ function ToolbarButton({
   icon,
   active,
   color,
+  disabled = false,
 }: ToolbarButtonProps) {
   const [hovered, setHovered] = useState(false);
+  const iconColor = disabled
+    ? 'rgba(42, 42, 42, 0.35)'
+    : (color ?? (active ? '#22c55e' : 'rgba(42, 42, 42, 0.8)'));
   return (
     <Pressable
-      onPress={onPress}
-      onLongPress={onLongPress}
+      onPress={disabled ? undefined : onPress}
+      onLongPress={disabled ? undefined : onLongPress}
       style={styles.toolbarButton}
       accessibilityRole="button"
       accessibilityLabel={label}
+      accessibilityState={{ disabled }}
       onHoverIn={() => setHovered(true)}
       onHoverOut={() => setHovered(false)}
     >
       <MaterialCommunityIcons
         name={icon}
         size={28}
-        color={color ?? (active ? '#22c55e' : 'rgba(42, 42, 42, 0.8)')}
+        color={iconColor}
       />
       {Platform.OS === 'web' && hovered && (
         <Text style={styles.tooltip} accessibilityElementsHidden>
@@ -1238,6 +1246,9 @@ export default function TestScreen() {
   const activeLineColor = activeFile?.lineColor ?? '#ffffff';
   const [lineWidthDraft, setLineWidthDraft] = useState(activeLineWidth);
 
+  /** True while a paint drag is in progress so the whole stroke is one undo step. */
+  const isPartOfDragRef = useRef(false);
+
   const {
     gridLayout,
     tiles,
@@ -1248,6 +1259,11 @@ export default function TestScreen() {
     controlledRandomize,
     resetTiles,
     loadTiles,
+    undo,
+    redo,
+    pushUndoForDragStart,
+    canUndo,
+    canRedo,
     clearCloneSource,
     setCloneSource,
     cloneSourceIndex,
@@ -1280,6 +1296,7 @@ export default function TestScreen() {
     patternAnchorKey: selectedPattern?.id ?? null,
     getFixedBrushSourceName: () => fixedBrushSourceNameRef.current,
     canvasSelection: viewMode === 'modify' ? canvasSelection : null,
+    isPartOfDragRef: viewMode === 'modify' ? isPartOfDragRef : undefined,
   });
   const tilesSignature = useMemo(
     () =>
@@ -1389,6 +1406,11 @@ export default function TestScreen() {
   const isTouchDragActiveRef = useRef(false);
   const lastCanvasTapTimeRef = useRef(0);
   const canvasTouchDidMoveRef = useRef(false);
+  /** On mobile web: 2 or 3 when a 2- or 3-finger gesture is in progress (for undo/redo tap). */
+  const multiFingerTouchCountRef = useRef(0);
+  /** On mobile web: defer single-finger paint briefly so a second finger can be detected for undo/redo. */
+  const pendingSingleTouchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingSingleTouchPointRef = useRef<{ x: number; y: number } | null>(null);
   const lastCanvasClickTimeRef = useRef(0);
   const canvasMouseDidMoveRef = useRef(false);
   const ignoreNextMouseRef = useRef(false);
@@ -4265,6 +4287,22 @@ export default function TestScreen() {
                 },
               ]}
             >
+            {!(isWeb && isMobileWeb) && (
+              <>
+                <ToolbarButton
+                  label="Undo"
+                  icon="undo"
+                  disabled={!canUndo}
+                  onPress={undo}
+                />
+                <ToolbarButton
+                  label="Redo"
+                  icon="redo"
+                  disabled={!canRedo}
+                  onPress={redo}
+                />
+              </>
+            )}
             <ToolbarButton
               key={`selection-${isSelectionMode}`}
               label="Selection"
@@ -4495,6 +4533,10 @@ export default function TestScreen() {
                     lastPaintedRef.current = null;
                     return;
                   }
+                  if (!isPartOfDragRef.current) {
+                    pushUndoForDragStart();
+                    isPartOfDragRef.current = true;
+                  }
                   handlePaintAt(point.x, point.y);
                 }
               }}
@@ -4526,10 +4568,12 @@ export default function TestScreen() {
                 }
               }}
               onMouseLeave={() => {
+                isPartOfDragRef.current = false;
                 setInteracting(false);
                 lastPaintedRef.current = null;
               }}
               onMouseUp={(event: any) => {
+                isPartOfDragRef.current = false;
                 setInteracting(false);
                 const now = Date.now();
                 if (
@@ -4565,6 +4609,60 @@ export default function TestScreen() {
                 // Use capture phase so we receive touchstart even when the target is a child
                 // (e.g. tile image). Otherwise on mobile web, starting a drag on an initialized
                 // tile only fires tap and touchmove never runs.
+                const touchCount = event?.touches?.length ?? 0;
+                if (isWeb && isMobileWeb && touchCount >= 2) {
+                  if (pendingSingleTouchTimeoutRef.current) {
+                    clearTimeout(pendingSingleTouchTimeoutRef.current);
+                    pendingSingleTouchTimeoutRef.current = null;
+                    pendingSingleTouchPointRef.current = null;
+                  }
+                  multiFingerTouchCountRef.current = touchCount === 3 ? 3 : 2;
+                  isTouchDragActiveRef.current = true;
+                  canvasTouchDidMoveRef.current = false;
+                  setInteracting(true);
+                  return;
+                }
+                if (isWeb && isMobileWeb && touchCount === 1) {
+                  setInteracting(true);
+                  markInteractionStart();
+                  isTouchDragActiveRef.current = true;
+                  canvasTouchDidMoveRef.current = false;
+                  if (isWeb) {
+                    ignoreNextMouseRef.current = true;
+                    if (ignoreMouseAfterTouchTimeoutRef.current) {
+                      clearTimeout(ignoreMouseAfterTouchTimeoutRef.current);
+                    }
+                    ignoreMouseAfterTouchTimeoutRef.current = setTimeout(() => {
+                      ignoreNextMouseRef.current = false;
+                      ignoreMouseAfterTouchTimeoutRef.current = null;
+                    }, 400);
+                  }
+                  const point = getRelativePoint(event);
+                  if (point) {
+                    const cellIndex = getCellIndexForPoint(point.x, point.y);
+                    if (cellIndex !== null && !isSelectionMode && !isPatternCreationMode && !(brush.mode === 'clone' && cloneSourceIndex === null)) {
+                      if (pendingSingleTouchTimeoutRef.current) {
+                        clearTimeout(pendingSingleTouchTimeoutRef.current);
+                      }
+                      pendingSingleTouchPointRef.current = { x: point.x, y: point.y };
+                      multiFingerTouchCountRef.current = 0;
+                      pendingSingleTouchTimeoutRef.current = setTimeout(() => {
+                        pendingSingleTouchTimeoutRef.current = null;
+                        const pt = pendingSingleTouchPointRef.current;
+                        pendingSingleTouchPointRef.current = null;
+                        if (pt && multiFingerTouchCountRef.current === 0) {
+                          if (!isPartOfDragRef.current) {
+                            pushUndoForDragStart();
+                            isPartOfDragRef.current = true;
+                          }
+                          handlePaintAt(pt.x, pt.y);
+                        }
+                      }, MOBILE_WEB_MULTI_FINGER_WAIT_MS);
+                      return;
+                    }
+                  }
+                  multiFingerTouchCountRef.current = 0;
+                }
                 isTouchDragActiveRef.current = true;
                 canvasTouchDidMoveRef.current = false;
                 if (isWeb) {
@@ -4598,6 +4696,10 @@ export default function TestScreen() {
                     lastPaintedRef.current = null;
                     return;
                   }
+                  if (!isPartOfDragRef.current) {
+                    pushUndoForDragStart();
+                    isPartOfDragRef.current = true;
+                  }
                   handlePaintAt(point.x, point.y);
                 }
               }}
@@ -4606,6 +4708,22 @@ export default function TestScreen() {
                   return;
                 }
                 canvasTouchDidMoveRef.current = true;
+                if (multiFingerTouchCountRef.current >= 2) {
+                  return;
+                }
+                if (isWeb && isMobileWeb && pendingSingleTouchTimeoutRef.current) {
+                  clearTimeout(pendingSingleTouchTimeoutRef.current);
+                  pendingSingleTouchTimeoutRef.current = null;
+                  const pt = pendingSingleTouchPointRef.current;
+                  pendingSingleTouchPointRef.current = null;
+                  if (pt) {
+                    if (!isPartOfDragRef.current) {
+                      pushUndoForDragStart();
+                      isPartOfDragRef.current = true;
+                    }
+                    handlePaintAt(pt.x, pt.y);
+                  }
+                }
                 const point = getRelativePoint(event);
                 if (point) {
                   if (isSelectionMode) {
@@ -4630,6 +4748,45 @@ export default function TestScreen() {
                 }
               }}
               onTouchEndCapture={(event: any) => {
+                const touchCount = event?.touches?.length ?? 0;
+                if (pendingSingleTouchTimeoutRef.current) {
+                  clearTimeout(pendingSingleTouchTimeoutRef.current);
+                  pendingSingleTouchTimeoutRef.current = null;
+                  const pt = pendingSingleTouchPointRef.current;
+                  pendingSingleTouchPointRef.current = null;
+                  if (pt && isWeb && isMobileWeb && touchCount === 0 && multiFingerTouchCountRef.current === 0 && !canvasTouchDidMoveRef.current) {
+                    if (!isPartOfDragRef.current) {
+                      pushUndoForDragStart();
+                      isPartOfDragRef.current = true;
+                    }
+                    handlePaintAt(pt.x, pt.y);
+                  }
+                }
+                if (isWeb && isMobileWeb && touchCount === 0) {
+                  const count = multiFingerTouchCountRef.current;
+                  multiFingerTouchCountRef.current = 0;
+                  if (
+                    count === 2 &&
+                    !canvasTouchDidMoveRef.current &&
+                    canUndo
+                  ) {
+                    undo();
+                    isTouchDragActiveRef.current = false;
+                    setInteracting(false);
+                    return;
+                  }
+                  if (
+                    count === 3 &&
+                    !canvasTouchDidMoveRef.current &&
+                    canRedo
+                  ) {
+                    redo();
+                    isTouchDragActiveRef.current = false;
+                    setInteracting(false);
+                    return;
+                  }
+                }
+                isPartOfDragRef.current = false;
                 isTouchDragActiveRef.current = false;
                 setInteracting(false);
                 const now = Date.now();
@@ -4658,6 +4815,13 @@ export default function TestScreen() {
                 lastPaintedRef.current = null;
               }}
               onTouchCancelCapture={() => {
+                if (pendingSingleTouchTimeoutRef.current) {
+                  clearTimeout(pendingSingleTouchTimeoutRef.current);
+                  pendingSingleTouchTimeoutRef.current = null;
+                  pendingSingleTouchPointRef.current = null;
+                }
+                multiFingerTouchCountRef.current = 0;
+                isPartOfDragRef.current = false;
                 isTouchDragActiveRef.current = false;
                 setInteracting(false);
                 lastPaintedRef.current = null;
@@ -4827,6 +4991,10 @@ export default function TestScreen() {
                       }
                     }, 420);
                     if (brush.mode !== 'clone') {
+                      if (!isPartOfDragRef.current) {
+                        pushUndoForDragStart();
+                        isPartOfDragRef.current = true;
+                      }
                       paintCellIndex(cellIndex);
                     } else if (cloneSourceIndex === null) {
                       setCloneSource(cellIndex);
@@ -4864,6 +5032,7 @@ export default function TestScreen() {
                   }
                 }}
                 onResponderRelease={(event: any) => {
+                  isPartOfDragRef.current = false;
                   setInteracting(false);
                   const now = Date.now();
                   if (
@@ -4898,6 +5067,7 @@ export default function TestScreen() {
                   lastPaintedRef.current = null;
                 }}
                 onResponderTerminate={() => {
+                  isPartOfDragRef.current = false;
                   setInteracting(false);
                   if (longPressTimeoutRef.current) {
                     clearTimeout(longPressTimeoutRef.current);

@@ -54,6 +54,7 @@ type ToolbarButtonProps = {
   icon: React.ComponentProps<typeof MaterialCommunityIcons>['name'];
   active?: boolean;
   color?: string;
+  disabled?: boolean;
 };
 
 function ToolbarButton({
@@ -63,19 +64,24 @@ function ToolbarButton({
   icon,
   active,
   color,
+  disabled = false,
 }: ToolbarButtonProps) {
+  const iconColor = disabled
+    ? 'rgba(42, 42, 42, 0.35)'
+    : (color ?? (active ? '#22c55e' : 'rgba(42, 42, 42, 0.8)'));
   return (
     <Pressable
-      onPress={onPress}
-      onLongPress={onLongPress}
+      onPress={disabled ? undefined : onPress}
+      onLongPress={disabled ? undefined : onLongPress}
       style={styles.toolbarButton}
       accessibilityRole="button"
       accessibilityLabel={label}
+      accessibilityState={{ disabled }}
     >
       <MaterialCommunityIcons
         name={icon}
         size={28}
-        color={color ?? (active ? '#22c55e' : 'rgba(42, 42, 42, 0.8)')}
+        color={iconColor}
       />
     </Pressable>
   );
@@ -386,6 +392,8 @@ export default function ModifyTileScreen() {
     0
   );
 
+  const isPartOfDragRef = useRef(false);
+
   const {
     gridLayout,
     tiles,
@@ -394,6 +402,11 @@ export default function ModifyTileScreen() {
     floodComplete,
     resetTiles,
     loadTiles,
+    undo,
+    redo,
+    pushUndoForDragStart,
+    canUndo,
+    canRedo,
     clearCloneSource,
     setCloneSource,
     cloneSourceIndex,
@@ -423,6 +436,7 @@ export default function ModifyTileScreen() {
         }
       : null,
     patternAnchorKey: selectedPattern?.id ?? null,
+    isPartOfDragRef: isPartOfDragRef,
   });
 
   useEffect(() => {
@@ -755,6 +769,18 @@ export default function ModifyTileScreen() {
             </ThemedText>
           </Pressable>
           <ThemedView style={styles.controls}>
+            <ToolbarButton
+              label="Undo"
+              icon="undo"
+              disabled={!canUndo}
+              onPress={undo}
+            />
+            <ToolbarButton
+              label="Redo"
+              icon="redo"
+              disabled={!canRedo}
+              onPress={redo}
+            />
             <ToolbarButton label="Clear" icon="refresh" onPress={resetTiles} />
             <ToolbarButton
               label="Fill"
@@ -893,6 +919,10 @@ export default function ModifyTileScreen() {
                   }
                 }, 420);
                 if (brush.mode !== 'clone') {
+                  if (!isPartOfDragRef.current) {
+                    pushUndoForDragStart();
+                    isPartOfDragRef.current = true;
+                  }
                   paintCellIndex(cellIndex);
                 } else if (cloneSourceIndex === null) {
                   setCloneSource(cellIndex);
@@ -911,6 +941,7 @@ export default function ModifyTileScreen() {
               }
             }}
             onResponderRelease={() => {
+              isPartOfDragRef.current = false;
               if (longPressTimeoutRef.current) {
                 clearTimeout(longPressTimeoutRef.current);
                 longPressTimeoutRef.current = null;
@@ -921,6 +952,7 @@ export default function ModifyTileScreen() {
               lastPaintedRef.current = null;
             }}
             onResponderTerminate={() => {
+              isPartOfDragRef.current = false;
               if (longPressTimeoutRef.current) {
                 clearTimeout(longPressTimeoutRef.current);
                 longPressTimeoutRef.current = null;

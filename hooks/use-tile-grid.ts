@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { type MutableRefObject, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { type TileSource } from '@/assets/images/tiles/manifest';
 import { buildCompatibilityTables } from '@/utils/tile-compat';
@@ -54,7 +54,11 @@ type Params = {
   }) => void;
   /** When set, clear/flood/reconcile apply only to cells in this rect (start/end cell indices). */
   canvasSelection?: { start: number; end: number } | null;
+  /** When true, handlePress does not push undo (caller pushes once at drag start via pushUndoForDragStart). */
+  isPartOfDragRef?: MutableRefObject<boolean>;
 };
+
+const MAX_UNDO_STEPS = 50;
 
 type Result = {
   gridLayout: GridLayout;
@@ -67,6 +71,12 @@ type Result = {
   controlledRandomize: () => void;
   resetTiles: () => void;
   loadTiles: (nextTiles: Tile[]) => void;
+  undo: () => void;
+  redo: () => void;
+  /** Call once at drag start so the whole stroke is one undo step. */
+  pushUndoForDragStart: () => void;
+  canUndo: boolean;
+  canRedo: boolean;
   clearCloneSource: () => void;
   setCloneSource: (cellIndex: number) => void;
   cloneSourceIndex: number | null;
@@ -99,6 +109,7 @@ export const useTileGrid = ({
   getFixedBrushSourceName,
   onFixedPlacementDebug,
   canvasSelection = null,
+  isPartOfDragRef,
 }: Params): Result => {
   const clearLogRef = useRef<{ clearId: number } | null>(null);
   const previousTileSourcesRef = useRef<TileSource[] | null>(null);
@@ -175,6 +186,14 @@ export const useTileGrid = ({
     () => normalizeTiles(tiles, totalCells, tileSourcesLength),
     [tiles, totalCells, tileSourcesLength]
   );
+  const lastTilesRef = useRef<Tile[]>(renderTiles);
+  lastTilesRef.current = renderTiles;
+
+  const undoStackRef = useRef<Tile[][]>([]);
+  const redoStackRef = useRef<Tile[][]>([]);
+  const [undoCount, setUndoCount] = useState(0);
+  const [redoCount, setRedoCount] = useState(0);
+  const isUndoRedoRef = useRef(false);
   const bulkUpdateRef = useRef(false);
 
   const withBulkUpdate = (fn: () => void) => {
@@ -219,30 +238,107 @@ export const useTileGrid = ({
     clearLogRef.current = null;
   };
 
-  const applyTiles = (nextTiles: Tile[]) => {
+  const pushUndo = useCallback(() => {
+    if (isUndoRedoRef.current) {
+      return;
+    }
+    const snapshot = lastTilesRef.current.map((t) => ({
+      ...t,
+      name: t.name,
+    }));
+    const stack = undoStackRef.current;
+    if (stack.length >= MAX_UNDO_STEPS) {
+      stack.shift();
+    }
+    stack.push(snapshot);
+    redoStackRef.current = [];
+    setUndoCount(stack.length);
+    setRedoCount(0);
+  }, []);
+
+  const applyTilesInternal = useCallback(
+    (nextTiles: Tile[]) => {
+      setTiles((prev) => {
+        const normalizedNext = normalizeTiles(nextTiles, totalCells, tileSourcesLength);
+        const normalizedPrev = normalizeTiles(prev, totalCells, tileSourcesLength);
+        if (tilesEqual(normalizedPrev, normalizedNext)) {
+          return prev;
+        }
+        let changed = 0;
+        for (let i = 0; i < normalizedPrev.length; i += 1) {
+          const a = normalizedPrev[i];
+          const b = normalizedNext[i];
+          if (
+            a.imageIndex !== b.imageIndex ||
+            a.rotation !== b.rotation ||
+            a.mirrorX !== b.mirrorX ||
+            a.mirrorY !== b.mirrorY
+          ) {
+            changed += 1;
+          }
+        }
+        logClearApply(changed, normalizedNext.length);
+        return normalizedNext;
+      });
+    },
+    [totalCells, tileSourcesLength]
+  );
+
+  const applyTiles = useCallback(
+    (nextTiles: Tile[]) => {
+      if (!isUndoRedoRef.current) {
+        pushUndo();
+      }
+      applyTilesInternal(nextTiles);
+    },
+    [pushUndo, applyTilesInternal]
+  );
+
+  const undo = useCallback(() => {
+    if (undoStackRef.current.length === 0) {
+      return;
+    }
+    isUndoRedoRef.current = true;
     setTiles((prev) => {
-      const normalizedNext = normalizeTiles(nextTiles, totalCells, tileSourcesLength);
-      const normalizedPrev = normalizeTiles(prev, totalCells, tileSourcesLength);
-      if (tilesEqual(normalizedPrev, normalizedNext)) {
+      const prevNorm = normalizeTiles(prev, totalCells, tileSourcesLength);
+      const next = undoStackRef.current.pop();
+      if (!next) {
         return prev;
       }
-      let changed = 0;
-      for (let i = 0; i < normalizedPrev.length; i += 1) {
-        const a = normalizedPrev[i];
-        const b = normalizedNext[i];
-        if (
-          a.imageIndex !== b.imageIndex ||
-          a.rotation !== b.rotation ||
-          a.mirrorX !== b.mirrorX ||
-          a.mirrorY !== b.mirrorY
-        ) {
-          changed += 1;
-        }
-      }
-      logClearApply(changed, normalizedNext.length);
-      return normalizedNext;
+      redoStackRef.current.push(
+        prevNorm.map((t) => ({ ...t, name: t.name }))
+      );
+      return normalizeTiles(next, totalCells, tileSourcesLength);
     });
-  };
+    setUndoCount(undoStackRef.current.length);
+    setRedoCount(redoStackRef.current.length);
+    requestAnimationFrame(() => {
+      isUndoRedoRef.current = false;
+    });
+  }, [totalCells, tileSourcesLength]);
+
+  const redo = useCallback(() => {
+    if (redoStackRef.current.length === 0) {
+      return;
+    }
+    isUndoRedoRef.current = true;
+    setTiles((prev) => {
+      const prevNorm = normalizeTiles(prev, totalCells, tileSourcesLength);
+      const next = redoStackRef.current.pop();
+      if (!next) {
+        return prev;
+      }
+      undoStackRef.current.push(
+        prevNorm.map((t) => ({ ...t, name: t.name }))
+      );
+      return normalizeTiles(next, totalCells, tileSourcesLength);
+    });
+    setUndoCount(undoStackRef.current.length);
+    setRedoCount(redoStackRef.current.length);
+    requestAnimationFrame(() => {
+      isUndoRedoRef.current = false;
+    });
+  }, [totalCells, tileSourcesLength]);
 
   useEffect(() => {
     setTiles((prev) => (prev.length === totalCells ? prev : buildInitialTiles(totalCells)));
@@ -825,6 +921,9 @@ export const useTileGrid = ({
   const handlePress = (cellIndex: number) => {
     if (bulkUpdateRef.current) {
       return;
+    }
+    if (!isPartOfDragRef?.current) {
+      pushUndo();
     }
     if (brush.mode === 'erase') {
       applyPlacement(cellIndex, {
@@ -1514,6 +1613,7 @@ export const useTileGrid = ({
         requestAnimationFrame(() => clearLogDone());
         return;
       }
+      pushUndo();
       const empty = {
         imageIndex: -1,
         rotation: 0,
@@ -1539,9 +1639,16 @@ export const useTileGrid = ({
     });
   };
 
-  const loadTiles = (nextTiles: Tile[]) => {
-    applyTiles(nextTiles);
-  };
+  const loadTiles = useCallback(
+    (nextTiles: Tile[]) => {
+      undoStackRef.current = [];
+      redoStackRef.current = [];
+      setUndoCount(0);
+      setRedoCount(0);
+      applyTilesInternal(nextTiles);
+    },
+    [applyTilesInternal]
+  );
 
   const setCloneSource = useCallback((cellIndex: number) => {
     cloneSourceRef.current = cellIndex;
@@ -1563,6 +1670,11 @@ export const useTileGrid = ({
     controlledRandomize,
     resetTiles,
     loadTiles,
+    undo,
+    redo,
+    pushUndoForDragStart: pushUndo,
+    canUndo: undoCount > 0,
+    canRedo: redoCount > 0,
     clearCloneSource,
     setCloneSource,
     cloneSourceIndex: brush.mode === 'clone' ? cloneSourceIndex : null,
