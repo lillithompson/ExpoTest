@@ -18,6 +18,42 @@ export type GridLayout = {
 export const MAX_TILE_CANVAS_CELLS = 512;
 
 /**
+ * Returns cell indices in spiral order: start at upper-left (0,0), go right to the right border,
+ * down to the bottom border, up to border-1, then right (inward) to border-1, and repeat inward.
+ * Used so draw-tool flood fill behaves as if the draw stroke spiraled from the corner.
+ */
+export function getSpiralCellOrder(columns: number, rows: number): number[] {
+  if (columns <= 0 || rows <= 0) return [];
+  const order: number[] = [];
+  let minR = 0;
+  let minC = 0;
+  let maxR = rows - 1;
+  let maxC = columns - 1;
+  while (minR <= maxR && minC <= maxC) {
+    for (let c = minC; c <= maxC; c += 1) {
+      order.push(minR * columns + c);
+    }
+    minR += 1;
+    if (minR > maxR) break;
+    for (let r = minR; r <= maxR; r += 1) {
+      order.push(r * columns + maxC);
+    }
+    maxC -= 1;
+    if (minC > maxC) break;
+    for (let c = maxC; c >= minC; c -= 1) {
+      order.push(maxR * columns + c);
+    }
+    maxR -= 1;
+    if (minR > maxR) break;
+    for (let r = maxR; r >= minR; r -= 1) {
+      order.push(r * columns + minC);
+    }
+    minC += 1;
+  }
+  return order;
+}
+
+/**
  * Returns the squarest (rows, columns) with rows * columns <= maxCells.
  * Used when capping the tile canvas so the grid stays as square as possible.
  */

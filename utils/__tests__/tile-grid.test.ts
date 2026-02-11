@@ -6,6 +6,7 @@
 import type { Tile } from '../tile-grid';
 import {
     buildInitialTiles,
+    getSpiralCellOrder,
     getTileSourceIndexByName,
     hydrateTilesWithSourceNames,
     normalizeTiles,
@@ -174,5 +175,31 @@ describe('buildInitialTiles', () => {
       expect(t.imageIndex).toBe(-1);
       expect(t.name).toBeUndefined();
     });
+  });
+});
+
+describe('getSpiralCellOrder', () => {
+  it('starts at upper-left (index 0) and goes right then down then up then inward', () => {
+    const order = getSpiralCellOrder(4, 3);
+    expect(order[0]).toBe(0);
+    expect(order).toHaveLength(12);
+    expect(order).toEqual([0, 1, 2, 3, 7, 11, 10, 9, 8, 4, 5, 6]);
+  });
+
+  it('returns empty for zero dimensions', () => {
+    expect(getSpiralCellOrder(0, 3)).toEqual([]);
+    expect(getSpiralCellOrder(2, 0)).toEqual([]);
+  });
+
+  it('covers every cell exactly once', () => {
+    const cols = 5;
+    const rows = 4;
+    const order = getSpiralCellOrder(cols, rows);
+    const set = new Set(order);
+    expect(order).toHaveLength(cols * rows);
+    expect(set.size).toBe(cols * rows);
+    for (let i = 0; i < cols * rows; i += 1) {
+      expect(set.has(i)).toBe(true);
+    }
   });
 });

@@ -7,6 +7,7 @@ import {
     buildInitialTiles,
     computeFixedGridLayout,
     computeGridLayout,
+    getSpiralCellOrder,
     getTileSourceIndexByName,
     MAX_TILE_CANVAS_CELLS,
     normalizeTiles,
@@ -1627,11 +1628,94 @@ export const useTileGrid = ({
         const nextTiles = selectionSet
           ? [...normalizeTiles(tiles, totalCells, tileSourcesLength)]
           : buildInitialTiles(totalCells);
+        const spiralOrder = getSpiralCellOrder(
+          gridLayout.columns,
+          gridLayout.rows
+        );
         const indices =
-          selectionSet && indicesToProcess.length > 0
-            ? [...indicesToProcess].sort(() => Math.random() - 0.5)
-            : indicesToProcess;
-        if (selectionSet && !mirrorHorizontal && !mirrorVertical) {
+          brush.mode === 'draw'
+            ? selectionSet
+              ? spiralOrder.filter((i) => selectionSet!.has(i))
+              : spiralOrder.filter((i) =>
+                  indicesToProcess.includes(i)
+                )
+            : selectionSet && indicesToProcess.length > 0
+              ? [...indicesToProcess].sort(() => Math.random() - 0.5)
+              : indicesToProcess;
+        if (brush.mode === 'draw' && indices.length > 0) {
+          for (let i = 0; i < indices.length; i += 1) {
+            const cellIndex = indices[i];
+            let candidates: Tile[];
+            if (indices.length === 1) {
+              candidates = getCandidatesWithExactConnections(
+                new Set(),
+                randomSourceSet
+              );
+              if (candidates.length === 0) {
+                candidates = getCandidatesWithExactConnections(new Set(), null);
+              }
+            } else if (i === 0) {
+              const dirToNext = getDirectionFromTo(
+                cellIndex,
+                indices[i + 1]
+              );
+              candidates = getCandidatesWithExactConnections(
+                new Set([dirToNext]),
+                randomSourceSet
+              );
+              if (candidates.length === 0) {
+                candidates = getCandidatesWithExactConnections(
+                  new Set([dirToNext]),
+                  null
+                );
+              }
+            } else if (i === indices.length - 1) {
+              const dirToPrev = getDirectionFromTo(
+                cellIndex,
+                indices[i - 1]
+              );
+              candidates = getCandidatesWithExactConnections(
+                new Set([dirToPrev]),
+                randomSourceSet
+              );
+              if (candidates.length === 0) {
+                candidates = getCandidatesWithExactConnections(
+                  new Set([dirToPrev]),
+                  null
+                );
+              }
+            } else {
+              const dirToPrev = getDirectionFromTo(
+                cellIndex,
+                indices[i - 1]
+              );
+              const dirToNext = getDirectionFromTo(
+                cellIndex,
+                indices[i + 1]
+              );
+              const required = new Set([dirToPrev, dirToNext]);
+              candidates = getCandidatesWithExactConnections(
+                required,
+                randomSourceSet
+              );
+              if (candidates.length === 0) {
+                candidates = getCandidatesWithExactConnections(
+                  required,
+                  null
+                );
+              }
+            }
+            const placement =
+              candidates.length > 0
+                ? candidates[Math.floor(Math.random() * candidates.length)]
+                : { imageIndex: -1, rotation: 0, mirrorX: false, mirrorY: false };
+            applyPlacementsToArrayOverride(
+              nextTiles,
+              getMirroredPlacements(cellIndex, placement),
+              selectionSet ?? undefined
+            );
+          }
+        } else if (selectionSet && !mirrorHorizontal && !mirrorVertical) {
           indices.forEach((index) => {
             nextTiles[index] = getRandomPlacement(
               index,
@@ -1660,7 +1744,89 @@ export const useTileGrid = ({
         });
         return;
       }
-      randomFill();
+      if (brush.mode === 'draw') {
+        const nextTiles = buildInitialTiles(totalCells);
+        const strokeOrder = getSpiralCellOrder(
+          gridLayout.columns,
+          gridLayout.rows
+        );
+        for (let i = 0; i < strokeOrder.length; i += 1) {
+          const cellIndex = strokeOrder[i];
+          let candidates: Tile[];
+          if (strokeOrder.length === 1) {
+            candidates = getCandidatesWithExactConnections(
+              new Set(),
+              randomSourceSet
+            );
+            if (candidates.length === 0) {
+              candidates = getCandidatesWithExactConnections(new Set(), null);
+            }
+          } else if (i === 0) {
+            const dirToNext = getDirectionFromTo(
+              cellIndex,
+              strokeOrder[i + 1]
+            );
+            candidates = getCandidatesWithExactConnections(
+              new Set([dirToNext]),
+              randomSourceSet
+            );
+            if (candidates.length === 0) {
+              candidates = getCandidatesWithExactConnections(
+                new Set([dirToNext]),
+                null
+              );
+            }
+          } else if (i === strokeOrder.length - 1) {
+            const dirToPrev = getDirectionFromTo(
+              cellIndex,
+              strokeOrder[i - 1]
+            );
+            candidates = getCandidatesWithExactConnections(
+              new Set([dirToPrev]),
+              randomSourceSet
+            );
+            if (candidates.length === 0) {
+              candidates = getCandidatesWithExactConnections(
+                new Set([dirToPrev]),
+                null
+              );
+            }
+          } else {
+            const dirToPrev = getDirectionFromTo(
+              cellIndex,
+              strokeOrder[i - 1]
+            );
+            const dirToNext = getDirectionFromTo(
+              cellIndex,
+              strokeOrder[i + 1]
+            );
+            const required = new Set([dirToPrev, dirToNext]);
+            candidates = getCandidatesWithExactConnections(
+              required,
+              randomSourceSet
+            );
+            if (candidates.length === 0) {
+              candidates = getCandidatesWithExactConnections(
+                required,
+                null
+              );
+            }
+          }
+          const placement =
+            candidates.length > 0
+              ? candidates[Math.floor(Math.random() * candidates.length)]
+              : { imageIndex: -1, rotation: 0, mirrorX: false, mirrorY: false };
+          applyPlacementsToArrayOverride(
+            nextTiles,
+            getMirroredPlacements(cellIndex, placement)
+          );
+        }
+        withBulkUpdate(() => {
+          applyTiles(nextTiles);
+        });
+      } else {
+        randomFill();
+      }
       return;
     }
     const sourceNameFlood =
