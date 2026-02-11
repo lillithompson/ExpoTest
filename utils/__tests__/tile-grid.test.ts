@@ -7,6 +7,7 @@ import type { Tile } from '../tile-grid';
 import {
     buildInitialTiles,
     getSpiralCellOrder,
+    getSpiralCellOrderInRect,
     getTileSourceIndexByName,
     hydrateTilesWithSourceNames,
     normalizeTiles,
@@ -201,5 +202,26 @@ describe('getSpiralCellOrder', () => {
     for (let i = 0; i < cols * rows; i += 1) {
       expect(set.has(i)).toBe(true);
     }
+  });
+});
+
+describe('getSpiralCellOrderInRect', () => {
+  it('returns spiral order within rect so selection edges act as borders', () => {
+    const gridColumns = 6;
+    const order = getSpiralCellOrderInRect(1, 1, 3, 4, gridColumns);
+    expect(order).toHaveLength(12);
+    expect(order[0]).toBe(1 * gridColumns + 1);
+    const set = new Set(order);
+    for (let row = 1; row <= 3; row += 1) {
+      for (let col = 1; col <= 4; col += 1) {
+        expect(set.has(row * gridColumns + col)).toBe(true);
+      }
+    }
+    expect(set.size).toBe(12);
+  });
+
+  it('returns empty for invalid rect', () => {
+    expect(getSpiralCellOrderInRect(2, 0, 1, 3, 4)).toEqual([]);
+    expect(getSpiralCellOrderInRect(0, 2, 3, 1, 4)).toEqual([]);
   });
 });

@@ -54,6 +54,30 @@ export function getSpiralCellOrder(columns: number, rows: number): number[] {
 }
 
 /**
+ * Returns cell indices in spiral order within a rectangle of the grid, so the
+ * rectangle's edges act as borders (spiral starts at upper-left of rect, goes
+ * right to rect right edge, down to rect bottom, etc.). Used for draw-tool
+ * flood fill over a selected region so the selection gets the same spiral effect.
+ */
+export function getSpiralCellOrderInRect(
+  minRow: number,
+  minCol: number,
+  maxRow: number,
+  maxCol: number,
+  gridColumns: number
+): number[] {
+  const numRows = maxRow - minRow + 1;
+  const numCols = maxCol - minCol + 1;
+  if (numRows <= 0 || numCols <= 0) return [];
+  const order = getSpiralCellOrder(numCols, numRows);
+  return order.map((localIndex) => {
+    const localR = Math.floor(localIndex / numCols);
+    const localC = localIndex % numCols;
+    return (minRow + localR) * gridColumns + (minCol + localC);
+  });
+}
+
+/**
  * Returns the squarest (rows, columns) with rows * columns <= maxCells.
  * Used when capping the tile canvas so the grid stays as square as possible.
  */

@@ -8,6 +8,7 @@ import {
     computeFixedGridLayout,
     computeGridLayout,
     getSpiralCellOrder,
+    getSpiralCellOrderInRect,
     getTileSourceIndexByName,
     MAX_TILE_CANVAS_CELLS,
     normalizeTiles,
@@ -1628,17 +1629,25 @@ export const useTileGrid = ({
         const nextTiles = selectionSet
           ? [...normalizeTiles(tiles, totalCells, tileSourcesLength)]
           : buildInitialTiles(totalCells);
-        const spiralOrder = getSpiralCellOrder(
-          gridLayout.columns,
-          gridLayout.rows
-        );
         const indices =
           brush.mode === 'draw'
-            ? selectionSet
-              ? spiralOrder.filter((i) => selectionSet!.has(i))
-              : spiralOrder.filter((i) =>
-                  indicesToProcess.includes(i)
+            ? selectionSet && selectionBounds
+              ? getSpiralCellOrderInRect(
+                  selectionBounds.minRow,
+                  selectionBounds.minCol,
+                  selectionBounds.maxRow,
+                  selectionBounds.maxCol,
+                  gridLayout.columns
                 )
+              : (() => {
+                  const spiralOrder = getSpiralCellOrder(
+                    gridLayout.columns,
+                    gridLayout.rows
+                  );
+                  return spiralOrder.filter((i) =>
+                    indicesToProcess.includes(i)
+                  );
+                })()
             : selectionSet && indicesToProcess.length > 0
               ? [...indicesToProcess].sort(() => Math.random() - 0.5)
               : indicesToProcess;
