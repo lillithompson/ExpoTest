@@ -403,10 +403,6 @@ export const useTileGrid = ({
     }
   }, [brush.mode]);
 
-  const clearDrawStroke = useCallback(() => {
-    drawStrokeRef.current = [];
-  }, []);
-
   const compatTables = useMemo(
     () => buildCompatibilityTables(tileSources),
     [tileSourcesKey]
@@ -1026,6 +1022,77 @@ export const useTileGrid = ({
     );
   };
 
+  /** Finalize a completed stroke: length 1 → set to 00000000 (or empty); length ≥ 2 → last tile connects only to n-1. */
+  const applyFinalizeStrokeToTiles = (
+    prevTiles: Tile[],
+    stroke: number[],
+    selectionSet: Set<number> | null
+  ): Tile[] => {
+    if (stroke.length === 0) return prevTiles;
+    const next = prevTiles.map((t) => ({ ...t }));
+    if (stroke.length === 1) {
+      let zeroCandidates = getCandidatesWithExactConnections(
+        new Set(),
+        randomSourceSet
+      );
+      if (zeroCandidates.length === 0) {
+        zeroCandidates = getCandidatesWithExactConnections(new Set(), null);
+      }
+      const tile =
+        zeroCandidates.length > 0
+          ? zeroCandidates[Math.floor(Math.random() * zeroCandidates.length)]
+          : ({ imageIndex: -1, rotation: 0, mirrorX: false, mirrorY: false } as Tile);
+      applyPlacementsToArrayOverride(
+        next,
+        getMirroredPlacements(stroke[0], tile),
+        selectionSet ?? undefined
+      );
+      return normalizeTiles(next, totalCells, tileSourcesLength);
+    }
+    const lastIndex = stroke[stroke.length - 1];
+    const prevIndex = stroke[stroke.length - 2];
+    const dirFromLastToPrev = getDirectionFromTo(lastIndex, prevIndex);
+    if (dirFromLastToPrev < 0) return prevTiles;
+    let endCandidates = getCandidatesWithExactConnections(
+      new Set([dirFromLastToPrev]),
+      randomSourceSet
+    );
+    if (endCandidates.length === 0) {
+      endCandidates = getCandidatesWithExactConnections(
+        new Set([dirFromLastToPrev]),
+        null
+      );
+    }
+    if (endCandidates.length === 0) return prevTiles;
+    const endTile =
+      endCandidates[Math.floor(Math.random() * endCandidates.length)];
+    applyPlacementsToArrayOverride(
+      next,
+      getMirroredPlacements(lastIndex, endTile),
+      selectionSet ?? undefined
+    );
+    return normalizeTiles(next, totalCells, tileSourcesLength);
+  };
+
+  const clearDrawStroke = useCallback(() => {
+    const stroke = [...drawStrokeRef.current];
+    drawStrokeRef.current = [];
+    if (stroke.length > 0) {
+      setTiles((prev) => {
+        const selectionSet = selectionBounds
+          ? new Set(getSelectionCellIndices())
+          : null;
+        const next = applyFinalizeStrokeToTiles(prev, stroke, selectionSet);
+        return tilesEqual(prev, next) ? prev : next;
+      });
+    }
+  }, [
+    selectionBounds,
+    getSelectionCellIndices,
+    applyFinalizeStrokeToTiles,
+    tilesEqual,
+  ]);
+
   const getPatternTileForPosition = (row: number, col: number) => {
     if (!pattern || pattern.width <= 0 || pattern.height <= 0) {
       return null;
@@ -1298,6 +1365,55 @@ export const useTileGrid = ({
       const prevPrevIndex = stroke.length >= 2 ? stroke[stroke.length - 2] : undefined;
       const dirToPrev = getDirectionFromTo(cellIndex, prevIndex);
       if (dirToPrev < 0) {
+        // User moved to a non-adjacent cell (e.g. moved too fast): finalize current stroke, then start a new stroke at this cell
+        const strokeToFinalize = [...stroke];
+        let firstCandidates = getCandidatesWithConnectionCount(1, randomSourceSet);
+        if (firstCandidates.length === 0) {
+          firstCandidates = getCandidatesWithConnectionCount(1, null);
+        }
+        const validFirst = firstCandidates.filter((t) =>
+          isPlacementValid(
+            cellIndex,
+            t,
+            renderTiles,
+            treatUninitForRandomBrush,
+            selectionSet
+          )
+        );
+        const newStrokeFirst =
+          validFirst.length > 0
+            ? validFirst[Math.floor(Math.random() * validFirst.length)]
+            : null;
+        if (newStrokeFirst) {
+          setTiles((prev) => {
+            let next = applyFinalizeStrokeToTiles(
+              prev,
+              strokeToFinalize,
+              selectionSet
+            );
+            applyPlacementsToArrayOverride(
+              next,
+              getMirroredPlacements(cellIndex, {
+                imageIndex: newStrokeFirst.imageIndex,
+                rotation: newStrokeFirst.rotation,
+                mirrorX: newStrokeFirst.mirrorX,
+                mirrorY: newStrokeFirst.mirrorY,
+                name: newStrokeFirst.name,
+              }),
+              selectionSet ?? undefined
+            );
+            return normalizeTiles(next, totalCells, tileSourcesLength);
+          });
+          drawStrokeRef.current = [cellIndex];
+          lastPressRef.current = {
+            cellIndex,
+            imageIndex: newStrokeFirst.imageIndex,
+            rotation: newStrokeFirst.rotation,
+            mirrorX: newStrokeFirst.mirrorX,
+            mirrorY: newStrokeFirst.mirrorY,
+            time: now,
+          };
+        }
         return;
       }
       // Nth tile: exactly 2 connections, one toward n-1 (and one “free” for the path)
