@@ -247,6 +247,10 @@ export const useTileGrid = ({
       name: t.name,
     }));
     const stack = undoStackRef.current;
+    const top = stack.length > 0 ? stack[stack.length - 1] : null;
+    if (top && tilesEqual(snapshot, top)) {
+      return;
+    }
     if (stack.length >= MAX_UNDO_STEPS) {
       stack.shift();
     }
@@ -295,13 +299,21 @@ export const useTileGrid = ({
   );
 
   const undo = useCallback(() => {
-    if (undoStackRef.current.length === 0) {
+    const stack = undoStackRef.current;
+    if (stack.length === 0) {
       return;
     }
     isUndoRedoRef.current = true;
     setTiles((prev) => {
       const prevNorm = normalizeTiles(prev, totalCells, tileSourcesLength);
-      const next = undoStackRef.current.pop();
+      let next: Tile[] | undefined;
+      while (stack.length > 0) {
+        next = stack.pop();
+        if (next && !tilesEqual(prevNorm, next)) {
+          break;
+        }
+        next = undefined;
+      }
       if (!next) {
         return prev;
       }
@@ -318,13 +330,21 @@ export const useTileGrid = ({
   }, [totalCells, tileSourcesLength]);
 
   const redo = useCallback(() => {
-    if (redoStackRef.current.length === 0) {
+    const stack = redoStackRef.current;
+    if (stack.length === 0) {
       return;
     }
     isUndoRedoRef.current = true;
     setTiles((prev) => {
       const prevNorm = normalizeTiles(prev, totalCells, tileSourcesLength);
-      const next = redoStackRef.current.pop();
+      let next: Tile[] | undefined;
+      while (stack.length > 0) {
+        next = stack.pop();
+        if (next && !tilesEqual(prevNorm, next)) {
+          break;
+        }
+        next = undefined;
+      }
       if (!next) {
         return prev;
       }
