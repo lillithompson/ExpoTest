@@ -1629,6 +1629,17 @@ export const useTileGrid = ({
         const nextTiles = selectionSet
           ? [...normalizeTiles(tiles, totalCells, tileSourcesLength)]
           : buildInitialTiles(totalCells);
+        const empty = {
+          imageIndex: -1,
+          rotation: 0,
+          mirrorX: false,
+          mirrorY: false,
+        };
+        if (brush.mode === 'random' && selectionSet && selectionSet.size > 0) {
+          selectionSet.forEach((index) => {
+            nextTiles[index] = { ...empty };
+          });
+        }
         const indices =
           brush.mode === 'draw'
             ? selectionSet && selectionBounds
