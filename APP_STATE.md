@@ -19,11 +19,11 @@ Main Routes
 File View (viewMode = "file")
 - Status bar background strip at the top (white).
 - Header row: On desktop web, switchable tabs "Files" | "Tile Sets" (components/desktop-nav-tabs.tsx); active tab is highlighted with underline; inactive tab navigates on press. On mobile web and native, single title "Files" (press navigates to Tile Set Creator). Actions on the right.
-- Header actions: New File (plus), Select Mode (checkbox), Settings (cog).
+- Header actions: Import .tile (upload icon), New File (plus), Select Mode (checkbox), Settings (cog). Import opens a file picker (web: hidden input accept .tile; native: DocumentPicker) and loads the .tile file as a new canvas (then opens Modify view).
 - Select mode bar: Animated bar with Delete button (left), selected count (center), Exit (right).
 - File grid: Scrollable list of file cards, sorted by `updatedAt` descending. Column count is computed from content width so as many columns as fit: on desktop web (width ≥ 768) at least FILE_GRID_MIN_CARD_WIDTH_DESKTOP_WEB (240px) per card for larger thumbnails; otherwise FILE_GRID_MIN_CARD_WIDTH (100px). Cards pack to the upper left with no extra horizontal spread. On web, file thumbnail display size is capped (aspect ratio preserved): FILE_THUMB_DISPLAY_SIZE (200 px) on narrow viewports, 400 px (2×) on desktop (content width ≥ 768). Generated thumbnail resolution is FILE_THUMB_SIZE 400 (2× display for sharp thumbnails on desktop); native ViewShot and web renderTileCanvasToDataUrl use 400. Cards show previews (thumbnail/preview if available, otherwise live tile grid on native; web uses placeholder).
 - File card interactions: Tap opens Modify view; long press opens File Options menu.
-- File Options menu: Download (web direct or native overlay), Download SVG (web only), Duplicate, Delete.
+- File Options menu: Download (web direct or native overlay), Download SVG (web only), Download .tile (serializes canvas to custom .tile format and downloads or shares), Duplicate, Delete.
 - New File modal: On desktop web, title "Preferred Tile Size"; on iOS and mobile (web), title "New File Size" (header unchanged). On iOS and mobile web, resolution options are S, M, L (tile sizes 100, 50, 25 px). On desktop web and Android, tile size selection grid is [25, 50, 75, 100, 150, 200].
 - Settings overlay (file view): First option "View manual" opens the in-app manual (app/manual.tsx). Then Show Debug toggle, background color picker, background line color picker, background line width slider. Bottom of settings: light grey platform label (Desktop Web, Mobile Web, Expo Go, iOS, or Android). "Delete all local data" button: shows an "are you sure" confirmation (Alert on native, window.confirm on web); on confirm, clears AsyncStorage for files, tile sets, bakes, favorites, patterns, and settings, resets settings to defaults (setSettings(getDefaultSettings())), resets in-memory state via clearAllFiles, reloadTileSets, clearBrushFavorites, and clearAllPatterns, then closes settings and returns to file view.
 
@@ -119,6 +119,7 @@ Persistence and Storage
 
 File Data Model
 - Each file stores: id, name, tiles array, grid rows/columns, category and categories, tileSetIds, sourceNames, preferredTileSize, lineWidth, lineColor, thumbnailUri, previewUri, updatedAt, lockedCells (optional array of cell indices that cannot be modified).
+- .tile format: Custom export/import format (extension .tile). utils/tile-format.ts defines versioned JSON: serializeTileFile(file) and deserializeTileFile(json). Import (File toolbar) loads a .tile file as a new canvas; Download .tile (file long-press menu) saves the canvas to a .tile file (web: blob download; native: share from cache).
 - Tile placement uses `imageIndex`, `rotation`, `mirrorX`, `mirrorY`. Empty tiles are `imageIndex = -1`; error tiles are `imageIndex = -2`.
 - Tiles can also carry a `name` for the original tile source; rendering prefers `name` to avoid index drift when tile set sources change.
 

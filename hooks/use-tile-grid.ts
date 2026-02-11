@@ -1,8 +1,8 @@
-import { type MutableRefObject, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react';
 
 import { type TileSource } from '@/assets/images/tiles/manifest';
-import { buildCompatibilityTables } from '@/utils/tile-compat';
 import { validateDrawStroke } from '@/utils/draw-stroke';
+import { buildCompatibilityTables } from '@/utils/tile-compat';
 import {
     buildInitialTiles,
     computeFixedGridLayout,

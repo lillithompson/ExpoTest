@@ -1,6 +1,7 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import Slider from '@react-native-community/slider';
 import Constants from 'expo-constants';
+import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
 import { Image as ExpoImage } from 'expo-image';
 import { useRouter } from 'expo-router';
@@ -47,6 +48,7 @@ import { useTileGrid } from '@/hooks/use-tile-grid';
 import { useTilePatterns } from '@/hooks/use-tile-patterns';
 import { useTileSets } from '@/hooks/use-tile-sets';
 import { clearAllLocalData } from '@/utils/clear-local-data';
+import { deserializeTileFile } from '@/utils/tile-format';
 import {
     canApplyEmptyNewFileRestore,
     canApplyNonEmptyRestore,
@@ -697,6 +699,8 @@ export default function TestScreen() {
   const [showTileSetChooser, setShowTileSetChooser] = useState(false);
   const [showNewFileModal, setShowNewFileModal] = useState(false);
   const [fileMenuTargetId, setFileMenuTargetId] = useState<string | null>(null);
+  const importTileInputRef = useRef<HTMLInputElement | null>(null);
+  const applyImportedTileFileRef = useRef<(content: string) => void>(() => {});
   const [downloadTargetId, setDownloadTargetId] = useState<string | null>(null);
   const [isDownloading, setIsDownloading] = useState(false);
   const [showDownloadOverlay, setShowDownloadOverlay] = useState(false);
@@ -853,8 +857,10 @@ export default function TestScreen() {
     activeFileId,
     setActive,
     createFile,
+    createFileFromTileData,
     duplicateFile,
     downloadFile,
+    downloadTileFile,
     deleteFile,
     clearAllFiles,
     upsertActiveFile,
@@ -3272,6 +3278,87 @@ export default function TestScreen() {
     setViewMode('modify');
   };
 
+  const applyImportedTileFile = useCallback(
+    (content: string) => {
+      const result = deserializeTileFile(content);
+      if (!result.ok) {
+        if (Platform.OS === 'web') {
+          window.alert(result.error);
+        } else {
+          Alert.alert('Invalid .tile file', result.error);
+        }
+        return;
+      }
+      const newId = createFileFromTileData(result.payload);
+      setLoadRequestId((prev) => prev + 1);
+      setLoadPreviewUri(null);
+      setSuspendTiles(true);
+      setLoadedToken(0);
+      setHydrating(true);
+      setViewMode('modify');
+    },
+    [createFileFromTileData]
+  );
+
+  const handleImportTileFilePress = useCallback(async () => {
+    if (Platform.OS === 'web') {
+      importTileInputRef.current?.click();
+      return;
+    }
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: '*/*',
+        copyToCacheDirectory: true,
+      });
+      if (result.canceled) {
+        return;
+      }
+      const uri = result.assets[0].uri;
+      const content = await FileSystem.readAsStringAsync(uri, {
+        encoding: FileSystem.EncodingType.UTF8,
+      });
+      applyImportedTileFile(content);
+    } catch {
+      Alert.alert('Import failed', 'Could not read the selected file.');
+    }
+  }, [applyImportedTileFile]);
+
+  useEffect(() => {
+    applyImportedTileFileRef.current = applyImportedTileFile;
+  }, [applyImportedTileFile]);
+
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof document === 'undefined') {
+      return;
+    }
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.tile';
+    input.style.display = 'none';
+    input.onchange = (e: Event) => {
+      const target = e.target as HTMLInputElement;
+      const file = target?.files?.[0];
+      if (!file) {
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = () => {
+        const text = reader.result as string;
+        applyImportedTileFileRef.current(text);
+      };
+      reader.readAsText(file);
+      target.value = '';
+    };
+    document.body.appendChild(input);
+    importTileInputRef.current = input;
+    return () => {
+      if (input.parentNode) {
+        document.body.removeChild(input);
+      }
+      importTileInputRef.current = null;
+    };
+  }, []);
+
   const toggleSelectFile = (fileId: string) => {
     setSelectedFileIds((prev) => {
       const next = new Set(prev);
@@ -3632,6 +3719,12 @@ export default function TestScreen() {
             </Pressable>
           )}
           <ThemedView style={styles.fileHeaderActions}>
+            <ToolbarButton
+              label="Import .tile file"
+              icon="upload"
+              color="#fff"
+              onPress={handleImportTileFilePress}
+            />
             <ToolbarButton
               label="Create new tile canvas file"
               icon="plus"
@@ -4083,6 +4176,20 @@ export default function TestScreen() {
                   <ThemedText type="defaultSemiBold">Download SVG</ThemedText>
                 </Pressable>
               )}
+              <Pressable
+                style={styles.fileMenuButton}
+                onPress={() => {
+                  const file = files.find((entry) => entry.id === fileMenuTargetId);
+                  if (file) {
+                    void downloadTileFile(file);
+                  }
+                  setFileMenuTargetId(null);
+                }}
+                accessibilityRole="button"
+                accessibilityLabel="Download .tile file"
+              >
+                <ThemedText type="defaultSemiBold">Download .tile</ThemedText>
+              </Pressable>
               <Pressable
                 style={styles.fileMenuButton}
                 onPress={() => {

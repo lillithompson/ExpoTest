@@ -1,11 +1,19 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as FileSystem from 'expo-file-system';
+import * as Sharing from 'expo-sharing';
+import { Platform } from 'react-native';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { TILE_CATEGORIES, type TileCategory } from '@/assets/images/tiles/manifest';
+import { getCellIndicesInRegion } from '@/utils/locked-regions';
+import {
+  type TileFilePayload,
+  deserializeTileFile,
+  serializeTileFile,
+} from '@/utils/tile-format';
 import { renderTileCanvasToDataUrl } from '@/utils/tile-export';
 import { applyRemovedSourcesToFile } from '@/utils/tile-file-sync';
 import { type GridLayout, type Tile } from '@/utils/tile-grid';
-import { getCellIndicesInRegion } from '@/utils/locked-regions';
 
 export type TileFile = {
   id: string;
@@ -358,6 +366,66 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
     [persistFiles]
   );
 
+  const createFileFromTileData = useCallback(
+    (payload: TileFilePayload): string => {
+      const nextFile: TileFile = {
+        id: createId(),
+        name: payload.name,
+        tiles: payload.tiles,
+        grid: payload.grid,
+        category: payload.category,
+        categories: payload.categories,
+        tileSetIds: payload.tileSetIds,
+        sourceNames: payload.sourceNames,
+        preferredTileSize: payload.preferredTileSize,
+        lineWidth: payload.lineWidth,
+        lineColor: payload.lineColor,
+        thumbnailUri: null,
+        previewUri: null,
+        updatedAt: Date.now(),
+        lockedCells:
+          Array.isArray(payload.lockedCells) && payload.lockedCells.length > 0
+            ? payload.lockedCells
+            : undefined,
+      };
+      setFiles((prev) => {
+        const next = [nextFile, ...prev];
+        void persistFiles(next, nextFile.id);
+        return next;
+      });
+      setActiveFileId(nextFile.id);
+      void AsyncStorage.setItem(ACTIVE_KEY, nextFile.id);
+      return nextFile.id;
+    },
+    [persistFiles]
+  );
+
+  const downloadTileFile = useCallback(async (file: TileFile) => {
+    const content = serializeTileFile(file);
+    const safeName = file.name.replace(/[^\w\s-]+/g, '').trim() || 'canvas';
+    const fileName = `${safeName}.tile`;
+    if (Platform.OS === 'web') {
+      const blob = new Blob([content], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } else {
+      const target = `${FileSystem.cacheDirectory}${safeName}.tile`;
+      await FileSystem.writeAsStringAsync(target, content, {
+        encoding: FileSystem.EncodingType.UTF8,
+      });
+      const canShare = await Sharing.isAvailableAsync();
+      if (canShare) {
+        await Sharing.shareAsync(target, { mimeType: 'application/json' });
+      }
+    }
+  }, []);
+
   const downloadFile = useCallback(
     async (
       file: TileFile,
@@ -530,8 +598,10 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
     activeFileId,
     setActive,
     createFile,
+    createFileFromTileData,
     duplicateFile,
     downloadFile,
+    downloadTileFile,
     deleteFile,
     clearAllFiles,
     upsertActiveFile,

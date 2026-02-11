@@ -1,10 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
 import { Canvas, Circle, Group, ImageSVG, Rect, Skia } from '@shopify/react-native-skia';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
+import { type TileSource } from '@/assets/images/tiles/manifest';
 import { getSvgXmlWithOverrides } from '@/components/tile-asset';
 import { getTransformedConnectionsForName } from '@/utils/tile-compat';
 import { type Tile } from '@/utils/tile-grid';
-import { type TileSource } from '@/assets/images/tiles/manifest';
 
 type Props = {
   width: number;
