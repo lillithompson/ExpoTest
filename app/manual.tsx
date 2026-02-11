@@ -85,7 +85,7 @@ export default function ManualScreen() {
 
         <ThemedText type="defaultSemiBold" style={styles.subsection}>Modify view</ThemedText>
         <ThemedText type="default" style={styles.para}>
-          Where you edit a single design. &lt; Modify (top left) saves and returns to the File view. The toolbar has Reset, Flood, Reconcile, and Mirror toggles. The brush panel at the bottom shows the tile palette and brush modes: Random, palette tiles, Clone, Erase, and Pattern. Double tap or long press the Random tile to open the Tile Set chooser. Settings (gear) opens Modify-view settings including Download PNG.
+          Where you edit a single design. &lt; Modify (top left) saves and returns to the File view. The toolbar has Reset, Flood, Reconcile, and Mirror (cycling button). The brush panel at the bottom shows the tile palette and brush modes: Random, palette tiles, Clone, Erase, and Pattern. Double tap or long press the Random tile to open the Tile Set chooser. Settings (gear) opens Modify-view settings including Download PNG.
         </ThemedText>
 
         <ThemedText type="defaultSemiBold" style={styles.subsection}>Tile Sets list</ThemedText>
@@ -126,13 +126,8 @@ export default function ManualScreen() {
         />
         <ToolRow
           icon="flip-horizontal"
-          label="Mirror Horizontal"
-          description="When on, painting is mirrored left/right; a guide line shows the axis."
-        />
-        <ToolRow
-          icon="flip-vertical"
-          label="Mirror Vertical"
-          description="When on, painting is mirrored top/bottom; a guide line shows the axis."
+          label="Mirror"
+          description="Tap to cycle: off → horizontal → horizontal + vertical → vertical → off. Icon is green when any mirroring is on; guide lines show axes."
         />
 
         <ThemedText type="defaultSemiBold" style={styles.subsection}>Brush panel</ThemedText>

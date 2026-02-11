@@ -791,25 +791,33 @@ export default function ModifyTileScreen() {
               onLongPress={floodFill}
             />
             <ToolbarButton
-              label="Mirror Horizontal"
-              icon="flip-horizontal"
-              active={settings.mirrorHorizontal}
-              onPress={() =>
-                setSettings((prev) => ({
-                  ...prev,
-                  mirrorHorizontal: !prev.mirrorHorizontal,
-                }))
+              label={
+                !settings.mirrorHorizontal && !settings.mirrorVertical
+                  ? 'Mirror (off)'
+                  : settings.mirrorHorizontal && settings.mirrorVertical
+                    ? 'Mirror: Horizontal + Vertical'
+                    : settings.mirrorHorizontal
+                      ? 'Mirror: Horizontal'
+                      : 'Mirror: Vertical'
               }
-            />
-            <ToolbarButton
-              label="Mirror Vertical"
-              icon="flip-vertical"
-              active={settings.mirrorVertical}
+              icon={
+                !settings.mirrorHorizontal && !settings.mirrorVertical
+                  ? 'flip-horizontal'
+                  : settings.mirrorHorizontal && settings.mirrorVertical
+                    ? 'arrow-all'
+                    : settings.mirrorHorizontal
+                      ? 'flip-horizontal'
+                      : 'flip-vertical'
+              }
+              active={settings.mirrorHorizontal || settings.mirrorVertical}
               onPress={() =>
-                setSettings((prev) => ({
-                  ...prev,
-                  mirrorVertical: !prev.mirrorVertical,
-                }))
+                setSettings((prev) => {
+                  const { mirrorHorizontal: h, mirrorVertical: v } = prev;
+                  if (!h && !v) return { ...prev, mirrorHorizontal: true };
+                  if (h && !v) return { ...prev, mirrorVertical: true };
+                  if (h && v) return { ...prev, mirrorHorizontal: false };
+                  return { ...prev, mirrorVertical: false };
+                })
               }
             />
           </ThemedView>

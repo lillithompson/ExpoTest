@@ -25,7 +25,7 @@ The **File** title at the top is tappable and takes you to the **Tile Sets** are
 The **Modify** view is where you edit a single design. You see a grid of cells that you paint with tiles.
 
 - **&lt; Modify** (top left) saves your work and returns you to the File view.
-- The **toolbar** at the top has: Reset, Flood, Reconcile, Mirror Horizontal, Mirror Vertical (see [Tools](#tools)).
+- The **toolbar** at the top has: Reset, Flood, Reconcile, Mirror (see [Tools](#tools)).
 - The **brush panel** at the bottom shows the tile palette and brush modes: Random, palette tiles, Clone, Erase, and Pattern.
 - **Double tap** or **long press** the **Random** tile in the brush panel to open the **Tile Set chooser** and pick which tile sets appear in your palette.
 - **Settings (gear)** in the header opens the Modify-view settings (including Download PNG).
@@ -62,7 +62,7 @@ Use the back button to return to the Tile Sets list.
 
 This is the single-tile editor. It works like the main Modify view but for one tile template.
 
-- Same **toolbar** (Reset, Flood, Reconcile, Mirror toggles) and **brush panel** as in the main Modify view.
+- Same **toolbar** (Reset, Flood, Reconcile, Mirror) and **brush panel** as in the main Modify view.
 - Changes are part of the tile set; when you’re done, go back to the Tile Set Editor.
 
 ---
@@ -76,8 +76,7 @@ The in-app manual (Settings → **View manual**) shows the same icons used in th
 - **Reset** (⟳ refresh icon) — Clears the entire grid (or the whole tile in Modify Tile). Use with care.
 - **Flood** (fill icon) — **Tap:** Fills the whole grid using the current brush (random, fixed, pattern, or erase). **Long press:** “Flood Complete” — fills only *empty* cells; already placed tiles are left as-is. Helpful for filling gaps without overwriting.
 - **Reconcile** (puzzle icon) — **Tap:** Fixes invalid tile connections by replacing bad tiles with compatible ones. Empty cells are never changed. **Long press:** “Controlled Randomize” — replaces tiles with connection-compatible alternatives (same “shape,” different look).
-- **Mirror Horizontal** (flip-horizontal icon) — When on, painting on one side is mirrored to the other (left/right). A thin guide line shows the mirror axis.
-- **Mirror Vertical** (flip-vertical icon) — Same as above, but top/bottom.
+- **Mirror** (single cycling button) — **Tap** to cycle: no mirroring → horizontal → horizontal + vertical → vertical → no mirroring. When any mirroring is on, the icon is green and guide lines show the mirror axes. Icons: grey horizontal flip when off; horizontal flip (green) for horizontal only; arrow-all for both axes; vertical flip for vertical only.
 
 ---
 
