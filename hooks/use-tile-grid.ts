@@ -188,6 +188,12 @@ export const useTileGrid = ({
   const [cloneCursorIndex, setCloneCursorIndex] = useState<number | null>(null);
   const patternAnchorRef = useRef<number | null>(null);
   const drawStrokeRef = useRef<number[]>([]);
+  const placementOrderRef = useRef(0);
+
+  const getNextPlacementOrder = () => {
+    placementOrderRef.current += 1;
+    return placementOrderRef.current;
+  };
 
   const renderTiles = useMemo(
     () => normalizeTiles(tiles, totalCells, tileSourcesLength),
@@ -225,7 +231,8 @@ export const useTileGrid = ({
         a.imageIndex !== b.imageIndex ||
         a.rotation !== b.rotation ||
         a.mirrorX !== b.mirrorX ||
-        a.mirrorY !== b.mirrorY
+        a.mirrorY !== b.mirrorY ||
+        (a.placedOrder ?? 0) !== (b.placedOrder ?? 0)
       ) {
         return false;
       }
@@ -283,7 +290,8 @@ export const useTileGrid = ({
             a.imageIndex !== b.imageIndex ||
             a.rotation !== b.rotation ||
             a.mirrorX !== b.mirrorX ||
-            a.mirrorY !== b.mirrorY
+            a.mirrorY !== b.mirrorY ||
+            (a.placedOrder ?? 0) !== (b.placedOrder ?? 0)
           ) {
             changed += 1;
           }
@@ -995,7 +1003,7 @@ export const useTileGrid = ({
       if (index !== driverIndex && nextTiles[index]?.imageIndex >= 0) {
         return;
       }
-      nextTiles[index] = placement;
+      nextTiles[index] = { ...placement, placedOrder: placementOrderRef.current };
     });
   };
 
@@ -1011,16 +1019,18 @@ export const useTileGrid = ({
       if (allowIndices != null && !allowIndices.has(index)) {
         return;
       }
-      nextTiles[index] = placement;
+      nextTiles[index] = { ...placement, placedOrder: placementOrderRef.current };
     });
   };
 
   const applyPlacement = (cellIndex: number, placement: Tile) => {
     const placements = getMirroredPlacements(cellIndex, placement);
+    const order = getNextPlacementOrder();
     setTiles((prev) =>
-      normalizeTiles(prev, totalCells, tileSourcesLength).map((tile, index) =>
-        placements.get(index) ?? tile
-      )
+      normalizeTiles(prev, totalCells, tileSourcesLength).map((tile, index) => {
+        const p = placements.get(index);
+        return p ? { ...p, placedOrder: order } : tile;
+      })
     );
   };
 
@@ -1081,6 +1091,7 @@ export const useTileGrid = ({
     drawStrokeRef.current = [];
     if (stroke.length > 0) {
       setTiles((prev) => {
+        getNextPlacementOrder();
         const selectionSet = selectionBounds
           ? new Set(getSelectionCellIndices())
           : null;
@@ -1268,6 +1279,7 @@ export const useTileGrid = ({
     if (!current) {
       return;
     }
+    const placementOrder = getNextPlacementOrder();
     const now = Date.now();
     const cached =
       lastPressRef.current &&
@@ -1286,6 +1298,7 @@ export const useTileGrid = ({
                 rotation: cached.rotation,
                 mirrorX: cached.mirrorX,
                 mirrorY: cached.mirrorY,
+                placedOrder: placementOrder,
               }
             : tile
         )
@@ -1525,6 +1538,7 @@ export const useTileGrid = ({
     if (totalCells <= 0 || tileSourcesLength <= 0) {
       return;
     }
+    getNextPlacementOrder();
     const startIndex = Math.floor(Math.random() * totalCells);
     const nextTiles = [...normalized];
     for (let offset = 0; offset < totalCells; offset += 1) {
@@ -1564,6 +1578,7 @@ export const useTileGrid = ({
     if (brush.mode === 'clone') {
       return;
     }
+    getNextPlacementOrder();
     const indicesToProcess = getIndicesToProcess();
     if (brush.mode === 'pattern') {
       if (!pattern || pattern.width <= 0 || pattern.height <= 0) {
@@ -1584,6 +1599,7 @@ export const useTileGrid = ({
                 mirrorX: tile.mirrorX,
                 mirrorY: tile.mirrorY,
                 name: tile.name,
+                placedOrder: placementOrderRef.current,
               }
             : { imageIndex: -1, rotation: 0, mirrorX: false, mirrorY: false };
         });
@@ -1609,6 +1625,7 @@ export const useTileGrid = ({
               mirrorX: tile.mirrorX,
               mirrorY: tile.mirrorY,
               name: tile.name,
+              placedOrder: placementOrderRef.current,
             };
           }
         }
@@ -1873,7 +1890,7 @@ export const useTileGrid = ({
       };
       if (selectionSet && !mirrorHorizontal && !mirrorVertical) {
         selectionSet.forEach((index) => {
-          nextTiles[index] = { ...fixedTile };
+          nextTiles[index] = { ...fixedTile, placedOrder: placementOrderRef.current };
         });
       } else {
         for (const index of indicesToProcess) {
@@ -1976,6 +1993,7 @@ export const useTileGrid = ({
             mirrorX: tile.mirrorX,
             mirrorY: tile.mirrorY,
             name: tile.name,
+            placedOrder: placementOrderRef.current,
           };
         }
       }
@@ -2068,6 +2086,7 @@ export const useTileGrid = ({
     if (totalCells <= 0 || tileSourcesLength <= 0) {
       return;
     }
+    getNextPlacementOrder();
     const snapshot = normalizeTiles(tiles, totalCells, tileSourcesLength);
     const nextTiles = [...snapshot];
     const allowedSet = randomSourceSet ?? null;
@@ -2075,11 +2094,14 @@ export const useTileGrid = ({
     const maxPasses = Math.min(50, Math.max(8, gridLayout.rows + gridLayout.columns));
     for (let pass = 0; pass < maxPasses; pass += 1) {
       let changed = false;
-      const indices = [...getIndicesToProcess()];
-      for (let i = indices.length - 1; i > 0; i -= 1) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [indices[i], indices[j]] = [indices[j], indices[i]];
-      }
+      // Visit tiles by placement order (oldest first) so the design is altered and latest strokes are preserved
+      const indices = [...getIndicesToProcess()].filter(
+        (i) => nextTiles[i]?.imageIndex >= 0
+      );
+      indices.sort(
+        (a, b) =>
+          (nextTiles[a].placedOrder ?? 0) - (nextTiles[b].placedOrder ?? 0)
+      );
       for (const index of indices) {
         const tile = nextTiles[index];
         if (!tile || tile.imageIndex < 0) {
@@ -2117,6 +2139,7 @@ export const useTileGrid = ({
     if (totalCells <= 0 || tileSourcesLength <= 0) {
       return;
     }
+    getNextPlacementOrder();
     const allowedSet = randomSourceSet ?? null;
     const lookup = allowedSet
       ? (() => {

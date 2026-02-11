@@ -6,6 +6,8 @@ export type Tile = {
   source?: unknown;
   name?: string;
   baseConnections?: boolean[] | null;
+  /** Monotonic order when the tile was placed; used by reconcile to prefer altering older tiles. */
+  placedOrder?: number;
 };
 
 export type GridLayout = {
@@ -144,6 +146,7 @@ export const normalizeTiles = (
         mirrorX: source.mirrorX,
         mirrorY: source.mirrorY,
         name: source.name,
+        placedOrder: source.placedOrder,
       });
     }
     return next;
