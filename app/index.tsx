@@ -717,6 +717,8 @@ export default function TestScreen() {
   );
   const [showSettingsOverlay, setShowSettingsOverlay] = useState(false);
   const [showTileSetChooser, setShowTileSetChooser] = useState(false);
+  const [showModifyTileSetBanner, setShowModifyTileSetBanner] = useState(false);
+  const dismissModifyBanner = useCallback(() => setShowModifyTileSetBanner(false), []);
   const [showNewFileModal, setShowNewFileModal] = useState(false);
   const [fileMenuTargetId, setFileMenuTargetId] = useState<string | null>(null);
   const importTileInputRef = useRef<HTMLInputElement | null>(null);
@@ -3415,6 +3417,7 @@ export default function TestScreen() {
     setSuspendTiles(true);
     setHydrating(true);
     setActive(file.id);
+    setShowModifyTileSetBanner(false);
     setViewMode('modify');
   };
 
@@ -3437,6 +3440,7 @@ export default function TestScreen() {
         setSuspendTiles(true);
         setLoadedToken(0);
         setHydrating(true);
+        setShowModifyTileSetBanner(false);
         setViewMode('modify');
         return;
       }
@@ -3455,6 +3459,7 @@ export default function TestScreen() {
       setSuspendTiles(true);
       setLoadedToken(0);
       setHydrating(true);
+      setShowModifyTileSetBanner(false);
       setViewMode('modify');
     },
     [createFileFromTileData, importTileSet]
@@ -5119,6 +5124,7 @@ export default function TestScreen() {
                       setLoadedToken(0);
                       setHydrating(true);
                       setShowNewFileModal(false);
+                      setShowModifyTileSetBanner(false);
                       setViewMode('modify');
                     }}
                     style={styles.newFileButton}
@@ -5294,12 +5300,22 @@ export default function TestScreen() {
         >
         <ThemedView style={styles.titleContainer}>
           <ThemedView style={styles.headerRow}>
-            <NavButton
-              label="< Modify"
+            <Pressable
               onPress={() => {
                 persistActiveFileNow();
                 setViewMode('file');
               }}
+              style={styles.navBackSquare}
+              accessibilityRole="button"
+              accessibilityLabel="Back to file list"
+            >
+              <ThemedText type="defaultSemiBold" style={styles.navButtonText}>
+                &lt;
+              </ThemedText>
+            </Pressable>
+            <NavButton
+              label="Modify"
+              onPress={() => setShowModifyTileSetBanner((prev) => !prev)}
             />
             <ThemedView
               style={[
@@ -5330,6 +5346,7 @@ export default function TestScreen() {
                   active={allSelectedLocked}
                   color={allSelectedLocked ? '#dc2626' : undefined}
                   onPress={() => {
+                    dismissModifyBanner();
                     if (!canvasSelection || gridLayout.columns === 0) {
                       return;
                     }
@@ -5358,6 +5375,7 @@ export default function TestScreen() {
                   icon="undo"
                   disabled={!canUndo}
                   onPress={() => {
+                    dismissModifyBanner();
                     showUndoRedoBanner('undoing');
                     undo();
                   }}
@@ -5367,6 +5385,7 @@ export default function TestScreen() {
                   icon="redo"
                   disabled={!canRedo}
                   onPress={() => {
+                    dismissModifyBanner();
                     showUndoRedoBanner('redoing');
                     redo();
                   }}
@@ -5379,6 +5398,7 @@ export default function TestScreen() {
               icon="select-drag"
               active={isSelectionMode}
               onPress={() => {
+                dismissModifyBanner();
                 setIsSelectionMode((prev) => !prev);
                 setCanvasSelection(null);
               }}
@@ -5387,6 +5407,7 @@ export default function TestScreen() {
               label="Reset"
               icon="refresh"
               onPress={() => {
+                dismissModifyBanner();
                 if (pendingFloodCompleteRef.current) {
                   clearTimeout(pendingFloodCompleteRef.current);
                   pendingFloodCompleteRef.current = null;
@@ -5398,6 +5419,7 @@ export default function TestScreen() {
               label="Flood"
               icon="format-color-fill"
               onPress={() => {
+                dismissModifyBanner();
                 if (floodLongPressHandledRef.current) {
                   floodLongPressHandledRef.current = false;
                   return;
@@ -5412,6 +5434,7 @@ export default function TestScreen() {
                 }, 0);
               }}
               onLongPress={() => {
+                dismissModifyBanner();
                 floodLongPressHandledRef.current = true;
                 if (pendingFloodCompleteRef.current) {
                   clearTimeout(pendingFloodCompleteRef.current);
@@ -5424,6 +5447,7 @@ export default function TestScreen() {
               label="Reconcile"
               icon="puzzle"
               onPress={() => {
+                dismissModifyBanner();
                 if (pendingFloodCompleteRef.current) {
                   clearTimeout(pendingFloodCompleteRef.current);
                   pendingFloodCompleteRef.current = null;
@@ -5431,6 +5455,7 @@ export default function TestScreen() {
                 reconcileTiles();
               }}
               onLongPress={() => {
+                dismissModifyBanner();
                 if (pendingFloodCompleteRef.current) {
                   clearTimeout(pendingFloodCompleteRef.current);
                   pendingFloodCompleteRef.current = null;
@@ -5463,15 +5488,16 @@ export default function TestScreen() {
                   ? '#3b82f6'
                   : undefined
               }
-              onPress={() =>
+              onPress={() => {
+                dismissModifyBanner();
                 setSettings((prev) => {
                   const { mirrorHorizontal: h, mirrorVertical: v } = prev;
                   if (!h && !v) return { ...prev, mirrorHorizontal: true };
                   if (h && !v) return { ...prev, mirrorVertical: true };
                   if (h && v) return { ...prev, mirrorHorizontal: false };
                   return { ...prev, mirrorVertical: false };
-                })
-              }
+                });
+              }}
             />
             </ThemedView>
           </ThemedView>
@@ -6199,6 +6225,178 @@ export default function TestScreen() {
             </Animated.View>
           )}
           </View>
+          {showModifyTileSetBanner && (
+            <>
+              <Pressable
+                style={StyleSheet.absoluteFill}
+                onPress={() => setShowModifyTileSetBanner(false)}
+                accessibilityRole="button"
+                accessibilityLabel="Dismiss tile set banner"
+              />
+              <View
+                style={styles.modifyTileSetBanner}
+                pointerEvents="box-none"
+              >
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator
+                style={styles.modifyTileSetBannerScroll}
+                contentContainerStyle={styles.modifyTileSetBannerScrollContent}
+              >
+                {TILE_CATEGORIES.map((category) => {
+                  const isSelected = selectedCategories.includes(category);
+                  const firstTile =
+                    TILE_CATEGORY_THUMBNAILS[category] ?? TILE_MANIFEST[category][0];
+                  return (
+                    <Pressable
+                      key={category}
+                      onPress={() => {
+                        if (
+                          isSelected &&
+                          selectedCategories.length === 1 &&
+                          selectedTileSetIds.length === 0
+                        ) {
+                          return;
+                        }
+                        const nextCategories = isSelected
+                          ? selectedCategories.filter((entry) => entry !== category)
+                          : [...selectedCategories, category];
+                        const nextPaletteSources = getSourcesForSelection(
+                          nextCategories,
+                          selectedTileSetIds
+                        );
+                        const nextSourceNames = ensureFileSourceNames(nextPaletteSources);
+                        setSelectedCategories(nextCategories);
+                        setSettings((prev) => ({
+                          ...prev,
+                          tileSetCategories: nextCategories,
+                          tileSetIds: selectedTileSetIds,
+                        }));
+                        if (activeFileId) {
+                          upsertActiveFile({
+                            tiles,
+                            gridLayout,
+                            tileSetIds: selectedTileSetIds,
+                            sourceNames: nextSourceNames,
+                            preferredTileSize: fileTileSize,
+                            lineWidth: activeLineWidth,
+                            lineColor: activeLineColor,
+                          });
+                        }
+                      }}
+                      style={styles.modifyTileSetBannerThumbWrap}
+                      accessibilityState={{ selected: isSelected }}
+                    >
+                      <View
+                        style={[
+                          styles.modifyTileSetBannerThumb,
+                          !isSelected && styles.modifyTileSetBannerThumbUnselected,
+                          isSelected && styles.modifyTileSetBannerThumbSelected,
+                        ]}
+                      >
+                        {firstTile && (
+                          <TileAsset
+                            source={firstTile.source}
+                            name={firstTile.name}
+                            style={styles.modifyTileSetBannerThumbImage}
+                            resizeMode="cover"
+                          />
+                        )}
+                      </View>
+                    </Pressable>
+                  );
+                })}
+                {userTileSets.map((set) => {
+                  const isSelected = selectedTileSetIds.includes(set.id);
+                  const firstTile =
+                    [...set.tiles].sort((a, b) =>
+                      (a.name ?? '').localeCompare(b.name ?? '')
+                    )[0] ?? null;
+                  const thumbUri = firstTile?.thumbnailUri ?? firstTile?.previewUri ?? null;
+                  const bakedSources = bakedSourcesBySetId[set.id] ?? [];
+                  const firstBakedSource = bakedSources[0];
+                  const thumbSource =
+                    thumbUri
+                      ? { uri: thumbUri }
+                      : firstBakedSource?.source
+                        ? firstBakedSource.source
+                        : null;
+                  return (
+                    <Pressable
+                      key={set.id}
+                      onPress={() => {
+                        if (
+                          isSelected &&
+                          selectedTileSetIds.length === 1 &&
+                          selectedCategories.length === 0
+                        ) {
+                          return;
+                        }
+                        const nextTileSetIds = isSelected
+                          ? selectedTileSetIds.filter((entry) => entry !== set.id)
+                          : [...selectedTileSetIds, set.id];
+                        setSelectedTileSetIds(nextTileSetIds);
+                        setSettings((prev) => ({
+                          ...prev,
+                          tileSetCategories: selectedCategories,
+                          tileSetIds: nextTileSetIds,
+                        }));
+                        const nextPaletteSources = getSourcesForSelection(
+                          selectedCategories,
+                          nextTileSetIds
+                        );
+                        const nextSourceNames =
+                          ensureFileSourceNames(nextPaletteSources);
+                        if (activeFileId) {
+                          upsertActiveFile({
+                            tiles,
+                            gridLayout,
+                            tileSetIds: nextTileSetIds,
+                            sourceNames: nextSourceNames,
+                            preferredTileSize: fileTileSize,
+                            lineWidth: activeLineWidth,
+                            lineColor: activeLineColor,
+                          });
+                        }
+                      }}
+                      style={styles.modifyTileSetBannerThumbWrap}
+                      accessibilityState={{ selected: isSelected }}
+                    >
+                      <View
+                        style={[
+                          styles.modifyTileSetBannerThumb,
+                          styles.modifyTileSetBannerThumbUgc,
+                          !isSelected && styles.modifyTileSetBannerThumbUnselected,
+                          isSelected && styles.modifyTileSetBannerThumbSelected,
+                        ]}
+                      >
+                        {thumbSource ? (
+                          <TileAsset
+                            source={thumbSource}
+                            name={firstBakedSource?.name ?? 'thumbnail'}
+                            style={styles.modifyTileSetBannerThumbImage}
+                            resizeMode="cover"
+                          />
+                        ) : (
+                          <View style={styles.modifyTileSetBannerThumbPlaceholder} />
+                        )}
+                      </View>
+                    </Pressable>
+                  );
+                })}
+              </ScrollView>
+              <Pressable
+                onPress={() => setShowModifyTileSetBanner(false)}
+                style={styles.modifyTileSetBannerClose}
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel="Dismiss tile set banner"
+              >
+                <MaterialCommunityIcons name="close" size={24} color="#fff" />
+              </Pressable>
+            </View>
+            </>
+          )}
         </View>
         {isPatternCreationMode && !showPatternSaveModal && (
           <View
@@ -6244,6 +6442,7 @@ export default function TestScreen() {
           }
           resolvePatternTile={resolvePatternTile}
           onSelect={(next) => {
+            dismissModifyBanner();
             if (next.mode === 'clone') {
               clearCloneSource();
             }
@@ -6295,7 +6494,8 @@ export default function TestScreen() {
               pendingPaletteFloodRef.current = true;
             }
           }}
-          onRotate={(index) =>
+          onRotate={(index) => {
+            dismissModifyBanner();
             setPaletteRotations((prev) => {
               const nextRotation = ((prev[index] ?? 0) + 90) % 360;
               const source = paletteSources[index];
@@ -6317,9 +6517,10 @@ export default function TestScreen() {
                 ...prev,
                 [index]: nextRotation,
               };
-            })
-          }
+            });
+          }}
           onMirror={(index) => {
+            dismissModifyBanner();
             const rotation = paletteRotations[index] ?? 0;
             const curX = paletteMirrors[index] ?? false;
             const curY = paletteMirrorsY[index] ?? false;
@@ -6347,6 +6548,7 @@ export default function TestScreen() {
             }
           }}
           onMirrorVertical={(index) => {
+            dismissModifyBanner();
             const rotation = paletteRotations[index] ?? 0;
             const curX = paletteMirrors[index] ?? false;
             const curY = paletteMirrorsY[index] ?? false;
@@ -6377,6 +6579,7 @@ export default function TestScreen() {
           getMirror={(index) => paletteMirrors[index] ?? false}
           getMirrorVertical={(index) => paletteMirrorsY[index] ?? false}
           onPatternLongPress={() => {
+            dismissModifyBanner();
             if (brush.mode !== 'pattern') {
               setBrush({ mode: 'pattern' });
             }
@@ -6384,6 +6587,7 @@ export default function TestScreen() {
             setShowPatternChooser(true);
           }}
           onPatternDoubleTap={() => {
+            dismissModifyBanner();
             if (brush.mode !== 'pattern') {
               setBrush({ mode: 'pattern' });
             }
@@ -6391,9 +6595,11 @@ export default function TestScreen() {
             setShowPatternChooser(true);
           }}
           onRandomLongPress={() => {
+            dismissModifyBanner();
             setShowTileSetChooser(true);
           }}
           onRandomDoubleTap={() => {
+            dismissModifyBanner();
             setShowTileSetChooser(true);
           }}
           height={brushPanelHeight}
@@ -7218,6 +7424,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 4,
   },
+  navBackSquare: {
+    width: Math.round(TOOLBAR_BUTTON_SIZE * 0.75),
+    height: HEADER_HEIGHT,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   navButtonText: {
     color: '#2a2a2a',
     fontSize: 18,
@@ -7365,6 +7577,67 @@ const styles = StyleSheet.create({
     marginTop: 6,
     textAlign: 'center',
     fontSize: 12,
+  },
+  modifyTileSetBanner: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 52,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#5a5a5a',
+  },
+  modifyTileSetBannerScroll: {
+    flex: 1,
+    maxHeight: 40,
+  },
+  modifyTileSetBannerClose: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modifyTileSetBannerScrollContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  modifyTileSetBannerThumbWrap: {
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modifyTileSetBannerThumb: {
+    width: 40,
+    height: 40,
+    borderRadius: 4,
+    borderWidth: 1,
+    borderColor: '#1f1f1f',
+    backgroundColor: '#111',
+    overflow: 'hidden',
+  },
+  modifyTileSetBannerThumbUgc: {
+    backgroundColor: '#0F1430',
+  },
+  modifyTileSetBannerThumbUnselected: {
+    opacity: 0.5,
+  },
+  modifyTileSetBannerThumbSelected: {
+    borderColor: '#22c55e',
+    borderWidth: 2,
+  },
+  modifyTileSetBannerThumbImage: {
+    width: '100%',
+    height: '100%',
+  },
+  modifyTileSetBannerThumbPlaceholder: {
+    width: '100%',
+    height: '100%',
+    backgroundColor: '#0f0f0f',
   },
   sectionGroup: {
     gap: 8,
