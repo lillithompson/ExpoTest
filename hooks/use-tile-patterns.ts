@@ -11,6 +11,8 @@ export type TilePattern = {
   width: number;
   height: number;
   tiles: Tile[];
+  /** UGC tile set IDs this pattern uses; required to resolve tile names when displaying. */
+  tileSetIds?: string[];
   createdAt: number;
 };
 
@@ -57,6 +59,7 @@ export const useTilePatterns = () => {
       width: number;
       height: number;
       tiles: Tile[];
+      tileSetIds?: string[];
     }) => {
       const nextPattern: TilePattern = {
         id: createId(),
@@ -65,6 +68,8 @@ export const useTilePatterns = () => {
         width: payload.width,
         height: payload.height,
         tiles: payload.tiles,
+        ...(Array.isArray(payload.tileSetIds) &&
+          payload.tileSetIds.length > 0 && { tileSetIds: payload.tileSetIds }),
         createdAt: Date.now(),
       };
       setPatterns((prev) => {

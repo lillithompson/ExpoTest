@@ -92,6 +92,7 @@ const GRID_GAP = 0;
 const CONTENT_PADDING = 0;
 const HEADER_HEIGHT = 50;
 const TOOLBAR_BUTTON_SIZE = 40;
+const UNDO_REDO_BANNER_HEIGHT = HEADER_HEIGHT / 2;
 const TITLE_SPACING = 0;
 const BRUSH_PANEL_HEIGHT = 160;
 const PATTERN_THUMB_HEIGHT = 70;
@@ -1346,6 +1347,44 @@ export default function TestScreen() {
     isPartOfDragRef: viewMode === 'modify' ? isPartOfDragRef : undefined,
   });
   const showLockButton = viewMode === 'modify' && !!(canvasSelection && gridLayout.columns > 0);
+
+  /** Ephemeral "Undoing" / "Redoing" banner over the tile canvas. */
+  const [undoRedoBanner, setUndoRedoBanner] = useState<'undoing' | 'redoing' | null>(null);
+  const undoRedoBannerTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const undoRedoBannerTranslateY = useRef(new Animated.Value(-UNDO_REDO_BANNER_HEIGHT)).current;
+
+  const showUndoRedoBanner = useCallback(
+    (action: 'undoing' | 'redoing') => {
+      if (undoRedoBannerTimeoutRef.current) {
+        clearTimeout(undoRedoBannerTimeoutRef.current);
+        undoRedoBannerTimeoutRef.current = null;
+      }
+      setUndoRedoBanner(action);
+      Animated.timing(undoRedoBannerTranslateY, {
+        toValue: 0,
+        duration: 120,
+        useNativeDriver: true,
+      }).start();
+      undoRedoBannerTimeoutRef.current = setTimeout(() => {
+        undoRedoBannerTimeoutRef.current = null;
+        Animated.timing(undoRedoBannerTranslateY, {
+          toValue: -UNDO_REDO_BANNER_HEIGHT,
+          duration: 120,
+          useNativeDriver: true,
+        }).start(() => setUndoRedoBanner(null));
+      }, 500);
+    },
+    [undoRedoBannerTranslateY]
+  );
+
+  useEffect(() => {
+    return () => {
+      if (undoRedoBannerTimeoutRef.current) {
+        clearTimeout(undoRedoBannerTimeoutRef.current);
+      }
+    };
+  }, []);
+
   const tilesSignature = useMemo(
     () =>
       tiles
@@ -1531,6 +1570,25 @@ export default function TestScreen() {
     () => (Array.isArray(activeFile?.tileSetIds) ? activeFile.tileSetIds : []),
     [activeFile]
   );
+  /** When in pattern mode with a UGC pattern, include the pattern's tile set IDs so placed pattern tiles resolve. */
+  const resolutionTileSetIds = useMemo(() => {
+    const base =
+      activeFileTileSetIds.length > 0 ? activeFileTileSetIds : selectedTileSetIds;
+    if (
+      brush.mode === 'pattern' &&
+      selectedPattern?.tileSetIds &&
+      selectedPattern.tileSetIds.length > 0
+    ) {
+      const set = new Set([...base, ...selectedPattern.tileSetIds]);
+      return Array.from(set);
+    }
+    return base;
+  }, [
+    activeFileTileSetIds,
+    selectedTileSetIds,
+    brush.mode,
+    selectedPattern?.tileSetIds,
+  ]);
   const tileSourcesByName = useMemo(() => {
     const map = new Map<string, TileSource>();
     tileSources.forEach((source) => {
@@ -1547,11 +1605,11 @@ export default function TestScreen() {
         return normalizeUserTileSource(direct, name);
       }
       return normalizeUserTileSource(
-        resolveSourceName(name, activeFileTileSetIds),
+        resolveSourceName(name, resolutionTileSetIds),
         name
       );
     },
-    [resolveSourceName, activeFileTileSetIds, tileSourcesByName]
+    [resolveSourceName, resolutionTileSetIds, tileSourcesByName]
   );
   const resolveTileAssetForFile = useCallback(
     (
@@ -3066,6 +3124,7 @@ export default function TestScreen() {
       width,
       height,
       tiles: nextTiles,
+      ...(saveTileSetIds.length > 0 && { tileSetIds: saveTileSetIds }),
     });
     setSelectedPatternId(patternId);
     setIsPatternCreationMode(false);
@@ -3550,13 +3609,36 @@ export default function TestScreen() {
           bundleResult.payload.pattern,
           oldToNewSetId
         );
+        const patternTileSetIds = Array.from(oldToNewSetId.values());
         createPattern({
           name: remapped.name,
           category: remapped.category,
           width: remapped.width,
           height: remapped.height,
           tiles: remapped.tiles,
+          ...(patternTileSetIds.length > 0 && { tileSetIds: patternTileSetIds }),
         });
+        // Auto-select the pattern's UGC sets in the tile set chooser so the pattern
+        // thumbnail and painting resolve correctly without the user toggling them on.
+        if (patternTileSetIds.length > 0) {
+          setSelectedTileSetIds((prev) => {
+            const next = [...prev];
+            let changed = false;
+            patternTileSetIds.forEach((id) => {
+              if (!next.includes(id)) {
+                next.push(id);
+                changed = true;
+              }
+            });
+            return changed ? next : prev;
+          });
+          setSettings((prev) => ({
+            ...prev,
+            tileSetIds: [
+              ...new Set([...(prev.tileSetIds ?? []), ...patternTileSetIds]),
+            ],
+          }));
+        }
         return { ok: true };
       }
       const parseResult = deserializePattern(content);
@@ -5006,13 +5088,19 @@ export default function TestScreen() {
                   label="Undo"
                   icon="undo"
                   disabled={!canUndo}
-                  onPress={undo}
+                  onPress={() => {
+                    showUndoRedoBanner('undoing');
+                    undo();
+                  }}
                 />
                 <ToolbarButton
                   label="Redo"
                   icon="redo"
                   disabled={!canRedo}
-                  onPress={redo}
+                  onPress={() => {
+                    showUndoRedoBanner('redoing');
+                    redo();
+                  }}
                 />
               </>
             )}
@@ -5503,6 +5591,7 @@ export default function TestScreen() {
                     !canvasTouchDidMoveRef.current &&
                     canUndo
                   ) {
+                    showUndoRedoBanner('undoing');
                     undo();
                     isTouchDragActiveRef.current = false;
                     setInteracting(false);
@@ -5513,6 +5602,7 @@ export default function TestScreen() {
                     !canvasTouchDidMoveRef.current &&
                     canRedo
                   ) {
+                    showUndoRedoBanner('redoing');
                     redo();
                     isTouchDragActiveRef.current = false;
                     setInteracting(false);
@@ -6268,10 +6358,14 @@ export default function TestScreen() {
                               }
                             const index = sourceRow * pattern.width + sourceCol;
                             const tile = pattern.tiles[index];
+                            const patternTileSetIds =
+                              pattern.tileSetIds && pattern.tileSetIds.length > 0
+                                ? pattern.tileSetIds
+                                : activeFileTileSetIds;
                             const resolved = resolveTileAssetForFile(
                               tile,
                               tileSources,
-                              activeFileTileSetIds
+                              patternTileSetIds
                             );
                             const tileName = resolved.name;
                             const source = resolved.source;
@@ -6718,6 +6812,7 @@ export default function TestScreen() {
                       <View
                         style={[
                           styles.tileSetChooserThumb,
+                          styles.tileSetChooserThumbUgc,
                           !isSelected && styles.tileSetChooserThumbUnselected,
                           isSelected && styles.tileSetChooserThumbSelected,
                         ]}
@@ -6946,6 +7041,10 @@ const styles = StyleSheet.create({
     borderColor: '#1f1f1f',
     backgroundColor: '#111',
     overflow: 'hidden',
+  },
+  /** UGC tile set thumbnails only: dark blue background to match in-app tile styling. */
+  tileSetChooserThumbUgc: {
+    backgroundColor: '#0F1430',
   },
   tileSetChooserThumbUnselected: {
     opacity: 0.5,
