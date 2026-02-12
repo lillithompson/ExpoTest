@@ -29,12 +29,13 @@ import { ThemedView } from '@/components/themed-view';
 import { TileAsset } from '@/components/tile-asset';
 import { TAB_BAR_HEIGHT, useTabBarVisible } from '@/contexts/tab-bar-visible';
 import { useIsMobileWeb } from '@/hooks/use-is-mobile-web';
+import { usePersistedSettings } from '@/hooks/use-persisted-settings';
 import { useTileFiles } from '@/hooks/use-tile-files';
 import { type TileSetTile, useTileSets } from '@/hooks/use-tile-sets';
 import { downloadUgcTileFile } from '@/utils/download-ugc-tile';
 import { renderTileCanvasToDataUrl } from '@/utils/tile-export';
-import { deserializeTileSet, serializeTileSet } from '@/utils/tile-ugc-format';
 import { type Tile } from '@/utils/tile-grid';
+import { deserializeTileSet, serializeTileSet } from '@/utils/tile-ugc-format';
 
 const HEADER_HEIGHT = 50;
 const FILE_GRID_COLUMNS_MOBILE = 3;
@@ -72,6 +73,7 @@ export default function TileSetCreatorScreen() {
   const { replaceTileSourceNamesWithError } = useTileFiles(
     DEFAULT_CATEGORY as TileCategory
   );
+  const { setSettings } = usePersistedSettings();
   const {
     tileSets,
     bakedSourcesBySetId,
@@ -383,6 +385,17 @@ export default function TileSetCreatorScreen() {
     selectedIds.forEach((id) => deleteTileSet(id));
     clearSelection();
   };
+
+  const exportFileName = useMemo(() => {
+    if (selectedIds.size === 0) return '';
+    const selectedSets = tileSets.filter((set) => selectedIds.has(set.id));
+    if (selectedSets.length === 1) {
+      const name = selectedSets[0].name;
+      const safe = name.replace(/[^\w\s-]+/g, '').trim().replace(/\s+/g, '_') || 'TileSet';
+      return `TileSet_${safe}.tileset`;
+    }
+    return 'tile-sets.zip';
+  }, [tileSets, selectedIds]);
 
   const exportSelectedAsTile = async () => {
     if (selectedIds.size === 0) {
@@ -781,6 +794,13 @@ export default function TileSetCreatorScreen() {
                     category: DEFAULT_CATEGORY,
                     resolution: newResolution,
                   });
+                  setSettings((prev) => ({
+                    ...prev,
+                    tileSetIds: [
+                      id,
+                      ...(Array.isArray(prev.tileSetIds) ? prev.tileSetIds : []),
+                    ],
+                  }));
                   router.push({
                     pathname: '/tileSetCreator/editor',
                     params: { setId: id },
@@ -806,15 +826,30 @@ export default function TileSetCreatorScreen() {
             accessibilityRole="button"
             accessibilityLabel="Close export options"
           />
-          <ThemedView style={styles.fileMenuPanel}>
-            <Pressable
-              style={[styles.fileMenuButton, styles.fileMenuButtonLast]}
-              onPress={() => void exportSelectedAsTile()}
-              accessibilityRole="button"
-              accessibilityLabel="Download .tileset file"
-            >
-              <ThemedText type="defaultSemiBold">Download .tileset?</ThemedText>
-            </Pressable>
+          <ThemedView style={styles.overlayPanel}>
+            <ThemedText type="defaultSemiBold">
+              Export {exportFileName || '.tileset'}?
+            </ThemedText>
+            <ThemedView style={styles.modalActions}>
+              <Pressable
+                onPress={() => setShowExportMenu(false)}
+                style={[styles.actionButton, styles.actionButtonGhost]}
+                accessibilityRole="button"
+                accessibilityLabel="Cancel export"
+              >
+                <ThemedText type="defaultSemiBold">Cancel</ThemedText>
+              </Pressable>
+              <Pressable
+                onPress={() => void exportSelectedAsTile()}
+                style={[styles.actionButton, styles.actionButtonPrimary]}
+                accessibilityRole="button"
+                accessibilityLabel="Export .tileset file"
+              >
+                <ThemedText type="defaultSemiBold" style={styles.actionButtonText}>
+                  Export
+                </ThemedText>
+              </Pressable>
+            </ThemedView>
           </ThemedView>
         </ThemedView>
       )}

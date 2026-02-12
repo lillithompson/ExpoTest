@@ -4,6 +4,7 @@ import Constants from 'expo-constants';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
 import { Image as ExpoImage } from 'expo-image';
+import { useFocusEffect } from '@react-navigation/native';
 import { useRouter } from 'expo-router';
 import * as Sharing from 'expo-sharing';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -49,6 +50,15 @@ import { useTilePatterns } from '@/hooks/use-tile-patterns';
 import { useTileSets } from '@/hooks/use-tile-sets';
 import { clearAllLocalData } from '@/utils/clear-local-data';
 import { downloadUgcTileFile } from '@/utils/download-ugc-tile';
+import {
+  deserializeBundle,
+  fileUsesUgc,
+  getSetIdsFromPatternTiles,
+  remapFilePayload,
+  remapPatternTileNames,
+  serializeFileBundle,
+  serializePatternBundle,
+} from '@/utils/tile-bundle-format';
 import { deserializeTileFile, serializeTileFile } from '@/utils/tile-format';
 import { deserializePattern, serializePattern } from '@/utils/tile-ugc-format';
 import JSZip from 'jszip';
@@ -689,7 +699,7 @@ export default function TestScreen() {
   const gridCaptureRef = useRef<ViewShot>(null);
   const gridOffsetRef = useRef({ x: 0, y: 0 });
   const gridTouchRef = useRef<View>(null);
-  const { settings, setSettings } = usePersistedSettings();
+  const { settings, setSettings, reload: reloadSettings } = usePersistedSettings();
   const [selectedCategories, setSelectedCategories] = useState<TileCategory[]>(
     () => [DEFAULT_CATEGORY]
   );
@@ -704,6 +714,9 @@ export default function TestScreen() {
   const [fileMenuTargetId, setFileMenuTargetId] = useState<string | null>(null);
   const importTileInputRef = useRef<HTMLInputElement | null>(null);
   const importPatternInputRef = useRef<HTMLInputElement | null>(null);
+  const applyImportedPatternRef = useRef<
+    (content: string) => { ok: false; error: string } | { ok: true }
+  >(() => ({ ok: false, error: 'Not ready' }));
   const applyImportedTileFileRef = useRef<(content: string) => void>(() => {});
   const [downloadTargetId, setDownloadTargetId] = useState<string | null>(null);
   const [isDownloading, setIsDownloading] = useState(false);
@@ -881,6 +894,7 @@ export default function TestScreen() {
     bakedSourcesBySetId,
     currentBakedNamesBySetId,
     isLoaded: tileSetsLoaded,
+    importTileSet,
     reloadTileSets,
   } = useTileSets({
     onBakedNamesReplaced: replaceTileSourceNames,
@@ -895,10 +909,14 @@ export default function TestScreen() {
   const areTileSetsReady = useCallback(
     (ids: string[]) =>
       ids.every((id) => {
-        const count = bakedSourcesBySetId[id]?.length ?? 0;
-        if (count > 0) return true;
-        const set = userTileSets.find((s) => s.id === id);
-        return set ? set.tiles.length === 0 : false;
+        const sources = bakedSourcesBySetId[id] ?? [];
+        if (sources.length === 0) {
+          const set = userTileSets.find((s) => s.id === id);
+          return set ? set.tiles.length === 0 : false;
+        }
+        const allPlaceholders = sources.every((s) => s.source === ERROR_TILE);
+        if (allPlaceholders) return false;
+        return true;
       }),
     [bakedSourcesBySetId, userTileSets]
   );
@@ -1899,6 +1917,13 @@ export default function TestScreen() {
       setSelectedTileSetIds(nextIds);
     }
   }, [settings.tileSetIds, selectedTileSetIds]);
+
+  useFocusEffect(
+    useCallback(() => {
+      void reloadSettings();
+    }, [reloadSettings])
+  );
+
   useEffect(() => {
     if (!tileSetsLoaded || selectedTileSetIds.length === 0) {
       return;
@@ -1941,6 +1966,16 @@ export default function TestScreen() {
           : inferTileSetIdsFromSourceNames(stored);
       const pendingTileSetIds =
         inferredTileSetIds.length > 0 ? inferredTileSetIds : selectedTileSetIds;
+      const hasUgcNames = stored.some(
+        (n) => typeof n === 'string' && n.includes(':')
+      );
+      if (
+        hasUgcNames &&
+        pendingTileSetIds.length > 0 &&
+        !areTileSetsReady(pendingTileSetIds)
+      ) {
+        return;
+      }
       const normalized = normalizeSourceNames(stored, pendingTileSetIds);
       if (!alreadyReady || fileSourceNames.length !== normalized.names.length) {
         setFileSourceNames(normalized.names);
@@ -2017,6 +2052,7 @@ export default function TestScreen() {
     fileSourceNames.length,
     tileSetsLoaded,
     userTileSets,
+    bakedSourcesBySetId,
   ]);
 
   const lastSourceNormalizationRef = useRef<string | null>(null);
@@ -3287,6 +3323,26 @@ export default function TestScreen() {
 
   const applyImportedTileFile = useCallback(
     (content: string) => {
+      const bundleResult = deserializeBundle(content);
+      if (bundleResult.ok && bundleResult.kind === 'fileBundle') {
+        const oldToNewSetId = new Map<string, string>();
+        for (const { setId, payload } of bundleResult.payload.tileSets) {
+          const newId = importTileSet(payload, { preserveBakedNames: true });
+          oldToNewSetId.set(setId, newId);
+        }
+        const remapped = remapFilePayload(
+          bundleResult.payload.file,
+          oldToNewSetId
+        );
+        createFileFromTileData(remapped);
+        setLoadRequestId((prev) => prev + 1);
+        setLoadPreviewUri(null);
+        setSuspendTiles(true);
+        setLoadedToken(0);
+        setHydrating(true);
+        setViewMode('modify');
+        return;
+      }
       const result = deserializeTileFile(content);
       if (!result.ok) {
         if (Platform.OS === 'web') {
@@ -3304,7 +3360,7 @@ export default function TestScreen() {
       setHydrating(true);
       setViewMode('modify');
     },
-    [createFileFromTileData]
+    [createFileFromTileData, importTileSet]
   );
 
   const handleImportTileFilePress = useCallback(async () => {
@@ -3439,7 +3495,14 @@ export default function TestScreen() {
     }
     if (selectedPatternsList.length === 1) {
       const pattern = selectedPatternsList[0];
-      const content = serializePattern(pattern);
+      const ugcSetIds = getSetIdsFromPatternTiles(pattern.tiles);
+      const tileSetsById = new Map(
+        userTileSets.filter((s) => ugcSetIds.includes(s.id)).map((s) => [s.id, s])
+      );
+      const content =
+        tileSetsById.size > 0
+          ? serializePatternBundle(pattern, tileSetsById)
+          : serializePattern(pattern);
       const index = patterns.findIndex((p) => p.id === pattern.id);
       const n = index >= 0 ? index : 0;
       await downloadUgcTileFile(content, `Pattern_${n}.tilepattern`);
@@ -3452,8 +3515,13 @@ export default function TestScreen() {
     }
     setShowPatternExportMenu(false);
     const zip = new JSZip();
+    const tileSetsById = new Map(userTileSets.map((s) => [s.id, s]));
     for (const pattern of selectedPatternsList) {
-      const content = serializePattern(pattern);
+      const ugcSetIds = getSetIdsFromPatternTiles(pattern.tiles);
+      const content =
+        ugcSetIds.length > 0
+          ? serializePatternBundle(pattern, tileSetsById)
+          : serializePattern(pattern);
       const index = patterns.findIndex((p) => p.id === pattern.id);
       const n = index >= 0 ? index : 0;
       zip.file(`Pattern_${n}.tilepattern`, content);
@@ -3467,7 +3535,46 @@ export default function TestScreen() {
     link.click();
     link.remove();
     URL.revokeObjectURL(url);
-  }, [activePatterns, selectedPatternIds, patterns]);
+  }, [activePatterns, selectedPatternIds, patterns, userTileSets]);
+
+  const applyImportedPattern = useCallback(
+    (content: string): { ok: false; error: string } | { ok: true } => {
+      const bundleResult = deserializeBundle(content);
+      if (bundleResult.ok && bundleResult.kind === 'patternBundle') {
+        const oldToNewSetId = new Map<string, string>();
+        for (const { setId, payload } of bundleResult.payload.tileSets) {
+          const newId = importTileSet(payload, { preserveBakedNames: true });
+          oldToNewSetId.set(setId, newId);
+        }
+        const remapped = remapPatternTileNames(
+          bundleResult.payload.pattern,
+          oldToNewSetId
+        );
+        createPattern({
+          name: remapped.name,
+          category: remapped.category,
+          width: remapped.width,
+          height: remapped.height,
+          tiles: remapped.tiles,
+        });
+        return { ok: true };
+      }
+      const parseResult = deserializePattern(content);
+      if (!parseResult.ok) {
+        return { ok: false, error: parseResult.error };
+      }
+      const p = parseResult.payload;
+      createPattern({
+        name: p.name,
+        category: p.category,
+        width: p.width,
+        height: p.height,
+        tiles: p.tiles,
+      });
+      return { ok: true };
+    },
+    [createPattern, importTileSet]
+  );
 
   const handleImportPatternPress = useCallback(async () => {
     if (Platform.OS === 'web') {
@@ -3486,23 +3593,18 @@ export default function TestScreen() {
       const content = await FileSystem.readAsStringAsync(uri, {
         encoding: FileSystem.EncodingType.UTF8,
       });
-      const parseResult = deserializePattern(content);
-      if (!parseResult.ok) {
-        Alert.alert('Invalid .tilepattern file', parseResult.error);
-        return;
+      const applyResult = applyImportedPattern(content);
+      if (!applyResult.ok) {
+        Alert.alert('Invalid .tilepattern file', applyResult.error);
       }
-      const p = parseResult.payload;
-      createPattern({
-        name: p.name,
-        category: p.category,
-        width: p.width,
-        height: p.height,
-        tiles: p.tiles,
-      });
     } catch {
       Alert.alert('Import failed', 'Could not read the selected file.');
     }
-  }, [createPattern]);
+  }, [applyImportedPattern]);
+
+  useEffect(() => {
+    applyImportedPatternRef.current = applyImportedPattern;
+  }, [applyImportedPattern]);
 
   useEffect(() => {
     if (Platform.OS !== 'web' || typeof document === 'undefined') {
@@ -3521,21 +3623,10 @@ export default function TestScreen() {
       const reader = new FileReader();
       reader.onload = () => {
         const text = reader.result as string;
-        const parseResult = deserializePattern(text);
-        if (!parseResult.ok) {
-          if (typeof window !== 'undefined' && window.alert) {
-            window.alert(`Invalid .tilepattern file: ${parseResult.error}`);
-          }
-          return;
+        const applyResult = applyImportedPatternRef.current(text);
+        if (!applyResult.ok && typeof window !== 'undefined' && window.alert) {
+          window.alert(`Invalid .tilepattern file: ${applyResult.error}`);
         }
-        const p = parseResult.payload;
-        createPattern({
-          name: p.name,
-          category: p.category,
-          width: p.width,
-          height: p.height,
-          tiles: p.tiles,
-        });
       };
       reader.readAsText(file);
       target.value = '';
@@ -3548,7 +3639,7 @@ export default function TestScreen() {
       }
       importPatternInputRef.current = null;
     };
-  }, [createPattern]);
+  }, [applyImportedPattern]);
 
   const handleDownloadPng = async () => {
     if (!downloadTargetFile) {
@@ -3901,25 +3992,43 @@ export default function TestScreen() {
     strokeScaleByName,
   ]);
 
+  const downloadSingleFileAsTile = useCallback(
+    async (file: TileFile) => {
+      const sortedFiles = [...files].sort((a, b) => b.updatedAt - a.updatedAt);
+      const fileIndex = sortedFiles.findIndex((f) => f.id === file.id);
+      const index = fileIndex >= 0 ? fileIndex : 0;
+      const fileName = `TileCanvas_${index}.tile`;
+      const tileSetsById = new Map(userTileSets.map((s) => [s.id, s]));
+      const content = fileUsesUgc(file)
+        ? serializeFileBundle(file, tileSetsById)
+        : serializeTileFile(file);
+      await downloadUgcTileFile(content, fileName);
+    },
+    [files, userTileSets]
+  );
+
   const exportSelectedAsTile = useCallback(async () => {
     if (selectedFiles.length === 0) {
       setShowExportMenu(false);
       return;
     }
     if (selectedFiles.length === 1) {
-      void downloadTileFile(selectedFiles[0]);
+      await downloadSingleFileAsTile(selectedFiles[0]);
       setShowExportMenu(false);
       return;
     }
+    const sortedFiles = [...files].sort((a, b) => b.updatedAt - a.updatedAt);
+    const tileSetsById = new Map(userTileSets.map((s) => [s.id, s]));
     if (Platform.OS !== 'web') {
       setShowExportMenu(false);
       return;
     }
     setShowExportMenu(false);
-    const sortedFiles = [...files].sort((a, b) => b.updatedAt - a.updatedAt);
     const zip = new JSZip();
     for (const file of selectedFiles) {
-      const content = serializeTileFile(file);
+      const content = fileUsesUgc(file)
+        ? serializeFileBundle(file, tileSetsById)
+        : serializeTileFile(file);
       const fileIndex = sortedFiles.findIndex((f) => f.id === file.id);
       const index = fileIndex >= 0 ? fileIndex : 0;
       zip.file(`TileCanvas_${index}.tile`, content);
@@ -3933,7 +4042,7 @@ export default function TestScreen() {
     link.click();
     link.remove();
     URL.revokeObjectURL(url);
-  }, [selectedFiles, files, downloadTileFile]);
+  }, [selectedFiles, files, userTileSets, downloadSingleFileAsTile]);
 
   const handleDownloadSvg = async () => {
     if (!downloadTargetFile) {
@@ -4550,7 +4659,7 @@ export default function TestScreen() {
                 onPress={() => {
                   const file = files.find((entry) => entry.id === fileMenuTargetId);
                   if (file) {
-                    void downloadTileFile(file);
+                    void downloadSingleFileAsTile(file);
                   }
                   setFileMenuTargetId(null);
                 }}
@@ -4599,25 +4708,25 @@ export default function TestScreen() {
                 style={styles.fileMenuButton}
                 onPress={() => void exportSelectedAsPng()}
                 accessibilityRole="button"
-                accessibilityLabel="Download PNG"
+                accessibilityLabel="Export PNG"
               >
-                <ThemedText type="defaultSemiBold">Download PNG</ThemedText>
+                <ThemedText type="defaultSemiBold">Export PNG</ThemedText>
               </Pressable>
               <Pressable
                 style={styles.fileMenuButton}
                 onPress={() => void exportSelectedAsSvg()}
                 accessibilityRole="button"
-                accessibilityLabel="Download SVG"
+                accessibilityLabel="Export SVG"
               >
-                <ThemedText type="defaultSemiBold">Download SVG</ThemedText>
+                <ThemedText type="defaultSemiBold">Export SVG</ThemedText>
               </Pressable>
               <Pressable
                 style={[styles.fileMenuButton, styles.fileMenuButtonLast]}
                 onPress={() => void exportSelectedAsTile()}
                 accessibilityRole="button"
-                accessibilityLabel="Download .tile file"
+                accessibilityLabel="Export .tile file"
               >
-                <ThemedText type="defaultSemiBold">Download .tile</ThemedText>
+                <ThemedText type="defaultSemiBold">Export .tile</ThemedText>
               </Pressable>
             </ThemedView>
           </ThemedView>
@@ -6214,15 +6323,26 @@ export default function TestScreen() {
               accessibilityRole="button"
               accessibilityLabel="Close export options"
             />
-            <ThemedView style={styles.fileMenuPanel}>
-              <Pressable
-                style={[styles.fileMenuButton, styles.fileMenuButtonLast]}
-                onPress={() => void exportSelectedPatternsAsTile()}
-                accessibilityRole="button"
-                accessibilityLabel="Download .tilepattern file"
-              >
-                <ThemedText type="defaultSemiBold">Download .tilepattern</ThemedText>
-              </Pressable>
+            <ThemedView style={styles.overlayPanel}>
+              <ThemedText type="defaultSemiBold">Export .tilepattern?</ThemedText>
+              <ThemedView style={styles.inlineOptions}>
+                <Pressable
+                  onPress={() => setShowPatternExportMenu(false)}
+                  style={styles.overlayItem}
+                  accessibilityRole="button"
+                  accessibilityLabel="Cancel export"
+                >
+                  <ThemedText type="defaultSemiBold">Cancel</ThemedText>
+                </Pressable>
+                <Pressable
+                  onPress={() => void exportSelectedPatternsAsTile()}
+                  style={[styles.overlayItem, styles.overlayItemSelected]}
+                  accessibilityRole="button"
+                  accessibilityLabel="Export .tilepattern file"
+                >
+                  <ThemedText type="defaultSemiBold">Export</ThemedText>
+                </Pressable>
+              </ThemedView>
             </ThemedView>
           </ThemedView>
         )}

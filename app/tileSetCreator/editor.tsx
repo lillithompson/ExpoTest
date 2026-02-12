@@ -1,6 +1,7 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import JSZip from 'jszip';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
     Animated,
@@ -22,6 +23,7 @@ import {
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { TileAsset } from '@/components/tile-asset';
+import { useIsMobileWeb } from '@/hooks/use-is-mobile-web';
 import { useTileFiles } from '@/hooks/use-tile-files';
 import { useTileSets, type TileSetTile } from '@/hooks/use-tile-sets';
 import {
@@ -29,7 +31,7 @@ import {
     parseTileConnections,
     transformConnections,
 } from '@/utils/tile-compat';
-import { exportTileCanvasAsSvg } from '@/utils/tile-export';
+import { exportTileCanvasAsSvg, renderTileCanvasToSvg } from '@/utils/tile-export';
 import { normalizeTiles, type Tile } from '@/utils/tile-grid';
 
 const HEADER_HEIGHT = 50;
@@ -133,9 +135,11 @@ export default function TileSetEditorScreen() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const selectBarAnim = useRef(new Animated.Value(0)).current;
   const [showSettingsOverlay, setShowSettingsOverlay] = useState(false);
+  const [showTileExportMenu, setShowTileExportMenu] = useState(false);
   const [showContextMenu, setShowContextMenu] = useState(false);
   const [contextTileId, setContextTileId] = useState<string | null>(null);
   const [nameDraft, setNameDraft] = useState('');
+  const isMobileWeb = useIsMobileWeb();
 
   const contentWidth = Math.max(0, width);
   const calculatedWidth = Math.floor(
@@ -167,6 +171,82 @@ export default function TileSetEditorScreen() {
     }
     setNameDraft(tileSet.name);
   }, [tileSet?.id, tileSet?.name]);
+
+  const activeCategoriesForHooks = normalizeCategories(
+    tileSet?.categories && tileSet.categories.length > 0
+      ? tileSet.categories
+      : tileSet?.category
+        ? [tileSet.category]
+        : null
+  );
+  const sourcesForHooks = getSourcesForCategories(activeCategoriesForHooks);
+
+  const exportSelectedTilesAsSvg = useCallback(async () => {
+    if (!tileSet || selectedIds.size === 0) {
+      setShowTileExportMenu(false);
+      return;
+    }
+    const selectedTiles = tileSet.tiles.filter((t) => selectedIds.has(t.id));
+    if (selectedTiles.length === 1) {
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        const { bits } = getBorderStatus(selectedTiles[0], sourcesForHooks);
+        void exportTileCanvasAsSvg({
+          tiles: selectedTiles[0].tiles,
+          gridLayout: {
+            rows: selectedTiles[0].grid.rows,
+            columns: selectedTiles[0].grid.columns,
+            tileSize: selectedTiles[0].preferredTileSize,
+          },
+          tileSources: sourcesForHooks,
+          gridGap: 0,
+          errorSource: null,
+          lineColor: tileSet.lineColor,
+          lineWidth: tileSet.lineWidth,
+          backgroundColor: null,
+          fileName: `${tileSet.name}_${bits}.svg`,
+        });
+      }
+      setShowTileExportMenu(false);
+      return;
+    }
+    if (Platform.OS !== 'web' || typeof window === 'undefined') {
+      setShowTileExportMenu(false);
+      return;
+    }
+    setShowTileExportMenu(false);
+    const zip = new JSZip();
+    for (let i = 0; i < selectedTiles.length; i++) {
+      const tile = selectedTiles[i];
+      const { bits } = getBorderStatus(tile, sourcesForHooks);
+      const fileName = `${tileSet.name}_${bits}_${i + 1}.svg`;
+      const svg = await renderTileCanvasToSvg({
+        tiles: tile.tiles,
+        gridLayout: {
+          rows: tile.grid.rows,
+          columns: tile.grid.columns,
+          tileSize: tile.preferredTileSize,
+        },
+        tileSources: sourcesForHooks,
+        gridGap: 0,
+        errorSource: null,
+        lineColor: tileSet.lineColor,
+        lineWidth: tileSet.lineWidth,
+        backgroundColor: null,
+      });
+      if (svg) {
+        zip.file(fileName, svg);
+      }
+    }
+    const blob = await zip.generateAsync({ type: 'blob' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'tiles.svg.zip';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  }, [tileSet, selectedIds, sourcesForHooks]);
 
   const contextTile = tileSet?.tiles.find((tile) => tile.id === contextTileId) ?? null;
 
@@ -333,6 +413,7 @@ export default function TileSetEditorScreen() {
       };
     });
   };
+
   const downloadTileSvg = (tile: TileSetTile) => {
     if (Platform.OS !== 'web' || typeof window === 'undefined') {
       return;
@@ -438,29 +519,56 @@ export default function TileSetEditorScreen() {
         ]}
         pointerEvents={isSelectMode ? 'auto' : 'none'}
       >
-        <Pressable
-          onPress={() => selectedIds.size > 0 && deleteSelected()}
-          style={[
-            styles.fileSelectDelete,
-            selectedIds.size === 0 && styles.fileSelectDeleteDisabled,
-          ]}
-          disabled={selectedIds.size === 0}
-          accessibilityRole="button"
-          accessibilityLabel="Delete selected tiles"
-        >
-          <ThemedText
-            type="defaultSemiBold"
+        <View style={styles.fileSelectDeleteExportRow}>
+          <Pressable
+            onPress={() => selectedIds.size > 0 && deleteSelected()}
             style={[
-              styles.fileSelectDeleteText,
-              selectedIds.size === 0 && styles.fileSelectDeleteTextDisabled,
+              styles.fileSelectDelete,
+              selectedIds.size === 0 && styles.fileSelectDeleteDisabled,
             ]}
+            disabled={selectedIds.size === 0}
+            accessibilityRole="button"
+            accessibilityLabel="Delete selected tiles"
           >
-            Delete
+            <ThemedText
+              type="defaultSemiBold"
+              style={[
+                styles.fileSelectDeleteText,
+                selectedIds.size === 0 && styles.fileSelectDeleteTextDisabled,
+              ]}
+            >
+              Delete
+            </ThemedText>
+          </Pressable>
+          <ThemedText type="defaultSemiBold" style={styles.fileSelectPipe}>
+            {' | '}
           </ThemedText>
-        </Pressable>
-        <ThemedText type="defaultSemiBold" style={styles.fileSelectCount}>
-          {selectedIds.size > 0 ? `${selectedIds.size} selected` : ''}
-        </ThemedText>
+          <Pressable
+            onPress={() => selectedIds.size > 0 && setShowTileExportMenu(true)}
+            style={[
+              styles.fileSelectExport,
+              selectedIds.size === 0 && styles.fileSelectExportDisabled,
+            ]}
+            disabled={selectedIds.size === 0}
+            accessibilityRole="button"
+            accessibilityLabel="Export selected tiles as SVG"
+          >
+            <ThemedText
+              type="defaultSemiBold"
+              style={[
+                styles.fileSelectExportText,
+                selectedIds.size === 0 && styles.fileSelectExportTextDisabled,
+              ]}
+            >
+              Export
+            </ThemedText>
+          </Pressable>
+        </View>
+        {!isMobileWeb && (
+          <ThemedText type="defaultSemiBold" style={styles.fileSelectCount}>
+            {selectedIds.size > 0 ? `${selectedIds.size} selected` : ''}
+          </ThemedText>
+        )}
         <Pressable
           onPress={clearSelection}
           style={styles.fileSelectButton}
@@ -632,6 +740,39 @@ export default function TileSetEditorScreen() {
           </ThemedView>
         </ThemedView>
       )}
+      {showTileExportMenu && (
+        <ThemedView style={styles.overlay} accessibilityRole="dialog">
+          <Pressable
+            style={styles.overlayBackdrop}
+            onPress={() => setShowTileExportMenu(false)}
+            accessibilityRole="button"
+            accessibilityLabel="Close export options"
+          />
+          <ThemedView style={styles.overlayPanel}>
+            <ThemedText type="defaultSemiBold">Export .svg?</ThemedText>
+            <ThemedView style={styles.modalActions}>
+              <Pressable
+                onPress={() => setShowTileExportMenu(false)}
+                style={[styles.actionButton, styles.actionButtonGhost]}
+                accessibilityRole="button"
+                accessibilityLabel="Cancel export"
+              >
+                <ThemedText type="defaultSemiBold">Cancel</ThemedText>
+              </Pressable>
+              <Pressable
+                onPress={() => void exportSelectedTilesAsSvg()}
+                style={[styles.actionButton, styles.actionButtonPrimary]}
+                accessibilityRole="button"
+                accessibilityLabel="Export selected tiles as SVG"
+              >
+                <ThemedText type="defaultSemiBold" style={styles.actionButtonText}>
+                  Export
+                </ThemedText>
+              </Pressable>
+            </ThemedView>
+          </ThemedView>
+        </ThemedView>
+      )}
       {showSettingsOverlay && (
         <ThemedView style={[styles.settingsScreen, { paddingTop: insets.top }]} accessibilityRole="dialog">
           <ThemedView style={styles.settingsHeader}>
@@ -755,6 +896,65 @@ const styles = StyleSheet.create({
   },
   fileSelectCount: {
     color: '#9ca3af',
+  },
+  fileSelectDeleteExportRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  fileSelectPipe: {
+    color: '#9ca3af',
+  },
+  fileSelectExport: {
+    paddingVertical: 8,
+    paddingHorizontal: 8,
+  },
+  fileSelectExportText: {
+    color: '#9ca3af',
+  },
+  fileSelectExportDisabled: {
+    opacity: 0.5,
+  },
+  fileSelectExportTextDisabled: {
+    color: '#6b7280',
+  },
+  overlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 25,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  overlayBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0, 0, 0, 0.45)',
+  },
+  overlayPanel: {
+    width: '85%',
+    maxHeight: '70%',
+    borderWidth: 1,
+    borderColor: '#1f1f1f',
+    borderRadius: 8,
+    padding: 16,
+    backgroundColor: '#fff',
+  },
+  modalActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 8,
+    marginTop: 12,
+  },
+  actionButton: {
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 6,
+  },
+  actionButtonGhost: {
+    backgroundColor: '#fff',
+  },
+  actionButtonPrimary: {
+    backgroundColor: '#111',
+  },
+  actionButtonText: {
+    color: '#fff',
   },
   fileScroll: {
     flex: 1,

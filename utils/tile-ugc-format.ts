@@ -10,7 +10,7 @@ import type { TilePattern } from '@/hooks/use-tile-patterns';
 
 export const TILE_UGC_FORMAT_VERSION = 1;
 
-/** Exported tile set (no id, no thumbnailUri/previewUri/updatedAt on set or tile entries). */
+/** Exported tile set (no setId; tile entries may include updatedAt so bundle import can preserve baked names). */
 export type TileSetExportPayload = {
   kind: 'tileSet';
   v: number;
@@ -26,6 +26,8 @@ export type TileSetExportPayload = {
     grid: { rows: number; columns: number };
     preferredTileSize: number;
     tiles: Tile[];
+    /** When present, bundle import preserves this so baked names match the file's sourceNames. */
+    updatedAt?: number;
   }>;
 };
 
@@ -92,6 +94,29 @@ export function serializeTileSet(set: TileSet): string {
       grid: t.grid,
       preferredTileSize: t.preferredTileSize,
       tiles: t.tiles,
+    })),
+  };
+  return JSON.stringify(payload, null, 0);
+}
+
+/** Include tile updatedAt in serialized payload so bundle import can preserve baked names. */
+export function serializeTileSetForBundle(set: TileSet): string {
+  const payload: TileSetExportPayload = {
+    kind: 'tileSet',
+    v: TILE_UGC_FORMAT_VERSION,
+    name: set.name,
+    category: set.category,
+    categories: set.categories ?? [set.category],
+    resolution: set.resolution,
+    lineWidth: set.lineWidth,
+    lineColor: set.lineColor,
+    tiles: set.tiles.map((t) => ({
+      id: t.id,
+      name: t.name,
+      grid: t.grid,
+      preferredTileSize: t.preferredTileSize,
+      tiles: t.tiles,
+      updatedAt: t.updatedAt,
     })),
   };
   return JSON.stringify(payload, null, 0);
@@ -181,6 +206,11 @@ export function deserializeTileSet(json: string): DeserializeTileSetResult {
           : 45;
       const tileName = typeof t.name === 'string' ? t.name : 'Tile';
       const tileId = typeof t.id === 'string' ? t.id : `tile-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const updatedAt =
+        typeof (t as Record<string, unknown>).updatedAt === 'number' &&
+        Number.isFinite((t as Record<string, unknown>).updatedAt as number)
+          ? ((t as Record<string, unknown>).updatedAt as number)
+          : undefined;
       const rawCellTiles = t.tiles;
       const totalCells = rows * columns;
       const cellTiles: Tile[] = Array.isArray(rawCellTiles)
@@ -197,13 +227,17 @@ export function deserializeTileSet(json: string): DeserializeTileSetResult {
           mirrorY: false,
         });
       }
-      tiles.push({
+      const entry: TileSetExportPayload['tiles'][0] = {
         id: tileId,
         name: tileName,
         grid: { rows, columns },
         preferredTileSize,
         tiles: cellTiles,
-      });
+      };
+      if (updatedAt !== undefined) {
+        entry.updatedAt = updatedAt;
+      }
+      tiles.push(entry);
     }
   }
   const payload: TileSetExportPayload = {

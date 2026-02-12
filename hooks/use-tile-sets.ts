@@ -627,18 +627,25 @@ export const useTileSets = (options?: {
   );
 
   const importTileSet = useCallback(
-    (payload: TileSetExportPayload) => {
+    (
+      payload: TileSetExportPayload,
+      options?: { preserveBakedNames?: boolean }
+    ) => {
       const now = Date.now();
       const setId = createId('tileset');
+      const preserve = options?.preserveBakedNames === true;
       const tiles: TileSetTile[] = payload.tiles.map((t) => ({
-        id: createId('tile'),
+        id: preserve && typeof t.id === 'string' ? t.id : createId('tile'),
         name: t.name,
         tiles: t.tiles,
         grid: t.grid,
         preferredTileSize: t.preferredTileSize,
         thumbnailUri: null,
         previewUri: null,
-        updatedAt: now,
+        updatedAt:
+          preserve && typeof (t as { updatedAt?: number }).updatedAt === 'number'
+            ? (t as { updatedAt: number }).updatedAt
+            : now,
       }));
       const newSet: TileSet = {
         id: setId,

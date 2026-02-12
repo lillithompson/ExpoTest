@@ -86,5 +86,24 @@ export const usePersistedSettings = () => {
     [persist]
   );
 
-  return { settings, setSettings };
+  const reload = useCallback(async () => {
+    try {
+      const raw = await AsyncStorage.getItem(STORAGE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as Partial<AppSettings>;
+      if (!parsed) return;
+      setSettingsState((prev) => ({
+        ...prev,
+        ...parsed,
+        allowEdgeConnections:
+          typeof parsed.allowEdgeConnections === 'boolean'
+            ? parsed.allowEdgeConnections
+            : true,
+      }));
+    } catch (error) {
+      console.warn('Failed to reload settings', error);
+    }
+  }, []);
+
+  return { settings, setSettings, reload };
 };
