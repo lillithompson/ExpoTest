@@ -15,6 +15,7 @@ import { ThemedText } from '@/components/themed-text';
 import { TileAsset } from '@/components/tile-asset';
 import { TileAtlasSprite } from '@/components/tile-atlas-sprite';
 import { type TileAtlas } from '@/utils/tile-atlas';
+import { type Tile } from '@/utils/tile-grid';
 
 type Brush =
   | { mode: 'random' }
@@ -32,12 +33,14 @@ type Props = {
   strokeScaleByName?: Map<string, number>;
   atlas?: TileAtlas | null;
   selectedPattern?: {
-    tiles: { imageIndex: number; rotation: number; mirrorX: boolean; mirrorY: boolean }[];
+    tiles: { imageIndex: number; rotation: number; mirrorX: boolean; mirrorY: boolean; name?: string }[];
     width: number;
     height: number;
     rotation: number;
     mirrorX: boolean;
   } | null;
+  /** Resolves a pattern tile to source/name using the pattern's tile set context (same as pattern dialog). */
+  resolvePatternTile?: (tile: Tile) => { source: unknown | null; name: string };
   onSelect: (brush: Brush) => void;
   onRotate: (index: number) => void;
   onMirror: (index: number) => void;
@@ -139,6 +142,7 @@ export function TileBrushPanel({
   strokeScaleByName,
   atlas,
   selectedPattern,
+  resolvePatternTile,
   onSelect,
   onRotate,
   onMirror,
@@ -576,14 +580,17 @@ export function TileBrushPanel({
                                   const index =
                                     sourceRow * (selectedPattern?.width ?? 0) + sourceCol;
                                   const tile = selectedPattern?.tiles[index];
-                                  const tileName =
-                                    tile && tile.imageIndex >= 0
-                                      ? tileSources[tile.imageIndex]?.name ?? ''
-                                      : '';
-                                  const source =
-                                    tile && tile.imageIndex >= 0
-                                      ? tileSources[tile.imageIndex]?.source ?? null
-                                      : null;
+                                  const resolved =
+                                    tile && resolvePatternTile
+                                      ? resolvePatternTile(tile as Tile)
+                                      : tile && tile.imageIndex >= 0
+                                        ? {
+                                            source: tileSources[tile.imageIndex]?.source ?? null,
+                                            name: tileSources[tile.imageIndex]?.name ?? '',
+                                          }
+                                        : { source: null as unknown | null, name: '' };
+                                  const tileName = resolved.name;
+                                  const source = resolved.source;
                                   return (
                                     <View
                                       key={`pattern-preview-cell-${rowIndex}-${colIndex}`}

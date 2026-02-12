@@ -1,10 +1,10 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import Slider from '@react-native-community/slider';
+import { useFocusEffect } from '@react-navigation/native';
 import Constants from 'expo-constants';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
 import { Image as ExpoImage } from 'expo-image';
-import { useFocusEffect } from '@react-navigation/native';
 import { useRouter } from 'expo-router';
 import * as Sharing from 'expo-sharing';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -51,21 +51,13 @@ import { useTileSets } from '@/hooks/use-tile-sets';
 import { clearAllLocalData } from '@/utils/clear-local-data';
 import { downloadUgcTileFile } from '@/utils/download-ugc-tile';
 import {
-  deserializeBundle,
-  fileUsesUgc,
-  getSetIdsFromPatternTiles,
-  remapFilePayload,
-  remapPatternTileNames,
-  serializeFileBundle,
-  serializePatternBundle,
-} from '@/utils/tile-bundle-format';
-import { deserializeTileFile, serializeTileFile } from '@/utils/tile-format';
-import { deserializePattern, serializePattern } from '@/utils/tile-ugc-format';
-import JSZip from 'jszip';
-import {
     canApplyEmptyNewFileRestore,
     canApplyNonEmptyRestore,
 } from '@/utils/load-state';
+import {
+    getCellIndicesInRegion,
+    getLockedBoundaryEdges,
+} from '@/utils/locked-regions';
 import {
     buildPreviewPath,
     getFilePreviewUri,
@@ -74,6 +66,15 @@ import {
     isOwnPreviewUri,
     showPreview as showPreviewState,
 } from '@/utils/preview-state';
+import {
+    deserializeBundle,
+    fileUsesUgc,
+    getSetIdsFromPatternTiles,
+    remapFilePayload,
+    remapPatternTileNames,
+    serializeFileBundle,
+    serializePatternBundle,
+} from '@/utils/tile-bundle-format';
 import { getTransformedConnectionsForName, parseTileConnections, transformConnections } from '@/utils/tile-compat';
 import {
     buildSourceXmlCache,
@@ -82,11 +83,10 @@ import {
     renderTileCanvasToDataUrl,
     renderTileCanvasToSvg,
 } from '@/utils/tile-export';
-import {
-  getCellIndicesInRegion,
-  getLockedBoundaryEdges,
-} from '@/utils/locked-regions';
+import { deserializeTileFile, serializeTileFile } from '@/utils/tile-format';
 import { hydrateTilesWithSourceNames, normalizeTiles, type Tile } from '@/utils/tile-grid';
+import { deserializePattern, serializePattern } from '@/utils/tile-ugc-format';
+import JSZip from 'jszip';
 
 const GRID_GAP = 0;
 const CONTENT_PADDING = 0;
@@ -1261,9 +1261,6 @@ export default function TestScreen() {
       if (selectedPatternId !== null) {
         setSelectedPatternId(null);
       }
-      if (brush.mode === 'pattern') {
-        setIsPatternCreationMode(true);
-      }
       return;
     }
     if (!selectedPattern) {
@@ -1278,8 +1275,6 @@ export default function TestScreen() {
       setShowPatternSaveModal(false);
       setShowPatternChooser(false);
       setPatternAnchorIndex(null);
-    } else if (activePatterns.length === 0) {
-      setIsPatternCreationMode(true);
     }
   }, [brush.mode, activePatterns.length]);
   useEffect(() => {
@@ -1360,19 +1355,21 @@ export default function TestScreen() {
         undoRedoBannerTimeoutRef.current = null;
       }
       setUndoRedoBanner(action);
+      undoRedoBannerTranslateY.setValue(-UNDO_REDO_BANNER_HEIGHT);
+      const useNative = Platform.OS !== 'web';
       Animated.timing(undoRedoBannerTranslateY, {
         toValue: 0,
         duration: 120,
-        useNativeDriver: true,
+        useNativeDriver: useNative,
       }).start();
       undoRedoBannerTimeoutRef.current = setTimeout(() => {
         undoRedoBannerTimeoutRef.current = null;
         Animated.timing(undoRedoBannerTranslateY, {
           toValue: -UNDO_REDO_BANNER_HEIGHT,
           duration: 120,
-          useNativeDriver: true,
+          useNativeDriver: useNative,
         }).start(() => setUndoRedoBanner(null));
-      }, 500);
+      }, 600);
     },
     [undoRedoBannerTranslateY]
   );
@@ -1628,8 +1625,14 @@ export default function TestScreen() {
       }
       if (tile.name) {
         const resolved = resolveSourceName(tile.name, tileSetIds);
-        if (resolved) {
+        if (resolved && resolved.source !== ERROR_TILE) {
           return { source: resolved.source, name: resolved.name };
+        }
+        if (tile.name.includes(':') && Platform.OS !== 'web') {
+          const ugcSource = buildUserTileSourceFromName(tile.name);
+          if (ugcSource && (!resolved || resolved.source === ERROR_TILE)) {
+            return { source: ugcSource.source, name: ugcSource.name };
+          }
         }
       }
       const fallback = sources[tile.imageIndex];
@@ -1639,6 +1642,21 @@ export default function TestScreen() {
       return { source: ERROR_TILE, name: tile.name ?? 'tile_error.svg' };
     },
     [resolveSourceName]
+  );
+  const resolvePatternTile = useCallback(
+    (tile: Tile) => {
+      const patternTileSetIds =
+        selectedPattern?.tileSetIds && selectedPattern.tileSetIds.length > 0
+          ? selectedPattern.tileSetIds
+          : activeFileTileSetIds;
+      return resolveTileAssetForFile(tile, tileSources, patternTileSetIds);
+    },
+    [
+      resolveTileAssetForFile,
+      selectedPattern?.tileSetIds,
+      activeFileTileSetIds,
+      tileSources,
+    ]
   );
   const saveTileSetIds = useMemo(
     () => (activeFileTileSetIds.length > 0 ? activeFileTileSetIds : selectedTileSetIds),
@@ -5910,6 +5928,25 @@ export default function TestScreen() {
               />
             </>
           )}
+          {undoRedoBanner !== null && (
+            <Animated.View
+              pointerEvents="none"
+              style={[
+                styles.undoRedoBanner,
+                {
+                  transform: [{ translateY: undoRedoBannerTranslateY }],
+                },
+              ]}
+            >
+              <Text
+                style={styles.undoRedoBannerText}
+                numberOfLines={1}
+                adjustsFontSizeToFit
+              >
+                {undoRedoBanner === 'undoing' ? 'Undoing' : 'Redoing'}
+              </Text>
+            </Animated.View>
+          )}
           </View>
         </View>
         {isPatternCreationMode && !showPatternSaveModal && (
@@ -5954,6 +5991,7 @@ export default function TestScreen() {
                 }
               : null
           }
+          resolvePatternTile={resolvePatternTile}
           onSelect={(next) => {
             if (next.mode === 'clone') {
               clearCloneSource();
@@ -6253,6 +6291,14 @@ export default function TestScreen() {
                 contentContainerStyle={styles.patternModalContent}
                 showsVerticalScrollIndicator
               >
+                {activePatterns.length === 0 ? (
+                  <View style={styles.patternModalEmpty}>
+                    <ThemedText style={styles.patternModalEmptyText}>
+                      No patterns yet
+                    </ThemedText>
+                  </View>
+                ) : (
+                <>
                 {activePatterns.map((pattern) => {
                   const rotationCW =
                     ((patternRotations[pattern.id] ?? 0) + 360) % 360;
@@ -6405,6 +6451,8 @@ export default function TestScreen() {
                     </Pressable>
                   );
                 })}
+                </>
+                )}
               </ScrollView>
             </ThemedView>
           </View>
@@ -7343,7 +7391,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#1f1f1f',
     overflow: 'hidden',
     marginBottom: 10,
-    borderRadius: 8,
+    borderRadius: 0,
   },
   patternSelectButton: {
     paddingVertical: 8,
@@ -7435,6 +7483,16 @@ const styles = StyleSheet.create({
     gap: 12,
     justifyContent: 'flex-start',
     paddingBottom: 8,
+  },
+  patternModalEmpty: {
+    height: PATTERN_THUMB_HEIGHT,
+    minHeight: PATTERN_THUMB_HEIGHT,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  patternModalEmptyText: {
+    color: '#9ca3af',
+    fontSize: 16,
   },
   patternThumb: {
     borderWidth: 1,
@@ -7566,6 +7624,21 @@ const styles = StyleSheet.create({
     position: 'relative',
     backgroundColor: 'transparent',
     overflow: 'hidden',
+  },
+  undoRedoBanner: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: UNDO_REDO_BANNER_HEIGHT,
+    backgroundColor: '#2a2a2a',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 100,
+  },
+  undoRedoBannerText: {
+    color: '#fff',
+    fontSize: 11,
   },
   gridBackground: {
     ...StyleSheet.absoluteFillObject,
