@@ -404,10 +404,10 @@ export const useTileGrid = ({
       redoStackRef.current.push(
         prevNorm.map((t) => ({ ...t, name: t.name }))
       );
+      setUndoCount(undoStackRef.current.length);
+      setRedoCount(redoStackRef.current.length);
       return normalizeTiles(next, totalCells, tileSourcesLength);
     });
-    setUndoCount(undoStackRef.current.length);
-    setRedoCount(redoStackRef.current.length);
     requestAnimationFrame(() => {
       isUndoRedoRef.current = false;
     });
@@ -435,10 +435,10 @@ export const useTileGrid = ({
       undoStackRef.current.push(
         prevNorm.map((t) => ({ ...t, name: t.name }))
       );
+      setUndoCount(undoStackRef.current.length);
+      setRedoCount(redoStackRef.current.length);
       return normalizeTiles(next, totalCells, tileSourcesLength);
     });
-    setUndoCount(undoStackRef.current.length);
-    setRedoCount(redoStackRef.current.length);
     requestAnimationFrame(() => {
       isUndoRedoRef.current = false;
     });
