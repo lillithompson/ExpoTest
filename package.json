@@ -4,7 +4,8 @@
   "version": "1.0.0",
   "scripts": {
     "generate-tiles-manifest": "node ./scripts/generate-tiles-manifest.js",
-    "prestart": "node ./scripts/generate-tiles-manifest.js",
+    "embed-samples": "node ./scripts/embed-sample-assets.js",
+    "prestart": "node ./scripts/generate-tiles-manifest.js && node ./scripts/embed-sample-assets.js",
     "start": "expo start",
     "watch-tiles-manifest": "node ./scripts/watch-tiles-manifest.js",
     "dev": "node ./scripts/watch-tiles-manifest.js & expo start",

@@ -51,6 +51,12 @@ import { useTileSets } from '@/hooks/use-tile-sets';
 import { clearAllLocalData } from '@/utils/clear-local-data';
 import { downloadUgcTileFile } from '@/utils/download-ugc-tile';
 import {
+  loadSampleFileContents,
+  loadSamplePatternContents,
+  loadSampleTileSetContents,
+  shouldLoadSamplesThisSession,
+} from '@/utils/load-sample-assets';
+import {
     canApplyEmptyNewFileRestore,
     canApplyNonEmptyRestore,
 } from '@/utils/load-state';
@@ -85,7 +91,7 @@ import {
 } from '@/utils/tile-export';
 import { deserializeTileFile, serializeTileFile } from '@/utils/tile-format';
 import { hydrateTilesWithSourceNames, normalizeTiles, type Tile } from '@/utils/tile-grid';
-import { deserializePattern, serializePattern } from '@/utils/tile-ugc-format';
+import { deserializePattern, deserializeTileSet, serializePattern } from '@/utils/tile-ugc-format';
 import JSZip from 'jszip';
 
 const GRID_GAP = 0;
@@ -1131,6 +1137,20 @@ export default function TestScreen() {
     resolveSourceName,
     getSourcesForFile,
   ]);
+  const userFiles = useMemo(
+    () =>
+      [...files]
+        .filter((f) => !f.isSample)
+        .sort((a, b) => b.updatedAt - a.updatedAt),
+    [files]
+  );
+  const sampleFiles = useMemo(
+    () =>
+      [...files]
+        .filter((f) => f.isSample)
+        .sort((a, b) => b.updatedAt - a.updatedAt),
+    [files]
+  );
   const fileSourceNamesForMapping =
     activeFileSourceNames.length > 0 ? activeFileSourceNames : fileSourceNames;
   const fileIndexByName = useMemo(() => {
@@ -3706,6 +3726,118 @@ export default function TestScreen() {
     applyImportedPatternRef.current = applyImportedPattern;
   }, [applyImportedPattern]);
 
+  // Load sample files, patterns, and tile sets only on app load when the user has none (once per session).
+  useEffect(() => {
+    if (
+      !ready ||
+      !tileSetsLoaded ||
+      !shouldLoadSamplesThisSession() ||
+      (files.length > 0 && patterns.length > 0 && userTileSets.length > 0)
+    ) {
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        if (userTileSets.length === 0) {
+          const contents = await loadSampleTileSetContents();
+          for (const content of contents) {
+            if (cancelled) return;
+            const result = deserializeTileSet(content);
+            if (result.ok) {
+              importTileSet(result.payload);
+            }
+          }
+        }
+        if (patterns.length === 0) {
+          const contents = await loadSamplePatternContents();
+          for (const content of contents) {
+            if (cancelled) return;
+            applyImportedPattern(content);
+          }
+        }
+        if (files.length === 0) {
+          const contents = await loadSampleFileContents();
+          for (const content of contents) {
+            if (cancelled) return;
+            const bundleResult = deserializeBundle(content);
+            if (bundleResult.ok && bundleResult.kind === 'fileBundle') {
+              const oldToNewSetId = new Map<string, string>();
+              for (const { setId, payload } of bundleResult.payload.tileSets) {
+                const newId = importTileSet(payload, { preserveBakedNames: true });
+                oldToNewSetId.set(setId, newId);
+              }
+              const remapped = remapFilePayload(
+                bundleResult.payload.file,
+                oldToNewSetId
+              );
+              createFileFromTileData(remapped, { isSample: true });
+            } else {
+              const result = deserializeTileFile(content);
+              if (result.ok) {
+                createFileFromTileData(result.payload, { isSample: true });
+              }
+            }
+          }
+        }
+      } catch (error) {
+        console.warn('Failed to load sample assets', error);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    ready,
+    tileSetsLoaded,
+    files.length,
+    patterns.length,
+    userTileSets.length,
+    createFileFromTileData,
+    applyImportedPattern,
+    importTileSet,
+  ]);
+
+  const handleReimportSamples = useCallback(async () => {
+    try {
+      const contents = await loadSampleFileContents();
+      for (const content of contents) {
+        const bundleResult = deserializeBundle(content);
+        if (bundleResult.ok && bundleResult.kind === 'fileBundle') {
+          const oldToNewSetId = new Map<string, string>();
+          for (const { setId, payload } of bundleResult.payload.tileSets) {
+            const newId = importTileSet(payload, { preserveBakedNames: true });
+            oldToNewSetId.set(setId, newId);
+          }
+          const remapped = remapFilePayload(
+            bundleResult.payload.file,
+            oldToNewSetId
+          );
+          createFileFromTileData(remapped, { isSample: true });
+        } else {
+          const result = deserializeTileFile(content);
+          if (result.ok) {
+            createFileFromTileData(result.payload, { isSample: true });
+          }
+        }
+      }
+    } catch (error) {
+      console.warn('Failed to reimport sample files', error);
+      if (Platform.OS === 'web') {
+        window.alert('Failed to reimport samples.');
+      } else {
+        Alert.alert('Reimport failed', 'Could not load sample files.');
+      }
+    }
+  }, [
+    createFileFromTileData,
+    importTileSet,
+    loadSampleFileContents,
+    deserializeBundle,
+    deserializeTileFile,
+    remapFilePayload,
+  ]);
+
   useEffect(() => {
     if (Platform.OS !== 'web' || typeof document === 'undefined') {
       return;
@@ -4372,9 +4504,7 @@ export default function TestScreen() {
           ]}
           showsVerticalScrollIndicator
         >
-          {[...files]
-            .sort((a, b) => b.updatedAt - a.updatedAt)
-            .map((file) => {
+          {userFiles.map((file) => {
             const sources = getSourcesForFile(file);
             const thumbAspect =
               file.grid.columns > 0 && file.grid.rows > 0
@@ -4429,7 +4559,7 @@ export default function TestScreen() {
                       style={styles.fileThumbImage}
                       resizeMode="cover"
                     />
-                  ) : Platform.OS !== 'web' ? (
+                  ) : (
                     <ThemedView style={styles.fileThumbGrid}>
                       {Array.from({ length: file.grid.rows }, (_, rowIndex) => (
                         <ThemedView
@@ -4477,13 +4607,134 @@ export default function TestScreen() {
                         </ThemedView>
                       ))}
                     </ThemedView>
-                  ) : (
-                    <ThemedView style={styles.fileThumbPlaceholder} />
                   )}
                 </ThemedView>
               </Pressable>
             );
           })}
+          <View style={styles.fileGridSectionDivider} />
+          <ThemedText style={styles.fileGridSectionTitle}>Samples</ThemedText>
+          {sampleFiles.length > 0 ? (
+            sampleFiles.map((file) => {
+              const sources = getSourcesForFile(file);
+              const thumbAspect =
+                file.grid.columns > 0 && file.grid.rows > 0
+                  ? file.grid.columns / file.grid.rows
+                  : 1;
+              let thumbWidth = fileCardWidth;
+              let thumbHeight = fileCardWidth / thumbAspect;
+              if (isWeb && (thumbWidth > fileThumbDisplayCap || thumbHeight > fileThumbDisplayCap)) {
+                const scale = fileThumbDisplayCap / Math.max(thumbWidth, thumbHeight);
+                thumbWidth = Math.round(thumbWidth * scale);
+                thumbHeight = Math.round(thumbHeight * scale);
+              }
+              const fileThumbSizeStyle = isWeb
+                ? { width: thumbWidth, height: thumbHeight }
+                : { width: fileCardWidth, aspectRatio: thumbAspect };
+              return (
+                <Pressable
+                  key={file.id}
+                  style={[styles.fileCard, { width: fileCardWidth }]}
+                  onPress={() => {
+                    if (isSelectMode) {
+                      toggleSelectFile(file.id);
+                    } else {
+                      void openFileInModifyView(file.id);
+                    }
+                  }}
+                  onLongPress={() => {
+                    if (isSelectMode) {
+                      return;
+                    }
+                    setIncludeDownloadBackground(true);
+                    setFileMenuTargetId(file.id);
+                  }}
+                  onContextMenu={Platform.OS === 'web' ? (e) => e.preventDefault() : undefined}
+                  delayLongPress={320}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Open ${file.name}`}
+                >
+                  <ThemedView
+                    style={[
+                      styles.fileThumb,
+                      selectedFileIds.has(file.id) && styles.fileThumbSelected,
+                      fileThumbSizeStyle,
+                    ]}
+                  >
+                    {hasCachedThumbnail(file) ? (
+                      <TileAsset
+                        source={{
+                          uri: file.thumbnailUri ?? file.previewUri ?? undefined,
+                        }}
+                        name="thumbnail.png"
+                        style={styles.fileThumbImage}
+                        resizeMode="cover"
+                      />
+                    ) : (
+                      <ThemedView style={styles.fileThumbGrid}>
+                        {Array.from({ length: file.grid.rows }, (_, rowIndex) => (
+                          <ThemedView
+                            key={`row-${file.id}-${rowIndex}`}
+                            style={styles.fileThumbRow}
+                          >
+                            {Array.from({ length: file.grid.columns }, (_, colIndex) => {
+                              const index = rowIndex * file.grid.columns + colIndex;
+                              const tile = file.tiles[index];
+                              const resolved = resolveTileAssetForFile(
+                                tile,
+                                sources,
+                                file.tileSetIds ?? []
+                              );
+                              return (
+                                <ThemedView
+                                  key={`cell-${file.id}-${index}`}
+                                  style={styles.fileThumbCell}
+                                >
+                                  {resolved.source && (
+                                    <TileAsset
+                                      source={resolved.source}
+                                      name={resolved.name}
+                                      strokeColor={file.lineColor}
+                                      strokeWidth={
+                                        file.lineWidth *
+                                        (strokeScaleByName?.get(resolved.name) ?? 1)
+                                      }
+                                      style={[
+                                        styles.fileThumbImage,
+                                        {
+                                          transform: [
+                                            { scaleX: tile?.mirrorX ? -1 : 1 },
+                                            { scaleY: tile?.mirrorY ? -1 : 1 },
+                                            { rotate: `${tile?.rotation ?? 0}deg` },
+                                          ],
+                                        },
+                                      ]}
+                                      resizeMode="cover"
+                                    />
+                                  )}
+                                </ThemedView>
+                              );
+                            })}
+                          </ThemedView>
+                        ))}
+                      </ThemedView>
+                    )}
+                  </ThemedView>
+                </Pressable>
+              );
+            })
+          ) : (
+            <Pressable
+              onPress={() => void handleReimportSamples()}
+              style={styles.reimportSamplesButton}
+              accessibilityRole="button"
+              accessibilityLabel="Reimport sample files"
+            >
+              <ThemedText type="defaultSemiBold" style={styles.reimportSamplesButtonText}>
+                Reimport
+              </ThemedText>
+            </Pressable>
+          )}
         </ScrollView>
         {downloadTargetFile && Platform.OS !== 'web' && showDownloadOverlay && (
           <ThemedView style={styles.overlay} accessibilityRole="dialog">
@@ -7272,6 +7523,35 @@ const styles = StyleSheet.create({
     paddingHorizontal: FILE_GRID_SIDE_PADDING,
     paddingTop: 8,
     paddingBottom: 12,
+  },
+  fileGridSectionDivider: {
+    width: '100%',
+    height: 1,
+    backgroundColor: '#6b7280',
+    marginTop: 8,
+    marginBottom: 0,
+  },
+  fileGridSectionTitle: {
+    width: '100%',
+    fontSize: 12,
+    marginBottom: 2,
+    color: '#6b7280',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  reimportSamplesButton: {
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#9ca3af',
+    borderRadius: 8,
+    backgroundColor: '#e5e7eb',
+    opacity: 0.25,
+  },
+  reimportSamplesButtonText: {
+    color: '#4b5563',
   },
   fileCard: {
     alignItems: 'center',

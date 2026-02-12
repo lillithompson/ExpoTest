@@ -32,6 +32,8 @@ export type TileFile = {
   updatedAt: number;
   /** Cell indices that are locked (cannot be modified by any tool). */
   lockedCells?: number[];
+  /** True when the file was added from the bundled samples (file view shows these in a separate section). */
+  isSample?: boolean;
 };
 
 const FILES_KEY = 'tile-files-v1';
@@ -153,6 +155,7 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
                 previewUri: file.previewUri ?? null,
                 updatedAt: file.updatedAt ?? Date.now(),
                 lockedCells,
+                isSample: file.isSample === true,
               };
             })
           : [];
@@ -355,6 +358,7 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
           lockedCells: Array.isArray(source.lockedCells)
             ? [...source.lockedCells]
             : [],
+          isSample: false,
         };
         setActiveFileId(nextFile.id);
         void AsyncStorage.setItem(ACTIVE_KEY, nextFile.id);
@@ -367,7 +371,7 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
   );
 
   const createFileFromTileData = useCallback(
-    (payload: TileFilePayload): string => {
+    (payload: TileFilePayload, options?: { isSample?: boolean }): string => {
       const nextFile: TileFile = {
         id: createId(),
         name: payload.name,
@@ -387,6 +391,7 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
           Array.isArray(payload.lockedCells) && payload.lockedCells.length > 0
             ? payload.lockedCells
             : undefined,
+        isSample: options?.isSample === true,
       };
       setFiles((prev) => {
         const next = [nextFile, ...prev];
