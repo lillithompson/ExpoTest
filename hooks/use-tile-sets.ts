@@ -12,6 +12,7 @@ import {
 import { parseTileConnections, transformConnections } from '@/utils/tile-compat';
 import { renderTileCanvasToSvg } from '@/utils/tile-export';
 import { type Tile } from '@/utils/tile-grid';
+import type { TileSetExportPayload } from '@/utils/tile-ugc-format';
 
 export type TileSetTile = {
   id: string;
@@ -625,6 +626,41 @@ export const useTileSets = (options?: {
     [persist]
   );
 
+  const importTileSet = useCallback(
+    (payload: TileSetExportPayload) => {
+      const now = Date.now();
+      const setId = createId('tileset');
+      const tiles: TileSetTile[] = payload.tiles.map((t) => ({
+        id: createId('tile'),
+        name: t.name,
+        tiles: t.tiles,
+        grid: t.grid,
+        preferredTileSize: t.preferredTileSize,
+        thumbnailUri: null,
+        previewUri: null,
+        updatedAt: now,
+      }));
+      const newSet: TileSet = {
+        id: setId,
+        name: payload.name,
+        category: payload.category,
+        categories: payload.categories ?? [payload.category],
+        resolution: clampResolution(payload.resolution),
+        lineWidth: payload.lineWidth ?? 3,
+        lineColor: payload.lineColor ?? '#ffffff',
+        tiles,
+        updatedAt: now,
+      };
+      setTileSets((prev) => {
+        const next = [newSet, ...prev];
+        void persist(next);
+        return next;
+      });
+      return setId;
+    },
+    [persist]
+  );
+
   const deleteTileFromSet = useCallback(
     (setId: string, tileId: string) => {
       const sources = bakedSourcesBySetId[setId] ?? [];
@@ -669,6 +705,7 @@ export const useTileSets = (options?: {
     bakedSourcesBySetId,
     currentBakedNamesBySetId,
     createTileSet,
+    importTileSet,
     deleteTileSet,
     reloadTileSets: loadFromStorage,
     updateTileSet,

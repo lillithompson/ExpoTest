@@ -48,7 +48,9 @@ import { useTileGrid } from '@/hooks/use-tile-grid';
 import { useTilePatterns } from '@/hooks/use-tile-patterns';
 import { useTileSets } from '@/hooks/use-tile-sets';
 import { clearAllLocalData } from '@/utils/clear-local-data';
+import { downloadUgcTileFile } from '@/utils/download-ugc-tile';
 import { deserializeTileFile, serializeTileFile } from '@/utils/tile-format';
+import { deserializePattern, serializePattern } from '@/utils/tile-ugc-format';
 import JSZip from 'jszip';
 import {
     canApplyEmptyNewFileRestore,
@@ -701,6 +703,7 @@ export default function TestScreen() {
   const [showNewFileModal, setShowNewFileModal] = useState(false);
   const [fileMenuTargetId, setFileMenuTargetId] = useState<string | null>(null);
   const importTileInputRef = useRef<HTMLInputElement | null>(null);
+  const importPatternInputRef = useRef<HTMLInputElement | null>(null);
   const applyImportedTileFileRef = useRef<(content: string) => void>(() => {});
   const [downloadTargetId, setDownloadTargetId] = useState<string | null>(null);
   const [isDownloading, setIsDownloading] = useState(false);
@@ -772,7 +775,7 @@ export default function TestScreen() {
   const [paletteMirrorsY, setPaletteMirrorsY] = useState<Record<number, boolean>>(
     {}
   );
-  const { patternsByCategory, createPattern, deletePatterns, clearAllPatterns } = useTilePatterns();
+  const { patterns, patternsByCategory, createPattern, deletePatterns, clearAllPatterns } = useTilePatterns();
   const [selectedPatternId, setSelectedPatternId] = useState<string | null>(null);
   const [isPatternCreationMode, setIsPatternCreationMode] = useState(false);
   const [patternSelection, setPatternSelection] = useState<{
@@ -789,6 +792,7 @@ export default function TestScreen() {
   const [showPatternChooser, setShowPatternChooser] = useState(false);
   const [isPatternSelectMode, setIsPatternSelectMode] = useState(false);
   const [selectedPatternIds, setSelectedPatternIds] = useState<Set<string>>(new Set());
+  const [showPatternExportMenu, setShowPatternExportMenu] = useState(false);
   const patternSelectAnim = useRef(new Animated.Value(0)).current;
   const [patternRotations, setPatternRotations] = useState<Record<string, number>>(
     {}
@@ -3421,6 +3425,131 @@ export default function TestScreen() {
     clearPatternSelection();
   };
 
+  const exportSelectedPatternsAsTile = useCallback(async () => {
+    if (selectedPatternIds.size === 0) {
+      setShowPatternExportMenu(false);
+      return;
+    }
+    const selectedPatternsList = activePatterns.filter((p) =>
+      selectedPatternIds.has(p.id)
+    );
+    if (selectedPatternsList.length === 0) {
+      setShowPatternExportMenu(false);
+      return;
+    }
+    if (selectedPatternsList.length === 1) {
+      const pattern = selectedPatternsList[0];
+      const content = serializePattern(pattern);
+      const index = patterns.findIndex((p) => p.id === pattern.id);
+      const n = index >= 0 ? index : 0;
+      await downloadUgcTileFile(content, `Pattern_${n}.tilepattern`);
+      setShowPatternExportMenu(false);
+      return;
+    }
+    if (Platform.OS !== 'web') {
+      setShowPatternExportMenu(false);
+      return;
+    }
+    setShowPatternExportMenu(false);
+    const zip = new JSZip();
+    for (const pattern of selectedPatternsList) {
+      const content = serializePattern(pattern);
+      const index = patterns.findIndex((p) => p.id === pattern.id);
+      const n = index >= 0 ? index : 0;
+      zip.file(`Pattern_${n}.tilepattern`, content);
+    }
+    const blob = await zip.generateAsync({ type: 'blob' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'patterns.zip';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  }, [activePatterns, selectedPatternIds, patterns]);
+
+  const handleImportPatternPress = useCallback(async () => {
+    if (Platform.OS === 'web') {
+      importPatternInputRef.current?.click();
+      return;
+    }
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: '*/*',
+        copyToCacheDirectory: true,
+      });
+      if (result.canceled) {
+        return;
+      }
+      const uri = result.assets[0].uri;
+      const content = await FileSystem.readAsStringAsync(uri, {
+        encoding: FileSystem.EncodingType.UTF8,
+      });
+      const parseResult = deserializePattern(content);
+      if (!parseResult.ok) {
+        Alert.alert('Invalid .tilepattern file', parseResult.error);
+        return;
+      }
+      const p = parseResult.payload;
+      createPattern({
+        name: p.name,
+        category: p.category,
+        width: p.width,
+        height: p.height,
+        tiles: p.tiles,
+      });
+    } catch {
+      Alert.alert('Import failed', 'Could not read the selected file.');
+    }
+  }, [createPattern]);
+
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof document === 'undefined') {
+      return;
+    }
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.tilepattern';
+    input.style.display = 'none';
+    input.onchange = (e: Event) => {
+      const target = e.target as HTMLInputElement;
+      const file = target?.files?.[0];
+      if (!file) {
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = () => {
+        const text = reader.result as string;
+        const parseResult = deserializePattern(text);
+        if (!parseResult.ok) {
+          if (typeof window !== 'undefined' && window.alert) {
+            window.alert(`Invalid .tilepattern file: ${parseResult.error}`);
+          }
+          return;
+        }
+        const p = parseResult.payload;
+        createPattern({
+          name: p.name,
+          category: p.category,
+          width: p.width,
+          height: p.height,
+          tiles: p.tiles,
+        });
+      };
+      reader.readAsText(file);
+      target.value = '';
+    };
+    document.body.appendChild(input);
+    importPatternInputRef.current = input;
+    return () => {
+      if (input.parentNode) {
+        document.body.removeChild(input);
+      }
+      importPatternInputRef.current = null;
+    };
+  }, [createPattern]);
+
   const handleDownloadPng = async () => {
     if (!downloadTargetFile) {
       return;
@@ -3787,11 +3916,13 @@ export default function TestScreen() {
       return;
     }
     setShowExportMenu(false);
+    const sortedFiles = [...files].sort((a, b) => b.updatedAt - a.updatedAt);
     const zip = new JSZip();
     for (const file of selectedFiles) {
       const content = serializeTileFile(file);
-      const safeName = file.name.replace(/[^\w\s-]+/g, '').trim() || 'canvas';
-      zip.file(`${safeName}.tile`, content);
+      const fileIndex = sortedFiles.findIndex((f) => f.id === file.id);
+      const index = fileIndex >= 0 ? fileIndex : 0;
+      zip.file(`TileCanvas_${index}.tile`, content);
     }
     const blob = await zip.generateAsync({ type: 'blob' });
     const url = URL.createObjectURL(blob);
@@ -3802,7 +3933,7 @@ export default function TestScreen() {
     link.click();
     link.remove();
     URL.revokeObjectURL(url);
-  }, [selectedFiles, downloadTileFile]);
+  }, [selectedFiles, files, downloadTileFile]);
 
   const handleDownloadSvg = async () => {
     if (!downloadTargetFile) {
@@ -3961,12 +4092,22 @@ export default function TestScreen() {
         >
           <View style={styles.fileSelectDeleteExportRow}>
             <Pressable
-              onPress={deleteSelectedFiles}
-              style={styles.fileSelectDelete}
+              onPress={() => selectedFileIds.size > 0 && deleteSelectedFiles()}
+              style={[
+                styles.fileSelectDelete,
+                selectedFileIds.size === 0 && styles.fileSelectDeleteDisabled,
+              ]}
+              disabled={selectedFileIds.size === 0}
               accessibilityRole="button"
               accessibilityLabel="Delete selected files"
             >
-              <ThemedText type="defaultSemiBold" style={styles.fileSelectDeleteText}>
+              <ThemedText
+                type="defaultSemiBold"
+                style={[
+                  styles.fileSelectDeleteText,
+                  selectedFileIds.size === 0 && styles.fileSelectDeleteTextDisabled,
+                ]}
+              >
                 Delete
               </ThemedText>
             </Pressable>
@@ -3974,12 +4115,22 @@ export default function TestScreen() {
               {' | '}
             </ThemedText>
             <Pressable
-              onPress={() => setShowExportMenu(true)}
-              style={styles.fileSelectExport}
+              onPress={() => selectedFileIds.size > 0 && setShowExportMenu(true)}
+              style={[
+                styles.fileSelectExport,
+                selectedFileIds.size === 0 && styles.fileSelectExportDisabled,
+              ]}
+              disabled={selectedFileIds.size === 0}
               accessibilityRole="button"
               accessibilityLabel="Export selected files"
             >
-              <ThemedText type="defaultSemiBold" style={styles.fileSelectExportText}>
+              <ThemedText
+                type="defaultSemiBold"
+                style={[
+                  styles.fileSelectExportText,
+                  selectedFileIds.size === 0 && styles.fileSelectExportTextDisabled,
+                ]}
+              >
                 Export
               </ThemedText>
             </Pressable>
@@ -5782,6 +5933,14 @@ export default function TestScreen() {
                 </ThemedText>
                 <View style={styles.patternModalActions}>
                   <Pressable
+                    onPress={handleImportPatternPress}
+                    style={styles.patternHeaderIcon}
+                    accessibilityRole="button"
+                    accessibilityLabel="Import .tilepattern file"
+                  >
+                    <MaterialCommunityIcons name="upload" size={24} color="#fff" />
+                  </Pressable>
+                  <Pressable
                     onPress={() => {
                       setBrush({ mode: 'pattern' });
                       setIsPatternCreationMode(true);
@@ -5823,16 +5982,57 @@ export default function TestScreen() {
                 ]}
                 pointerEvents={isPatternSelectMode ? 'auto' : 'none'}
               >
-                <Pressable
-                  onPress={deleteSelectedPatterns}
-                  style={styles.patternSelectDelete}
-                  accessibilityRole="button"
-                  accessibilityLabel="Delete selected patterns"
-                >
-                  <ThemedText type="defaultSemiBold" style={styles.patternSelectDeleteText}>
-                    Delete
+                <View style={styles.patternSelectDeleteExportRow}>
+                  <Pressable
+                    onPress={() =>
+                      selectedPatternIds.size > 0 && deleteSelectedPatterns()
+                    }
+                    style={[
+                      styles.patternSelectDelete,
+                      selectedPatternIds.size === 0 && styles.patternSelectDeleteDisabled,
+                    ]}
+                    disabled={selectedPatternIds.size === 0}
+                    accessibilityRole="button"
+                    accessibilityLabel="Delete selected patterns"
+                  >
+                    <ThemedText
+                      type="defaultSemiBold"
+                      style={[
+                        styles.patternSelectDeleteText,
+                        selectedPatternIds.size === 0 &&
+                          styles.patternSelectDeleteTextDisabled,
+                      ]}
+                    >
+                      Delete
+                    </ThemedText>
+                  </Pressable>
+                  <ThemedText type="defaultSemiBold" style={styles.patternSelectPipe}>
+                    {' | '}
                   </ThemedText>
-                </Pressable>
+                  <Pressable
+                    onPress={() =>
+                      selectedPatternIds.size > 0 && setShowPatternExportMenu(true)
+                    }
+                    style={[
+                      styles.patternSelectExport,
+                      selectedPatternIds.size === 0 && styles.patternSelectExportDisabled,
+                    ]}
+                    disabled={selectedPatternIds.size === 0}
+                    accessibilityRole="button"
+                    accessibilityLabel="Export selected patterns"
+                  >
+                    <ThemedText
+                      type="defaultSemiBold"
+                      style={[
+                        styles.patternSelectExportText,
+                        selectedPatternIds.size === 0 &&
+                          styles.patternSelectExportTextDisabled,
+                      ]}
+                    >
+                      Export
+                    </ThemedText>
+                  </Pressable>
+                </View>
                 <ThemedText type="defaultSemiBold" style={styles.patternSelectCount}>
                   {selectedPatternIds.size > 0
                     ? `${selectedPatternIds.size} selected`
@@ -6005,6 +6205,26 @@ export default function TestScreen() {
               </ScrollView>
             </ThemedView>
           </View>
+        )}
+        {showPatternExportMenu && (
+          <ThemedView style={[styles.overlay, { zIndex: 40 }]} accessibilityRole="dialog">
+            <Pressable
+              style={styles.overlayBackdrop}
+              onPress={() => setShowPatternExportMenu(false)}
+              accessibilityRole="button"
+              accessibilityLabel="Close export options"
+            />
+            <ThemedView style={styles.fileMenuPanel}>
+              <Pressable
+                style={[styles.fileMenuButton, styles.fileMenuButtonLast]}
+                onPress={() => void exportSelectedPatternsAsTile()}
+                accessibilityRole="button"
+                accessibilityLabel="Download .tilepattern file"
+              >
+                <ThemedText type="defaultSemiBold">Download .tilepattern</ThemedText>
+              </Pressable>
+            </ThemedView>
+          </ThemedView>
         )}
         {showPatternSaveModal && (
           <ThemedView style={styles.overlay} accessibilityRole="dialog">
@@ -6721,6 +6941,12 @@ const styles = StyleSheet.create({
   fileSelectDeleteText: {
     color: '#dc2626',
   },
+  fileSelectDeleteDisabled: {
+    opacity: 0.5,
+  },
+  fileSelectDeleteTextDisabled: {
+    color: '#b91c1c',
+  },
   fileSelectPipe: {
     color: '#9ca3af',
   },
@@ -6730,6 +6956,12 @@ const styles = StyleSheet.create({
   },
   fileSelectExportText: {
     color: '#9ca3af',
+  },
+  fileSelectExportDisabled: {
+    opacity: 0.5,
+  },
+  fileSelectExportTextDisabled: {
+    color: '#6b7280',
   },
   fileSelectExitText: {
     color: '#fff',
@@ -6896,6 +7128,32 @@ const styles = StyleSheet.create({
   },
   patternSelectDeleteText: {
     color: '#dc2626',
+  },
+  patternSelectDeleteDisabled: {
+    opacity: 0.5,
+  },
+  patternSelectDeleteTextDisabled: {
+    color: '#b91c1c',
+  },
+  patternSelectDeleteExportRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  patternSelectPipe: {
+    color: '#9ca3af',
+  },
+  patternSelectExport: {
+    paddingVertical: 8,
+    paddingHorizontal: 8,
+  },
+  patternSelectExportText: {
+    color: '#9ca3af',
+  },
+  patternSelectExportDisabled: {
+    opacity: 0.5,
+  },
+  patternSelectExportTextDisabled: {
+    color: '#6b7280',
   },
   patternSelectExitText: {
     color: '#fff',

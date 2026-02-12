@@ -1,8 +1,11 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import * as DocumentPicker from 'expo-document-picker';
+import * as FileSystem from 'expo-file-system';
 import { useRouter } from 'expo-router';
 import JSZip from 'jszip';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+    Alert,
     Animated,
     Platform,
     Pressable,
@@ -28,7 +31,9 @@ import { TAB_BAR_HEIGHT, useTabBarVisible } from '@/contexts/tab-bar-visible';
 import { useIsMobileWeb } from '@/hooks/use-is-mobile-web';
 import { useTileFiles } from '@/hooks/use-tile-files';
 import { type TileSetTile, useTileSets } from '@/hooks/use-tile-sets';
+import { downloadUgcTileFile } from '@/utils/download-ugc-tile';
 import { renderTileCanvasToDataUrl } from '@/utils/tile-export';
+import { deserializeTileSet, serializeTileSet } from '@/utils/tile-ugc-format';
 import { type Tile } from '@/utils/tile-grid';
 
 const HEADER_HEIGHT = 50;
@@ -72,9 +77,11 @@ export default function TileSetCreatorScreen() {
     bakedSourcesBySetId,
     currentBakedNamesBySetId,
     createTileSet,
+    importTileSet,
     deleteTileSet,
     updateTileSet,
   } = useTileSets({ onTileSourceNamesRemoved: replaceTileSourceNamesWithError });
+  const importTileSetInputRef = useRef<HTMLInputElement | null>(null);
   const [isSelectMode, setIsSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const selectBarAnim = useRef(new Animated.Value(0)).current;
@@ -84,6 +91,7 @@ export default function TileSetCreatorScreen() {
   const [downloadSetId, setDownloadSetId] = useState<string | null>(null);
   const [downloadError, setDownloadError] = useState<string | null>(null);
   const [isDownloadingZip, setIsDownloadingZip] = useState(false);
+  const [showExportMenu, setShowExportMenu] = useState(false);
   const [bakedPreviews, setBakedPreviews] = useState<Record<string, BakedPreview>>(
     {}
   );
@@ -300,6 +308,73 @@ export default function TileSetCreatorScreen() {
     setShowCreateModal(true);
   };
 
+  const handleImportTileSetPress = useCallback(async () => {
+    if (Platform.OS === 'web') {
+      importTileSetInputRef.current?.click();
+      return;
+    }
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: '*/*',
+        copyToCacheDirectory: true,
+      });
+      if (result.canceled) {
+        return;
+      }
+      const uri = result.assets[0].uri;
+      const content = await FileSystem.readAsStringAsync(uri, {
+        encoding: FileSystem.EncodingType.UTF8,
+      });
+      const parseResult = deserializeTileSet(content);
+      if (!parseResult.ok) {
+        Alert.alert('Invalid .tileset file', parseResult.error);
+        return;
+      }
+      importTileSet(parseResult.payload);
+    } catch {
+      Alert.alert('Import failed', 'Could not read the selected file.');
+    }
+  }, [importTileSet]);
+
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof document === 'undefined') {
+      return;
+    }
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.tileset';
+    input.style.display = 'none';
+    input.onchange = (e: Event) => {
+      const target = e.target as HTMLInputElement;
+      const file = target?.files?.[0];
+      if (!file) {
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = () => {
+        const text = reader.result as string;
+        const parseResult = deserializeTileSet(text);
+        if (!parseResult.ok) {
+          if (typeof window !== 'undefined' && window.alert) {
+            window.alert(`Invalid .tileset file: ${parseResult.error}`);
+          }
+          return;
+        }
+        importTileSet(parseResult.payload);
+      };
+      reader.readAsText(file);
+      target.value = '';
+    };
+    document.body.appendChild(input);
+    importTileSetInputRef.current = input;
+    return () => {
+      if (input.parentNode) {
+        document.body.removeChild(input);
+      }
+      importTileSetInputRef.current = null;
+    };
+  }, [importTileSet]);
+
   const deleteSelected = () => {
     if (selectedIds.size === 0) {
       clearSelection();
@@ -307,6 +382,43 @@ export default function TileSetCreatorScreen() {
     }
     selectedIds.forEach((id) => deleteTileSet(id));
     clearSelection();
+  };
+
+  const exportSelectedAsTile = async () => {
+    if (selectedIds.size === 0) {
+      setShowExportMenu(false);
+      return;
+    }
+    const selectedSets = tileSets.filter((set) => selectedIds.has(set.id));
+    const tileSetFileName = (name: string) => {
+      const safe = name.replace(/[^\w\s-]+/g, '').trim().replace(/\s+/g, '_') || 'TileSet';
+      return `TileSet_${safe}.tileset`;
+    };
+    if (selectedSets.length === 1) {
+      const content = serializeTileSet(selectedSets[0]);
+      await downloadUgcTileFile(content, tileSetFileName(selectedSets[0].name));
+      setShowExportMenu(false);
+      return;
+    }
+    if (Platform.OS !== 'web') {
+      setShowExportMenu(false);
+      return;
+    }
+    setShowExportMenu(false);
+    const zip = new JSZip();
+    for (const set of selectedSets) {
+      const content = serializeTileSet(set);
+      zip.file(tileSetFileName(set.name), content);
+    }
+    const blob = await zip.generateAsync({ type: 'blob' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'tile-sets.zip';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
   };
 
   const downloadTileSetZip = async (setId: string) => {
@@ -430,6 +542,14 @@ export default function TileSetCreatorScreen() {
         )}
         <ThemedView style={styles.fileHeaderActions}>
           <Pressable
+            onPress={handleImportTileSetPress}
+            style={styles.headerIcon}
+            accessibilityRole="button"
+            accessibilityLabel="Import .tileset file"
+          >
+            <MaterialCommunityIcons name="upload" size={24} color="#fff" />
+          </Pressable>
+          <Pressable
             onPress={openCreateModal}
             style={styles.headerIcon}
             accessibilityRole="button"
@@ -460,16 +580,51 @@ export default function TileSetCreatorScreen() {
         ]}
         pointerEvents={isSelectMode ? 'auto' : 'none'}
       >
-        <Pressable
-          onPress={deleteSelected}
-          style={styles.fileSelectDelete}
-          accessibilityRole="button"
-          accessibilityLabel="Delete selected tile sets"
-        >
-          <ThemedText type="defaultSemiBold" style={styles.fileSelectDeleteText}>
-            Delete
+        <View style={styles.fileSelectDeleteExportRow}>
+          <Pressable
+            onPress={() => selectedIds.size > 0 && deleteSelected()}
+            style={[
+              styles.fileSelectDelete,
+              selectedIds.size === 0 && styles.fileSelectDeleteDisabled,
+            ]}
+            disabled={selectedIds.size === 0}
+            accessibilityRole="button"
+            accessibilityLabel="Delete selected tile sets"
+          >
+            <ThemedText
+              type="defaultSemiBold"
+              style={[
+                styles.fileSelectDeleteText,
+                selectedIds.size === 0 && styles.fileSelectDeleteTextDisabled,
+              ]}
+            >
+              Delete
+            </ThemedText>
+          </Pressable>
+          <ThemedText type="defaultSemiBold" style={styles.fileSelectPipe}>
+            {' | '}
           </ThemedText>
-        </Pressable>
+          <Pressable
+            onPress={() => selectedIds.size > 0 && setShowExportMenu(true)}
+            style={[
+              styles.fileSelectExport,
+              selectedIds.size === 0 && styles.fileSelectExportDisabled,
+            ]}
+            disabled={selectedIds.size === 0}
+            accessibilityRole="button"
+            accessibilityLabel="Export selected tile sets"
+          >
+            <ThemedText
+              type="defaultSemiBold"
+              style={[
+                styles.fileSelectExportText,
+                selectedIds.size === 0 && styles.fileSelectExportTextDisabled,
+              ]}
+            >
+              Export
+            </ThemedText>
+          </Pressable>
+        </View>
         <ThemedText type="defaultSemiBold" style={styles.fileSelectCount}>
           {selectedIds.size > 0 ? `${selectedIds.size} selected` : ''}
         </ThemedText>
@@ -640,6 +795,26 @@ export default function TileSetCreatorScreen() {
                 </ThemedText>
               </Pressable>
             </ThemedView>
+          </ThemedView>
+        </ThemedView>
+      )}
+      {showExportMenu && (
+        <ThemedView style={styles.overlay} accessibilityRole="dialog">
+          <Pressable
+            style={styles.overlayBackdrop}
+            onPress={() => setShowExportMenu(false)}
+            accessibilityRole="button"
+            accessibilityLabel="Close export options"
+          />
+          <ThemedView style={styles.fileMenuPanel}>
+            <Pressable
+              style={[styles.fileMenuButton, styles.fileMenuButtonLast]}
+              onPress={() => void exportSelectedAsTile()}
+              accessibilityRole="button"
+              accessibilityLabel="Download .tileset file"
+            >
+              <ThemedText type="defaultSemiBold">Download .tileset?</ThemedText>
+            </Pressable>
           </ThemedView>
         </ThemedView>
       )}
@@ -951,11 +1126,54 @@ const styles = StyleSheet.create({
   fileSelectDeleteText: {
     color: '#dc2626',
   },
+  fileSelectDeleteDisabled: {
+    opacity: 0.5,
+  },
+  fileSelectDeleteTextDisabled: {
+    color: '#b91c1c',
+  },
   fileSelectExitText: {
     color: '#fff',
   },
   fileSelectCount: {
     color: '#9ca3af',
+  },
+  fileSelectDeleteExportRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  fileSelectPipe: {
+    color: '#9ca3af',
+  },
+  fileSelectExport: {
+    paddingVertical: 8,
+    paddingHorizontal: 8,
+  },
+  fileSelectExportText: {
+    color: '#9ca3af',
+  },
+  fileSelectExportDisabled: {
+    opacity: 0.5,
+  },
+  fileSelectExportTextDisabled: {
+    color: '#6b7280',
+  },
+  fileMenuPanel: {
+    width: 220,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#1f1f1f',
+    backgroundColor: '#fff',
+    overflow: 'hidden',
+  },
+  fileMenuButton: {
+    paddingVertical: 14,
+    paddingHorizontal: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e5e7eb',
+  },
+  fileMenuButtonLast: {
+    borderBottomWidth: 0,
   },
   fileScroll: {
     flex: 1,

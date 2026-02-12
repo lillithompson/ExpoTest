@@ -439,12 +439,22 @@ export default function TileSetEditorScreen() {
         pointerEvents={isSelectMode ? 'auto' : 'none'}
       >
         <Pressable
-          onPress={deleteSelected}
-          style={styles.fileSelectDelete}
+          onPress={() => selectedIds.size > 0 && deleteSelected()}
+          style={[
+            styles.fileSelectDelete,
+            selectedIds.size === 0 && styles.fileSelectDeleteDisabled,
+          ]}
+          disabled={selectedIds.size === 0}
           accessibilityRole="button"
           accessibilityLabel="Delete selected tiles"
         >
-          <ThemedText type="defaultSemiBold" style={styles.fileSelectDeleteText}>
+          <ThemedText
+            type="defaultSemiBold"
+            style={[
+              styles.fileSelectDeleteText,
+              selectedIds.size === 0 && styles.fileSelectDeleteTextDisabled,
+            ]}
+          >
             Delete
           </ThemedText>
         </Pressable>
@@ -733,6 +743,12 @@ const styles = StyleSheet.create({
   },
   fileSelectDeleteText: {
     color: '#dc2626',
+  },
+  fileSelectDeleteDisabled: {
+    opacity: 0.5,
+  },
+  fileSelectDeleteTextDisabled: {
+    color: '#b91c1c',
   },
   fileSelectExitText: {
     color: '#fff',

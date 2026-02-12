@@ -402,8 +402,10 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
 
   const downloadTileFile = useCallback(async (file: TileFile) => {
     const content = serializeTileFile(file);
-    const safeName = file.name.replace(/[^\w\s-]+/g, '').trim() || 'canvas';
-    const fileName = `${safeName}.tile`;
+    const sortedFiles = [...files].sort((a, b) => b.updatedAt - a.updatedAt);
+    const fileIndex = sortedFiles.findIndex((f) => f.id === file.id);
+    const index = fileIndex >= 0 ? fileIndex : 0;
+    const fileName = `TileCanvas_${index}.tile`;
     if (Platform.OS === 'web') {
       const blob = new Blob([content], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
@@ -415,7 +417,7 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
       link.remove();
       URL.revokeObjectURL(url);
     } else {
-      const target = `${FileSystem.cacheDirectory}${safeName}.tile`;
+      const target = `${FileSystem.cacheDirectory}${fileName}`;
       await FileSystem.writeAsStringAsync(target, content, {
         encoding: FileSystem.EncodingType.UTF8,
       });
@@ -424,7 +426,7 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
         await Sharing.shareAsync(target, { mimeType: 'application/json' });
       }
     }
-  }, []);
+  }, [files]);
 
   const downloadFile = useCallback(
     async (
