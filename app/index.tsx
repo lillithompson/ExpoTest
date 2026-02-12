@@ -6664,6 +6664,14 @@ export default function TestScreen() {
                       (a.name ?? '').localeCompare(b.name ?? '')
                     )[0] ?? null;
                   const thumbUri = firstTile?.thumbnailUri ?? firstTile?.previewUri ?? null;
+                  const bakedSources = bakedSourcesBySetId[set.id] ?? [];
+                  const firstBakedSource = bakedSources[0];
+                  const thumbSource =
+                    thumbUri
+                      ? { uri: thumbUri }
+                      : firstBakedSource?.source
+                        ? firstBakedSource.source
+                        : null;
                   return (
                     <Pressable
                       key={set.id}
@@ -6714,10 +6722,10 @@ export default function TestScreen() {
                           isSelected && styles.tileSetChooserThumbSelected,
                         ]}
                       >
-                        {thumbUri ? (
+                        {thumbSource ? (
                           <TileAsset
-                            source={{ uri: thumbUri }}
-                            name="thumbnail"
+                            source={thumbSource}
+                            name={firstBakedSource?.name ?? 'thumbnail'}
                             style={styles.tileSetChooserThumbImage}
                             resizeMode="cover"
                           />
