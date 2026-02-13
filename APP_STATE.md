@@ -62,7 +62,8 @@ Tile Set Editor (tileSetCreator/editor.tsx)
 - Settings overlay: Rename tile set.
 
 Tile Modify View (tileSetCreator/modifyTile.tsx)
-- Header row: back button label "Modify Tile" (upper left); toolbar actions similar to Modify View (Undo, Redo, Clear, Fill, Mirror cycling button).
+- Header row: Back button "<" in a square tap target (75% of toolbar button width, full header height); "Modify" button (toggles the tile set chooser banner over the canvas); toolbar actions (Undo, Redo, Clear, Fill, Mirror cycling button). Same top-bar behavior as File Modify view: tap "<" to go back, tap "Modify" to show/hide the compact tile set banner.
+- Modify tile set banner: Same as File Modify view—horizontal scroll of 40 px square thumbnails (built-in categories only), no names; tap to toggle selection (same data as double-tap/long-press Random chooser); X to dismiss; tap outside or any toolbar/palette action dismisses the banner.
 - Grid background and optional debug overlay.
 - Brush panel: 2–5 rows (row count increases when row height would exceed 120px); for editing the tile template.
 - Tile Set chooser (double tap or long press Random): Same thumbnail grid styling as the File/Modify view Tile Set chooser (card, 72×72 thumb; built-in category uses thumbnail.svg when present, else first tile; green border when selected). Only built-in categories are shown; UGC tile sets are not selectable in this modal.

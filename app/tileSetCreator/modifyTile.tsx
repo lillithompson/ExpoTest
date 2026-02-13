@@ -322,6 +322,8 @@ export default function ModifyTileScreen() {
   });
   const { patternsByCategory } = useTilePatterns();
   const [showTileSetChooser, setShowTileSetChooser] = useState(false);
+  const [showModifyTileSetBanner, setShowModifyTileSetBanner] = useState(false);
+  const dismissModifyBanner = useCallback(() => setShowModifyTileSetBanner(false), []);
   const [tileSetSelectionError, setTileSetSelectionError] = useState<string | null>(
     null
   );
@@ -762,12 +764,22 @@ export default function ModifyTileScreen() {
                 params: { setId },
               });
             }}
-            style={styles.navButton}
+            style={styles.navBackSquare}
             accessibilityRole="button"
             accessibilityLabel="Back to tile set editor"
           >
             <ThemedText type="defaultSemiBold" style={styles.navButtonText}>
-              &lt; Modify Tile
+              &lt;
+            </ThemedText>
+          </Pressable>
+          <Pressable
+            onPress={() => setShowModifyTileSetBanner((prev) => !prev)}
+            style={styles.navButton}
+            accessibilityRole="button"
+            accessibilityLabel="Toggle tile set banner"
+          >
+            <ThemedText type="defaultSemiBold" style={styles.navButtonText}>
+              Modify
             </ThemedText>
           </Pressable>
           <ThemedView style={styles.controls}>
@@ -775,20 +787,39 @@ export default function ModifyTileScreen() {
               label="Undo"
               icon="undo"
               disabled={!canUndo}
-              onPress={undo}
+              onPress={() => {
+                dismissModifyBanner();
+                undo();
+              }}
             />
             <ToolbarButton
               label="Redo"
               icon="redo"
               disabled={!canRedo}
-              onPress={redo}
+              onPress={() => {
+                dismissModifyBanner();
+                redo();
+              }}
             />
-            <ToolbarButton label="Clear" icon="refresh" onPress={resetTiles} />
+            <ToolbarButton
+              label="Clear"
+              icon="refresh"
+              onPress={() => {
+                dismissModifyBanner();
+                resetTiles();
+              }}
+            />
             <ToolbarButton
               label="Fill"
               icon="format-color-fill"
-              onPress={floodComplete}
-              onLongPress={floodFill}
+              onPress={() => {
+                dismissModifyBanner();
+                floodComplete();
+              }}
+              onLongPress={() => {
+                dismissModifyBanner();
+                floodFill();
+              }}
             />
             <ToolbarButton
               label={
@@ -815,15 +846,16 @@ export default function ModifyTileScreen() {
                   ? '#3b82f6'
                   : undefined
               }
-              onPress={() =>
+              onPress={() => {
+                dismissModifyBanner();
                 setSettings((prev) => {
                   const { mirrorHorizontal: h, mirrorVertical: v } = prev;
                   if (!h && !v) return { ...prev, mirrorHorizontal: true };
                   if (h && !v) return { ...prev, mirrorVertical: true };
                   if (h && v) return { ...prev, mirrorHorizontal: false };
                   return { ...prev, mirrorVertical: false };
-                })
-              }
+                });
+              }}
             />
           </ThemedView>
         </ThemedView>
@@ -1058,6 +1090,86 @@ export default function ModifyTileScreen() {
           />
         )}
         </View>
+        {showModifyTileSetBanner && (
+          <>
+            <Pressable
+              style={StyleSheet.absoluteFill}
+              onPress={() => setShowModifyTileSetBanner(false)}
+              accessibilityRole="button"
+              accessibilityLabel="Dismiss tile set banner"
+            />
+            <View
+              style={styles.modifyTileSetBanner}
+              pointerEvents="box-none"
+            >
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator
+                style={styles.modifyTileSetBannerScroll}
+                contentContainerStyle={styles.modifyTileSetBannerScrollContent}
+              >
+                {TILE_CATEGORIES.map((category) => {
+                  const isSelected = selectedCategories.includes(category);
+                  const firstTile =
+                    TILE_CATEGORY_THUMBNAILS[category] ?? TILE_MANIFEST[category]?.[0];
+                  return (
+                    <Pressable
+                      key={category}
+                      onPress={() => {
+                        if (isSelected && selectedCategories.length === 1) {
+                          return;
+                        }
+                        const nextCategories = isSelected
+                          ? selectedCategories.filter((entry) => entry !== category)
+                          : [...selectedCategories, category];
+                        setTileSetSelectionError(null);
+                        setSettings((prev) => ({
+                          ...prev,
+                          tileModifyCategories: nextCategories,
+                        }));
+                        if (tileSet) {
+                          updateTileSet(tileSet.id, (set) => ({
+                            ...set,
+                            categories: nextCategories,
+                            updatedAt: Date.now(),
+                          }));
+                        }
+                      }}
+                      style={styles.modifyTileSetBannerThumbWrap}
+                      accessibilityState={{ selected: isSelected }}
+                    >
+                      <View
+                        style={[
+                          styles.modifyTileSetBannerThumb,
+                          !isSelected && styles.modifyTileSetBannerThumbUnselected,
+                          isSelected && styles.modifyTileSetBannerThumbSelected,
+                        ]}
+                      >
+                        {firstTile && (
+                          <TileAsset
+                            source={firstTile.source}
+                            name={firstTile.name}
+                            style={styles.modifyTileSetBannerThumbImage}
+                            resizeMode="cover"
+                          />
+                        )}
+                      </View>
+                    </Pressable>
+                  );
+                })}
+              </ScrollView>
+              <Pressable
+                onPress={() => setShowModifyTileSetBanner(false)}
+                style={styles.modifyTileSetBannerClose}
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel="Dismiss tile set banner"
+              >
+                <MaterialCommunityIcons name="close" size={24} color="#fff" />
+              </Pressable>
+            </View>
+          </>
+        )}
       </View>
       <View style={styles.brushPanelWrap}>
         <TileBrushPanel
@@ -1080,6 +1192,7 @@ export default function ModifyTileScreen() {
               : null
           }
           onSelect={(next) => {
+            dismissModifyBanner();
             if (next.mode === 'clone') {
               clearCloneSource();
             }
@@ -1100,7 +1213,8 @@ export default function ModifyTileScreen() {
               setBrush(next);
             }
           }}
-          onRotate={(index) =>
+          onRotate={(index) => {
+            dismissModifyBanner();
             setPaletteRotations((prev) => {
               const nextRotation = ((prev[index] ?? 0) + 90) % 360;
               if (brush.mode === 'fixed' && brush.index === index) {
@@ -1118,9 +1232,10 @@ export default function ModifyTileScreen() {
                 ...prev,
                 [index]: nextRotation,
               };
-            })
-          }
+            });
+          }}
           onMirror={(index) => {
+            dismissModifyBanner();
             const rotation = paletteRotations[index] ?? 0;
             const curX = paletteMirrors[index] ?? false;
             const curY = paletteMirrorsY[index] ?? false;
@@ -1144,6 +1259,7 @@ export default function ModifyTileScreen() {
             }
           }}
           onMirrorVertical={(index) => {
+            dismissModifyBanner();
             const rotation = paletteRotations[index] ?? 0;
             const curX = paletteMirrors[index] ?? false;
             const curY = paletteMirrorsY[index] ?? false;
@@ -1169,8 +1285,14 @@ export default function ModifyTileScreen() {
           getRotation={(index) => paletteRotations[index] ?? 0}
           getMirror={(index) => paletteMirrors[index] ?? false}
           getMirrorVertical={(index) => paletteMirrorsY[index] ?? false}
-          onRandomLongPress={() => setShowTileSetChooser(true)}
-          onRandomDoubleTap={() => setShowTileSetChooser(true)}
+          onRandomLongPress={() => {
+            dismissModifyBanner();
+            setShowTileSetChooser(true);
+          }}
+          onRandomDoubleTap={() => {
+            dismissModifyBanner();
+            setShowTileSetChooser(true);
+          }}
           height={brushPanelHeight}
           itemSize={brushItemSize}
           rowGap={BRUSH_PANEL_ROW_GAP}
@@ -1324,10 +1446,69 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 4,
   },
+  navBackSquare: {
+    width: Math.round(TOOLBAR_BUTTON_SIZE * 0.75),
+    height: HEADER_HEIGHT,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   navButtonText: {
     color: '#2a2a2a',
     fontSize: 18,
     lineHeight: 20,
+  },
+  modifyTileSetBanner: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 52,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#5a5a5a',
+  },
+  modifyTileSetBannerScroll: {
+    flex: 1,
+    maxHeight: 40,
+  },
+  modifyTileSetBannerScrollContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  modifyTileSetBannerThumbWrap: {
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modifyTileSetBannerThumb: {
+    width: 40,
+    height: 40,
+    borderRadius: 4,
+    borderWidth: 1,
+    borderColor: '#1f1f1f',
+    backgroundColor: '#111',
+    overflow: 'hidden',
+  },
+  modifyTileSetBannerThumbUnselected: {
+    opacity: 0.5,
+  },
+  modifyTileSetBannerThumbSelected: {
+    borderColor: '#22c55e',
+    borderWidth: 2,
+  },
+  modifyTileSetBannerThumbImage: {
+    width: '100%',
+    height: '100%',
+  },
+  modifyTileSetBannerClose: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   gridCanvasWebCenter: {
     width: '100%',
