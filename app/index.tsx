@@ -718,7 +718,25 @@ export default function TestScreen() {
   const [showSettingsOverlay, setShowSettingsOverlay] = useState(false);
   const [showTileSetChooser, setShowTileSetChooser] = useState(false);
   const [showModifyTileSetBanner, setShowModifyTileSetBanner] = useState(false);
-  const dismissModifyBanner = useCallback(() => setShowModifyTileSetBanner(false), []);
+  const MODIFY_BANNER_HEIGHT = 52;
+  const modifyBannerTranslateY = useRef(new Animated.Value(-MODIFY_BANNER_HEIGHT)).current;
+  useEffect(() => {
+    if (showModifyTileSetBanner) {
+      modifyBannerTranslateY.setValue(-MODIFY_BANNER_HEIGHT);
+      Animated.timing(modifyBannerTranslateY, {
+        toValue: 0,
+        duration: 200,
+        useNativeDriver: true,
+      }).start();
+    }
+  }, [showModifyTileSetBanner, modifyBannerTranslateY]);
+  const dismissModifyBanner = useCallback(() => {
+    Animated.timing(modifyBannerTranslateY, {
+      toValue: -MODIFY_BANNER_HEIGHT,
+      duration: 200,
+      useNativeDriver: true,
+    }).start(() => setShowModifyTileSetBanner(false));
+  }, [modifyBannerTranslateY]);
   const [showNewFileModal, setShowNewFileModal] = useState(false);
   const [fileMenuTargetId, setFileMenuTargetId] = useState<string | null>(null);
   const importTileInputRef = useRef<HTMLInputElement | null>(null);
@@ -5314,8 +5332,14 @@ export default function TestScreen() {
               </ThemedText>
             </Pressable>
             <NavButton
-              label="Modify"
-              onPress={() => setShowModifyTileSetBanner((prev) => !prev)}
+              label="Tiles"
+              onPress={() => {
+                if (showModifyTileSetBanner) {
+                  dismissModifyBanner();
+                } else {
+                  setShowModifyTileSetBanner(true);
+                }
+              }}
             />
             <ThemedView
               style={[
@@ -6229,12 +6253,15 @@ export default function TestScreen() {
             <>
               <Pressable
                 style={StyleSheet.absoluteFill}
-                onPress={() => setShowModifyTileSetBanner(false)}
+                onPress={dismissModifyBanner}
                 accessibilityRole="button"
                 accessibilityLabel="Dismiss tile set banner"
               />
-              <View
-                style={styles.modifyTileSetBanner}
+              <Animated.View
+                style={[
+                  styles.modifyTileSetBanner,
+                  { transform: [{ translateY: modifyBannerTranslateY }] },
+                ]}
                 pointerEvents="box-none"
               >
               <ScrollView
@@ -6386,7 +6413,7 @@ export default function TestScreen() {
                 })}
               </ScrollView>
               <Pressable
-                onPress={() => setShowModifyTileSetBanner(false)}
+                onPress={dismissModifyBanner}
                 style={styles.modifyTileSetBannerClose}
                 hitSlop={8}
                 accessibilityRole="button"
@@ -6394,7 +6421,7 @@ export default function TestScreen() {
               >
                 <MaterialCommunityIcons name="close" size={24} color="#fff" />
               </Pressable>
-            </View>
+            </Animated.View>
             </>
           )}
         </View>

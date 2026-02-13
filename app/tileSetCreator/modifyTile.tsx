@@ -2,6 +2,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+    Animated,
     Platform,
     Pressable,
     ScrollView,
@@ -323,7 +324,25 @@ export default function ModifyTileScreen() {
   const { patternsByCategory } = useTilePatterns();
   const [showTileSetChooser, setShowTileSetChooser] = useState(false);
   const [showModifyTileSetBanner, setShowModifyTileSetBanner] = useState(false);
-  const dismissModifyBanner = useCallback(() => setShowModifyTileSetBanner(false), []);
+  const MODIFY_BANNER_HEIGHT = 52;
+  const modifyBannerTranslateY = useRef(new Animated.Value(-MODIFY_BANNER_HEIGHT)).current;
+  useEffect(() => {
+    if (showModifyTileSetBanner) {
+      modifyBannerTranslateY.setValue(-MODIFY_BANNER_HEIGHT);
+      Animated.timing(modifyBannerTranslateY, {
+        toValue: 0,
+        duration: 200,
+        useNativeDriver: true,
+      }).start();
+    }
+  }, [showModifyTileSetBanner, modifyBannerTranslateY]);
+  const dismissModifyBanner = useCallback(() => {
+    Animated.timing(modifyBannerTranslateY, {
+      toValue: -MODIFY_BANNER_HEIGHT,
+      duration: 200,
+      useNativeDriver: true,
+    }).start(() => setShowModifyTileSetBanner(false));
+  }, [modifyBannerTranslateY]);
   const [tileSetSelectionError, setTileSetSelectionError] = useState<string | null>(
     null
   );
@@ -773,13 +792,19 @@ export default function ModifyTileScreen() {
             </ThemedText>
           </Pressable>
           <Pressable
-            onPress={() => setShowModifyTileSetBanner((prev) => !prev)}
+            onPress={() => {
+              if (showModifyTileSetBanner) {
+                dismissModifyBanner();
+              } else {
+                setShowModifyTileSetBanner(true);
+              }
+            }}
             style={styles.navButton}
             accessibilityRole="button"
             accessibilityLabel="Toggle tile set banner"
           >
             <ThemedText type="defaultSemiBold" style={styles.navButtonText}>
-              Modify
+              Tiles
             </ThemedText>
           </Pressable>
           <ThemedView style={styles.controls}>
@@ -1094,12 +1119,15 @@ export default function ModifyTileScreen() {
           <>
             <Pressable
               style={StyleSheet.absoluteFill}
-              onPress={() => setShowModifyTileSetBanner(false)}
+              onPress={dismissModifyBanner}
               accessibilityRole="button"
               accessibilityLabel="Dismiss tile set banner"
             />
-            <View
-              style={styles.modifyTileSetBanner}
+            <Animated.View
+              style={[
+                styles.modifyTileSetBanner,
+                { transform: [{ translateY: modifyBannerTranslateY }] },
+              ]}
               pointerEvents="box-none"
             >
               <ScrollView
@@ -1159,7 +1187,7 @@ export default function ModifyTileScreen() {
                 })}
               </ScrollView>
               <Pressable
-                onPress={() => setShowModifyTileSetBanner(false)}
+                onPress={dismissModifyBanner}
                 style={styles.modifyTileSetBannerClose}
                 hitSlop={8}
                 accessibilityRole="button"
@@ -1167,7 +1195,7 @@ export default function ModifyTileScreen() {
               >
                 <MaterialCommunityIcons name="close" size={24} color="#fff" />
               </Pressable>
-            </View>
+            </Animated.View>
           </>
         )}
       </View>
