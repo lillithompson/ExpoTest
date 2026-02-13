@@ -317,7 +317,7 @@ export default function ModifyTileScreen() {
   const { replaceTileSourceNames, replaceTileSourceNamesWithError } = useTileFiles(
     TILE_CATEGORIES[0] as TileCategory
   );
-  const { tileSets, updateTileInSet, updateTileSet } = useTileSets({
+  const { tileSets, bakedSourcesBySetId, updateTileInSet, updateTileSet } = useTileSets({
     onBakedNamesReplaced: replaceTileSourceNames,
     onTileSourceNamesRemoved: replaceTileSourceNamesWithError,
   });
@@ -369,8 +369,43 @@ export default function ModifyTileScreen() {
     const categorySources = selectedCategories.flatMap(
       (category) => TILE_MANIFEST[category] ?? []
     );
-    return [...categorySources];
-  }, [selectedCategories]);
+    const entryTiles = tileEntry?.tiles ?? [];
+    const namesInTiles = new Set(
+      entryTiles.map((t: Tile) => t.name).filter((n): n is string => !!n)
+    );
+    if (namesInTiles.size === 0) {
+      return [...categorySources];
+    }
+    const nameToSource = new Map(
+      categorySources.map((s) => [s.name, s])
+    );
+    for (const name of namesInTiles) {
+      if (nameToSource.has(name)) continue;
+      if (name.includes(':')) {
+        const baked = bakedSourcesBySetId[setId] ?? [];
+        const found = baked.find((s) => s.name === name);
+        if (found) nameToSource.set(name, found);
+      } else {
+        for (const category of TILE_CATEGORIES) {
+          const list = TILE_MANIFEST[category] ?? [];
+          const found = list.find((s) => s.name === name);
+          if (found) {
+            nameToSource.set(name, found);
+            break;
+          }
+        }
+      }
+    }
+    const extraSources = Array.from(nameToSource.entries())
+      .filter(([name]) => !categorySources.some((s) => s.name === name))
+      .map(([, s]) => s);
+    return [...categorySources, ...extraSources];
+  }, [
+    selectedCategories,
+    tileEntry?.tiles,
+    bakedSourcesBySetId,
+    setId,
+  ]);
   const primaryCategory = selectedCategories[0] ?? TILE_CATEGORIES[0];
   const activePatterns = primaryCategory
     ? patternsByCategory.get(primaryCategory) ?? []

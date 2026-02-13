@@ -63,6 +63,7 @@ Tile Set Editor (tileSetCreator/editor.tsx)
 
 Tile Modify View (tileSetCreator/modifyTile.tsx)
 - Header row: Back button "<" in a square tap target (75% of toolbar button width, full header height); "Tiles" button (toggles the tile set chooser banner over the canvas); toolbar actions (Undo, Redo, Clear, Fill, Mirror cycling button). Same top-bar behavior as File Modify view: tap "<" to go back, tap "Tiles" to show/hide the compact tile set banner.
+- Enabling or disabling tile sets (categories) in the chooser does not change the tile canvas. The canvas always displays the tiles already on it. The source list passed to the grid is the union of (1) sources from the currently selected categories and (2) sources for every tile name that appears on the canvas (from the persisted tile entry), so unchecking a category no longer replaces those tiles with error tiles.
 - Modify tile set banner: Same as File Modify view—horizontal scroll of 40 px square thumbnails (built-in categories only), no names; tap to toggle selection (same data as double-tap/long-press Random chooser); X to dismiss; tap outside or any toolbar/palette action dismisses the banner.
 - Grid background and optional debug overlay.
 - Brush panel: 2–5 rows (row count increases when row height would exceed 120px); for editing the tile template.
