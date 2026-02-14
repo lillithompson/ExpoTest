@@ -33,6 +33,7 @@ import {
     type TileSource,
 } from '@/assets/images/tiles/manifest';
 import { DesktopNavTabs } from '@/components/desktop-nav-tabs';
+import { PatternThumbnail } from '@/components/pattern-thumbnail';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { clearTileAssetCache, prefetchTileAssets, TileAsset } from '@/components/tile-asset';
@@ -1807,6 +1808,48 @@ export default function TestScreen() {
       tileSources,
     ]
   );
+  /** Same thumbnail as pattern chooser so UGC tiles resolve correctly in the palette. */
+  const patternThumbnailNode = useMemo(() => {
+    if (!selectedPattern) return undefined;
+    const rotationCW = ((patternRotations[selectedPattern.id] ?? 0) + 360) % 360;
+    const rotatedWidth =
+      rotationCW % 180 === 0 ? selectedPattern.width : selectedPattern.height;
+    const rotatedHeight =
+      rotationCW % 180 === 0 ? selectedPattern.height : selectedPattern.width;
+    const tileSize = Math.max(
+      4,
+      Math.floor(brushItemSize / Math.max(1, Math.max(rotatedWidth, rotatedHeight)))
+    );
+    const patternTileSetIds =
+      selectedPattern.tileSetIds && selectedPattern.tileSetIds.length > 0
+        ? selectedPattern.tileSetIds
+        : activeFileTileSetIds;
+    return (
+      <PatternThumbnail
+        pattern={selectedPattern}
+        rotationCW={rotationCW}
+        mirrorX={patternMirrors[selectedPattern.id] ?? false}
+        tileSize={tileSize}
+        resolveTile={(t) =>
+          resolveTileAssetForFile(t, tileSources, patternTileSetIds)
+        }
+        strokeColor={activeLineColor}
+        strokeWidth={activeLineWidth}
+        strokeScaleByName={strokeScaleByName}
+      />
+    );
+  }, [
+    selectedPattern,
+    patternRotations,
+    patternMirrors,
+    brushItemSize,
+    tileSources,
+    activeFileTileSetIds,
+    resolveTileAssetForFile,
+    activeLineColor,
+    activeLineWidth,
+    strokeScaleByName,
+  ]);
   const saveTileSetIds = useMemo(
     () => (activeFileTileSetIds.length > 0 ? activeFileTileSetIds : selectedTileSetIds),
     [activeFileTileSetIds, selectedTileSetIds]
@@ -6643,6 +6686,7 @@ export default function TestScreen() {
               : null
           }
           resolvePatternTile={resolvePatternTile}
+          patternThumbnailNode={patternThumbnailNode}
           onSelect={(next) => {
             dismissModifyBanner();
             if (next.mode === 'clone') {
@@ -7031,82 +7075,24 @@ export default function TestScreen() {
                       accessibilityRole="button"
                       accessibilityLabel={`Pattern ${pattern.name}`}
                     >
-                      <View
-                        style={{
-                          width: rotatedWidth * tileSize,
-                          height: rotatedHeight * tileSize,
-                          flexDirection: 'column',
-                        }}
-                      >
-                        {Array.from({ length: rotatedHeight }, (_, rowIndex) => (
-                          <View
-                            key={`pattern-row-${pattern.id}-${rowIndex}`}
-                            style={{ flexDirection: 'row' }}
-                          >
-                          {Array.from({ length: rotatedWidth }, (_, colIndex) => {
-                            let mappedRow = rowIndex;
-                            let mappedCol = colIndex;
-                            if (mirrorX) {
-                              mappedCol = rotatedWidth - 1 - mappedCol;
-                            }
-                            let sourceRow = mappedRow;
-                            let sourceCol = mappedCol;
-                              if (rotationCCW === 90) {
-                                sourceRow = mappedCol;
-                                sourceCol = pattern.width - 1 - mappedRow;
-                              } else if (rotationCCW === 180) {
-                                sourceRow = pattern.height - 1 - mappedRow;
-                                sourceCol = pattern.width - 1 - mappedCol;
-                              } else if (rotationCCW === 270) {
-                                sourceRow = pattern.height - 1 - mappedCol;
-                                sourceCol = mappedRow;
-                              }
-                            const index = sourceRow * pattern.width + sourceCol;
-                            const tile = pattern.tiles[index];
-                            const patternTileSetIds =
-                              pattern.tileSetIds && pattern.tileSetIds.length > 0
-                                ? pattern.tileSetIds
-                                : activeFileTileSetIds;
-                            const resolved = resolveTileAssetForFile(
-                              tile,
-                              tileSources,
-                              patternTileSetIds
-                            );
-                            const tileName = resolved.name;
-                            const source = resolved.source;
-                              return (
-                                <View
-                                  key={`pattern-cell-${pattern.id}-${index}`}
-                                  style={{
-                                    width: tileSize,
-                                    height: tileSize,
-                                    backgroundColor: 'transparent',
-                                  }}
-                                >
-                                  {source && tile && (
-                                    <TileAsset
-                                      source={source}
-                                      name={tileName}
-                                      strokeColor={activeLineColor}
-                                      strokeWidth={activeLineWidth}
-                                      style={{
-                                        width: '100%',
-                                        height: '100%',
-                                        transform: [
-                                          { scaleX: tile.mirrorX !== mirrorX ? -1 : 1 },
-                                          { scaleY: tile.mirrorY ? -1 : 1 },
-                                          { rotate: `${(tile.rotation + rotationCW) % 360}deg` },
-                                        ],
-                                      }}
-                                      resizeMode="cover"
-                                    />
-                                  )}
-                                </View>
-                              );
-                            })}
-                          </View>
-                        ))}
-                      </View>
+                      <PatternThumbnail
+                        pattern={pattern}
+                        rotationCW={rotationCW}
+                        mirrorX={mirrorX}
+                        tileSize={tileSize}
+                        resolveTile={(t) =>
+                          resolveTileAssetForFile(
+                            t,
+                            tileSources,
+                            pattern.tileSetIds && pattern.tileSetIds.length > 0
+                              ? pattern.tileSetIds
+                              : activeFileTileSetIds
+                          )
+                        }
+                        strokeColor={activeLineColor}
+                        strokeWidth={activeLineWidth}
+                        strokeScaleByName={strokeScaleByName}
+                      />
                     </Pressable>
                   );
                 })}
