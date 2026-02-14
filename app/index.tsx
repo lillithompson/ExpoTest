@@ -3182,7 +3182,7 @@ export default function TestScreen() {
     };
   }, [patternSelection, gridLayout.columns, gridLayout.tileSize, gridLayout.rows]);
   const canvasSelectionRect = useMemo(() => {
-    if (!canvasSelection || gridLayout.columns === 0) {
+    if (!canvasSelection || gridLayout.columns === 0 || zoomRegion) {
       return null;
     }
     const { minRow, maxRow, minCol, maxCol } = getSelectionBounds(
@@ -3200,7 +3200,7 @@ export default function TestScreen() {
       width,
       height,
     };
-  }, [canvasSelection, gridLayout.columns, gridLayout.tileSize, gridLayout.rows]);
+  }, [canvasSelection, gridLayout.columns, gridLayout.tileSize, gridLayout.rows, zoomRegion]);
   const lockedCellIndicesSet = useMemo(() => {
     const cells = activeFile?.lockedCells ?? [];
     if (cells.length === 0) {
@@ -5560,8 +5560,6 @@ export default function TestScreen() {
                           canvasSelection.end
                         );
                         setZoomRegion({ minRow, maxRow, minCol, maxCol });
-                        setCanvasSelection(null);
-                        setIsSelectionMode(false);
                       }}
                     />
                   );
