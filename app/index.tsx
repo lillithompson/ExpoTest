@@ -51,10 +51,10 @@ import { useTileSets } from '@/hooks/use-tile-sets';
 import { clearAllLocalData } from '@/utils/clear-local-data';
 import { downloadUgcTileFile } from '@/utils/download-ugc-tile';
 import {
-  loadSampleFileContents,
-  loadSamplePatternContents,
-  loadSampleTileSetContents,
-  shouldLoadSamplesThisSession,
+    loadSampleFileContents,
+    loadSamplePatternContents,
+    loadSampleTileSetContents,
+    shouldLoadSamplesThisSession,
 } from '@/utils/load-sample-assets';
 import {
     canApplyEmptyNewFileRestore,
@@ -65,10 +65,6 @@ import {
     getLockedBoundaryEdges,
 } from '@/utils/locked-regions';
 import {
-    getSetIdAndLegacyFromQualifiedName,
-    parseBakedName,
-} from '@/utils/tile-baked-name';
-import {
     buildPreviewPath,
     getFilePreviewUri,
     hasCachedThumbnail,
@@ -76,6 +72,10 @@ import {
     isOwnPreviewUri,
     showPreview as showPreviewState,
 } from '@/utils/preview-state';
+import {
+    getSetIdAndLegacyFromQualifiedName,
+    parseBakedName,
+} from '@/utils/tile-baked-name';
 import {
     deserializeBundle,
     fileUsesUgc,
@@ -810,7 +810,10 @@ export default function TestScreen() {
   }, [viewMode, setHideTabBarOverModify]);
   const prevViewModeRef = useRef<'modify' | 'file'>(viewMode);
   useEffect(() => {
-    if (viewMode === 'modify' && prevViewModeRef.current === 'file') {
+    // Clear zoom when opening a file (enter modify) or closing a file (enter file list).
+    if (viewMode === 'file') {
+      setZoomRegion(null);
+    } else if (viewMode === 'modify' && prevViewModeRef.current === 'file') {
       setZoomRegion(null);
     }
     prevViewModeRef.current = viewMode;
@@ -3514,6 +3517,7 @@ export default function TestScreen() {
     if (!file) {
       return;
     }
+    setZoomRegion(null);
     setLoadRequestId((prev) => prev + 1);
     setLoadPreviewUri(getFilePreviewUri(file));
     setSuspendTiles(true);
@@ -3537,6 +3541,7 @@ export default function TestScreen() {
           oldToNewSetId
         );
         createFileFromTileData(remapped);
+        setZoomRegion(null);
         setLoadRequestId((prev) => prev + 1);
         setLoadPreviewUri(null);
         setSuspendTiles(true);
@@ -3556,6 +3561,7 @@ export default function TestScreen() {
         return;
       }
       const newId = createFileFromTileData(result.payload);
+      setZoomRegion(null);
       setLoadRequestId((prev) => prev + 1);
       setLoadPreviewUri(null);
       setSuspendTiles(true);
@@ -5220,6 +5226,7 @@ export default function TestScreen() {
                         sourceNames: initialSources,
                       });
                       setFileSourceNames(initialSources);
+                      setZoomRegion(null);
                       setLoadRequestId((prev) => prev + 1);
                       setLoadPreviewUri(null);
                       setSuspendTiles(true);
@@ -5405,6 +5412,7 @@ export default function TestScreen() {
             <Pressable
               onPress={() => {
                 persistActiveFileNow();
+                setZoomRegion(null);
                 setViewMode('file');
               }}
               style={styles.navBackSquare}
