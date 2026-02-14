@@ -449,7 +449,10 @@ export const useTileSets = (options?: {
           return next;
         });
         if (nameReplacements.length > 0) {
-          onBakedNamesReplacedRef.current?.(nameReplacements);
+          const result = onBakedNamesReplacedRef.current?.(nameReplacements);
+          if (result != null && typeof (result as Promise<unknown>).then === 'function') {
+            await (result as Promise<void>);
+          }
         }
       }
     };

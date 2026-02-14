@@ -65,6 +65,10 @@ import {
     getLockedBoundaryEdges,
 } from '@/utils/locked-regions';
 import {
+    getSetIdAndLegacyFromQualifiedName,
+    parseBakedName,
+} from '@/utils/tile-baked-name';
+import {
     buildPreviewPath,
     getFilePreviewUri,
     hasCachedThumbnail,
@@ -988,6 +992,24 @@ export default function TestScreen() {
     });
     return map;
   }, [bakedSourcesBySetId]);
+  /** Resolve UGC names that no longer exist (e.g. old baked name) by setId + tileId so files load after tile edits. */
+  const bakedBySetIdAndTileId = useMemo(() => {
+    const outer = new Map<string, Map<string, TileSource>>();
+    Object.entries(bakedSourcesBySetId).forEach(([setId, sources]) => {
+      const inner = new Map<string, TileSource>();
+      sources.forEach((source) => {
+        if (!source?.name) return;
+        const parsed = parseBakedName(source.name);
+        if (parsed) {
+          inner.set(parsed.tileId, source);
+        }
+      });
+      if (inner.size > 0) {
+        outer.set(setId, inner);
+      }
+    });
+    return outer;
+  }, [bakedSourcesBySetId]);
   const bakedLegacyLookup = useMemo(() => {
     const map = new Map<string, Map<string, TileSource>>();
     Object.entries(bakedSourcesBySetId).forEach(([setId, sources]) => {
@@ -1034,9 +1056,23 @@ export default function TestScreen() {
       if (direct) {
         return normalizeUserTileSource(direct, name);
       }
+      // Resolve legacy UGC names (old baked timestamp) to current baked source by setId + tileId
+      if (name.includes(':')) {
+        const parsed = getSetIdAndLegacyFromQualifiedName(name);
+        if (parsed) {
+          const { setId, legacy } = parsed;
+          const tileIdFromLegacy = parseBakedName(legacy)?.tileId;
+          if (tileIdFromLegacy) {
+            const currentSource = bakedBySetIdAndTileId.get(setId)?.get(tileIdFromLegacy);
+            if (currentSource) {
+              return normalizeUserTileSource(currentSource, currentSource.name);
+            }
+          }
+        }
+      }
       return normalizeUserTileSource(null, name);
     },
-    [allSourceLookup, bakedLegacyLookup]
+    [allSourceLookup, bakedLegacyLookup, bakedBySetIdAndTileId]
   );
   const normalizeSourceNames = useCallback(
     (names: string[], tileSetIds: string[]) => {

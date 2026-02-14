@@ -546,14 +546,17 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
   /**
    * Replaces tile source names across all files (e.g. when a user tile is modified
    * and the baked filename changes). Updates both tile.name and file.sourceNames
-   * so that existing designs keep pointing at the new asset.
+   * so that existing designs keep pointing at the new asset. Returns a Promise that
+   * resolves after files are persisted, so callers can await to avoid races (e.g.
+   * app close before persist completes leaving files with stale names on reopen).
    */
   const replaceTileSourceNames = useCallback(
-    (replacements: Array<{ oldName: string; newName: string }>) => {
+    async (replacements: Array<{ oldName: string; newName: string }>) => {
       if (replacements.length === 0) {
         return;
       }
       const oldToNew = new Map(replacements.map((r) => [r.oldName, r.newName]));
+      let nextToPersist: TileFile[] | null = null;
       setFiles((prev) => {
         let anyChanged = false;
         const next = prev.map((file) => {
@@ -586,10 +589,13 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
           };
         });
         if (anyChanged) {
-          void persistFiles(next, activeFileId);
+          nextToPersist = next;
         }
         return next;
       });
+      if (nextToPersist !== null) {
+        await persistFiles(nextToPersist, activeFileId);
+      }
     },
     [activeFileId, persistFiles]
   );
