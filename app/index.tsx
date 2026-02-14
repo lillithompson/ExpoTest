@@ -808,6 +808,13 @@ export default function TestScreen() {
     setHideTabBarOverModify(viewMode === 'modify');
     return () => setHideTabBarOverModify(false);
   }, [viewMode, setHideTabBarOverModify]);
+  const prevViewModeRef = useRef<'modify' | 'file'>(viewMode);
+  useEffect(() => {
+    if (viewMode === 'modify' && prevViewModeRef.current === 'file') {
+      setZoomRegion(null);
+    }
+    prevViewModeRef.current = viewMode;
+  }, [viewMode]);
   useEffect(() => {
     setHideTabBarOverOverlay(showSettingsOverlay);
     return () => setHideTabBarOverOverlay(false);
@@ -830,6 +837,12 @@ export default function TestScreen() {
   const [canvasSelection, setCanvasSelection] = useState<{
     start: number;
     end: number;
+  } | null>(null);
+  const [zoomRegion, setZoomRegion] = useState<{
+    minRow: number;
+    maxRow: number;
+    minCol: number;
+    maxCol: number;
   } | null>(null);
   const [patternAnchorIndex, setPatternAnchorIndex] = useState<number | null>(null);
   const [showPatternSaveModal, setShowPatternSaveModal] = useState(false);
@@ -1387,6 +1400,8 @@ export default function TestScreen() {
     cloneAnchorIndex,
     cloneCursorIndex,
     clearDrawStroke,
+    fullGridColumnsForZoom,
+    fullGridRowsForZoom,
   } = useTileGrid({
     tileSources,
     availableWidth,
@@ -1412,12 +1427,33 @@ export default function TestScreen() {
       : null,
     patternAnchorKey: selectedPattern?.id ?? null,
     getFixedBrushSourceName: () => fixedBrushSourceNameRef.current,
-    canvasSelection: viewMode === 'modify' ? canvasSelection : null,
+    canvasSelection: viewMode === 'modify' && !zoomRegion ? canvasSelection : null,
     lockedCells:
       viewMode === 'modify' ? (activeFile?.lockedCells ?? null) : null,
     isPartOfDragRef: viewMode === 'modify' ? isPartOfDragRef : undefined,
+    zoomRegion: viewMode === 'modify' ? zoomRegion : null,
+    fullGridColumns: viewMode === 'modify' && zoomRegion ? (activeFile?.grid.columns ?? undefined) : undefined,
+    fullGridRows: viewMode === 'modify' && zoomRegion ? (activeFile?.grid.rows ?? undefined) : undefined,
   });
+  const fullGridColumnsForMapping =
+    zoomRegion && fullGridColumnsForZoom != null
+      ? fullGridColumnsForZoom
+      : (activeFile?.grid.columns ?? 0);
+  const getFullIndexForCanvas = useCallback(
+    (visibleIndex: number) => {
+      if (!zoomRegion || fullGridColumnsForMapping <= 0) return visibleIndex;
+      const { minRow, minCol, maxCol } = zoomRegion;
+      const zoomCols = maxCol - minCol + 1;
+      const visibleRow = Math.floor(visibleIndex / zoomCols);
+      const visibleCol = visibleIndex % zoomCols;
+      return (minRow + visibleRow) * fullGridColumnsForMapping + (minCol + visibleCol);
+    },
+    [zoomRegion, fullGridColumnsForMapping]
+  );
   const showLockButton = viewMode === 'modify' && !!(canvasSelection && gridLayout.columns > 0);
+  const showZoomButton =
+    viewMode === 'modify' &&
+    ((!!(canvasSelection && gridLayout.columns > 0) && !zoomRegion) || !!zoomRegion);
 
   /** Ephemeral "Undoing" / "Redoing" banner over the tile canvas. */
   const [undoRedoBanner, setUndoRedoBanner] = useState<'undoing' | 'redoing' | null>(null);
@@ -1463,8 +1499,8 @@ export default function TestScreen() {
       tiles
         .map(
           (tile) =>
-            `${tile.imageIndex}:${tile.rotation}:${tile.mirrorX ? 1 : 0}:${
-              tile.mirrorY ? 1 : 0
+            `${tile?.imageIndex ?? -1}:${tile?.rotation ?? 0}:${tile?.mirrorX ? 1 : 0}:${
+              tile?.mirrorY ? 1 : 0
             }`
         )
         .join('|'),
@@ -2380,6 +2416,7 @@ export default function TestScreen() {
     clearCloneSource();
     setIsSelectionMode(false);
     setCanvasSelection(null);
+    setZoomRegion(null);
     updateActiveFileLockedCells([]);
     if (brush.mode === 'clone' || brush.mode === 'pattern') {
       setBrush({ mode: 'random' });
@@ -2548,6 +2585,9 @@ export default function TestScreen() {
   ]);
 
   useEffect(() => {
+    if (zoomRegion) {
+      return;
+    }
     const pending = pendingRestoreRef.current;
     if (!pending || activeFileId !== pending.fileId) {
       return;
@@ -2615,6 +2655,7 @@ export default function TestScreen() {
     setHydrating,
     loadToken,
     activeFileSourceNames,
+    zoomRegion,
   ]);
 
   useEffect(() => {
@@ -2622,6 +2663,9 @@ export default function TestScreen() {
       return;
     }
     if (!isReadyLatched) {
+      return;
+    }
+    if (zoomRegion) {
       return;
     }
     const pending = pendingRestoreRef.current;
@@ -2639,6 +2683,7 @@ export default function TestScreen() {
     }
     saveTimeoutRef.current = setTimeout(() => {
       void (async () => {
+        if (zoomRegion) return;
         const thumbnailUri =
           Platform.OS === 'web'
             ? await renderTileCanvasToDataUrl({
@@ -2688,7 +2733,8 @@ export default function TestScreen() {
             suppressAutosaveRef.current ||
             isHydratingFile ||
             viewMode !== 'modify' ||
-            isInteractingRef.current
+            isInteractingRef.current ||
+            zoomRegion
           ) {
             return;
           }
@@ -2741,6 +2787,7 @@ export default function TestScreen() {
             isHydratingFile ||
             viewMode !== 'modify' ||
             isInteractingRef.current ||
+            zoomRegion ||
             !gridVisible ||
             isCapturingPreview
           ) {
@@ -2877,6 +2924,7 @@ export default function TestScreen() {
     isInteracting,
     saveTileSetIds,
     strokeScaleByName,
+    zoomRegion,
   ]);
 
   useEffect(() => {
@@ -5386,7 +5434,7 @@ export default function TestScreen() {
               ]}
             >
             {showLockButton && (() => {
-              const selectionIndices =
+              const rawSelectionIndices =
                 canvasSelection && gridLayout.columns > 0
                   ? getCellIndicesInRegion(
                       canvasSelection.start,
@@ -5394,6 +5442,9 @@ export default function TestScreen() {
                       gridLayout.columns
                     )
                   : [];
+              const selectionIndices = zoomRegion
+                ? rawSelectionIndices.map(getFullIndexForCanvas)
+                : rawSelectionIndices;
               const allSelectedLocked =
                 selectionIndices.length > 0 &&
                 (lockedCellIndicesSet
@@ -5410,11 +5461,13 @@ export default function TestScreen() {
                     if (!canvasSelection || gridLayout.columns === 0) {
                       return;
                     }
-                    const indices = getCellIndicesInRegion(
-                      canvasSelection.start,
-                      canvasSelection.end,
-                      gridLayout.columns
-                    );
+                    const indices = zoomRegion
+                      ? rawSelectionIndices.map(getFullIndexForCanvas)
+                      : getCellIndicesInRegion(
+                          canvasSelection.start,
+                          canvasSelection.end,
+                          gridLayout.columns
+                        );
                     if (lockedCellIndicesSet && indices.every((i) => lockedCellIndicesSet.has(i))) {
                       const next = (activeFile?.lockedCells ?? []).filter(
                         (i) => !indices.includes(i)
@@ -5424,6 +5477,39 @@ export default function TestScreen() {
                       const next = [...new Set([...(activeFile?.lockedCells ?? []), ...indices])];
                       updateActiveFileLockedCells(next);
                     }
+                  }}
+                />
+              );
+            })()}
+            {showZoomButton && (() => {
+              if (zoomRegion) {
+                return (
+                  <ToolbarButton
+                    label="Zoom out"
+                    icon="magnify-minus-outline"
+                    active
+                    onPress={() => {
+                      dismissModifyBanner();
+                      setZoomRegion(null);
+                    }}
+                  />
+                );
+              }
+              if (!canvasSelection || gridLayout.columns === 0) return null;
+              return (
+                <ToolbarButton
+                  label="Zoom to selection"
+                  icon="magnify-plus-outline"
+                  onPress={() => {
+                    dismissModifyBanner();
+                    if (!canvasSelection || gridLayout.columns === 0) return;
+                    const { minRow, maxRow, minCol, maxCol } = getSelectionBounds(
+                      canvasSelection.start,
+                      canvasSelection.end
+                    );
+                    setZoomRegion({ minRow, maxRow, minCol, maxCol });
+                    setCanvasSelection(null);
+                    setIsSelectionMode(false);
                   }}
                 />
               );
@@ -5568,6 +5654,7 @@ export default function TestScreen() {
           ]}
         >
           <View
+            key={zoomRegion ? `zoomed-${gridLayout.rows}-${gridLayout.columns}` : `full-${gridLayout.rows}-${gridLayout.columns}`}
             style={[
               styles.gridWrapper,
               {
@@ -5704,7 +5791,7 @@ export default function TestScreen() {
                     setPatternSelection({ start: cellIndex, end: cellIndex });
                     return;
                   }
-                  if (lockedCellIndicesSet?.has(cellIndex)) {
+                  if (lockedCellIndicesSet?.has(getFullIndexForCanvas(cellIndex))) {
                     setIsSelectionMode(true);
                     setCanvasSelection({ start: cellIndex, end: cellIndex });
                     return;
@@ -5821,7 +5908,7 @@ export default function TestScreen() {
                   if (point) {
                     const cellIndex = getCellIndexForPoint(point.x, point.y);
                     if (cellIndex !== null && !isSelectionMode && !isPatternCreationMode && !(brush.mode === 'clone' && cloneSourceIndex === null)) {
-                      if (lockedCellIndicesSet?.has(cellIndex)) {
+                      if (lockedCellIndicesSet?.has(getFullIndexForCanvas(cellIndex))) {
                         multiFingerTouchCountRef.current = 0;
                         setIsSelectionMode(true);
                         setCanvasSelection({ start: cellIndex, end: cellIndex });
@@ -5863,7 +5950,7 @@ export default function TestScreen() {
                     setPatternSelection({ start: cellIndex, end: cellIndex });
                     return;
                   }
-                  if (lockedCellIndicesSet?.has(cellIndex)) {
+                  if (lockedCellIndicesSet?.has(getFullIndexForCanvas(cellIndex))) {
                     setIsSelectionMode(true);
                     setCanvasSelection({ start: cellIndex, end: cellIndex });
                     return;
@@ -6036,7 +6123,7 @@ export default function TestScreen() {
                         isCloneCursor={
                           brush.mode === 'clone' && cloneCursorIndex === cellIndex
                         }
-                        isLocked={lockedCellIndicesSet?.has(cellIndex)}
+                        isLocked={lockedCellIndicesSet?.has(getFullIndexForCanvas(cellIndex))}
                       />
                     );
                   })}
@@ -6117,7 +6204,7 @@ export default function TestScreen() {
                           isCloneCursor={
                             brush.mode === 'clone' && cloneCursorIndex === cellIndex
                           }
-                          isLocked={lockedCellIndicesSet?.has(cellIndex)}
+                          isLocked={lockedCellIndicesSet?.has(getFullIndexForCanvas(cellIndex))}
                         />
                       );
                     })}
