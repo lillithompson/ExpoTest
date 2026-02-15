@@ -103,6 +103,8 @@ type Result = {
   fullGridRowsForZoom?: number;
   /** Move a region: copy tiles from fromIndices to toIndices, clear fromIndices. Same length; respects locked cells. One undo step. */
   moveRegion: (fromIndices: number[], toIndices: number[]) => void;
+  /** Rotate the rectangular region 90° clockwise. Bounds in full-grid row/col. One undo step. */
+  rotateRegion: (minRow: number, maxRow: number, minCol: number, maxCol: number, gridColumns: number) => void;
 };
 
 const toConnectionKey = (connections: boolean[] | null) =>
@@ -2564,6 +2566,76 @@ export const useTileGrid = ({
     ]
   );
 
+  const rotateRegion = useCallback(
+    (minRow: number, maxRow: number, minCol: number, maxCol: number, gridColumns: number) => {
+      const gridRows = fullGridLayout.rows;
+      const height = maxRow - minRow + 1;
+      const width = maxCol - minCol + 1;
+      if (height <= 0 || width <= 0 || gridColumns <= 0 || gridRows <= 0) return;
+      const centerRow = (minRow + maxRow) / 2;
+      const centerCol = (minCol + maxCol) / 2;
+      const newHeight = width;
+      const newWidth = height;
+      let newMinRow = Math.round(centerRow - (newHeight - 1) / 2);
+      let newMaxRow = newMinRow + newHeight - 1;
+      let newMinCol = Math.round(centerCol - (newWidth - 1) / 2);
+      let newMaxCol = newMinCol + newWidth - 1;
+      newMinRow = Math.max(0, Math.min(newMinRow, gridRows - 1));
+      newMaxRow = Math.max(0, Math.min(newMaxRow, gridRows - 1));
+      newMinCol = Math.max(0, Math.min(newMinCol, gridColumns - 1));
+      newMaxCol = Math.max(0, Math.min(newMaxCol, gridColumns - 1));
+      if (newMinRow > newMaxRow || newMinCol > newMaxCol) return;
+      const fromIndices: number[] = [];
+      const toIndices: number[] = [];
+      for (let r = 0; r < height; r += 1) {
+        for (let c = 0; c < width; c += 1) {
+          fromIndices.push((minRow + r) * gridColumns + (minCol + c));
+          const newR = c;
+          const newC = height - 1 - r;
+          toIndices.push((newMinRow + newR) * gridColumns + (newMinCol + newC));
+        }
+      }
+      pushUndo();
+      const empty = {
+        imageIndex: -1,
+        rotation: 0,
+        mirrorX: false,
+        mirrorY: false,
+      };
+      withBulkUpdate(() => {
+        setTiles((prev) => {
+          const current = normalizeTiles(prev, internalTotalCells, tileSourcesLength);
+          const tilesToPlace = fromIndices.map((i) => current[i] ?? empty);
+          const next = [...current];
+          fromIndices.forEach((index) => {
+            if (!lockedCellIndices?.has(index)) {
+              next[index] = { ...empty };
+            }
+          });
+          toIndices.forEach((index, idx) => {
+            if (!lockedCellIndices?.has(index) && index >= 0 && index < next.length) {
+              const tile = tilesToPlace[idx];
+              next[index] = {
+                ...tile,
+                rotation: (tile.rotation + 90) % 360,
+                mirrorX: tile.mirrorY,
+                mirrorY: tile.mirrorX,
+              };
+            }
+          });
+          return next;
+        });
+      });
+    },
+    [
+      internalTotalCells,
+      tileSourcesLength,
+      lockedCellIndices,
+      pushUndo,
+      fullGridLayout.rows,
+    ]
+  );
+
   const setCloneSource = useCallback((cellIndex: number) => {
     const full = isZoomed ? visibleToFull(cellIndex) : cellIndex;
     cloneSourceRef.current = full;
@@ -2616,5 +2688,6 @@ export const useTileGrid = ({
     fullGridColumnsForZoom: isZoomed ? fullGridLayout.columns : undefined,
     fullGridRowsForZoom: isZoomed ? fullGridLayout.rows : undefined,
     moveRegion,
+    rotateRegion,
   };
 };

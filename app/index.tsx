@@ -1415,6 +1415,7 @@ export default function TestScreen() {
     fullGridColumnsForZoom,
     fullGridRowsForZoom,
     moveRegion,
+    rotateRegion,
   } = useTileGrid({
     tileSources,
     availableWidth,
@@ -5764,8 +5765,28 @@ export default function TestScreen() {
                     icon="rotate-right"
                     onPress={() => {
                       dismissModifyBanner();
-                      if (!canvasSelection || gridLayout.columns === 0) return;
-                      // TODO: rotate selected region 90° CW
+                      if (!canvasSelection || fullGridColumnsForMapping === 0 || !selectionBoundsFullGrid) return;
+                      const { minRow, maxRow, minCol, maxCol } = selectionBoundsFullGrid;
+                      const height = maxRow - minRow + 1;
+                      const width = maxCol - minCol + 1;
+                      const centerRow = (minRow + maxRow) / 2;
+                      const centerCol = (minCol + maxCol) / 2;
+                      const newHeight = width;
+                      const newWidth = height;
+                      let newMinRow = Math.round(centerRow - (newHeight - 1) / 2);
+                      let newMaxRow = newMinRow + newHeight - 1;
+                      let newMinCol = Math.round(centerCol - (newWidth - 1) / 2);
+                      let newMaxCol = newMinCol + newWidth - 1;
+                      const cols = fullGridColumnsForMapping;
+                      const rows = fullGridRows;
+                      newMinRow = Math.max(0, Math.min(newMinRow, rows - 1));
+                      newMaxRow = Math.max(0, Math.min(newMaxRow, rows - 1));
+                      newMinCol = Math.max(0, Math.min(newMinCol, cols - 1));
+                      newMaxCol = Math.max(0, Math.min(newMaxCol, cols - 1));
+                      rotateRegion(minRow, maxRow, minCol, maxCol, cols);
+                      const newStart = newMinRow * cols + newMinCol;
+                      const newEnd = newMaxRow * cols + newMaxCol;
+                      setCanvasSelection({ start: newStart, end: newEnd });
                     }}
                   />
                   </View>
