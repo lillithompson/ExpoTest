@@ -101,6 +101,8 @@ type Result = {
   /** When zoomed, the effective full grid dimensions (may be capped). Use for visible↔full index mapping in the app. */
   fullGridColumnsForZoom?: number;
   fullGridRowsForZoom?: number;
+  /** Move a region: copy tiles from fromIndices to toIndices, clear fromIndices. Same length; respects locked cells. One undo step. */
+  moveRegion: (fromIndices: number[], toIndices: number[]) => void;
 };
 
 const toConnectionKey = (connections: boolean[] | null) =>
@@ -2523,6 +2525,45 @@ export const useTileGrid = ({
     [applyTilesInternal]
   );
 
+  const moveRegion = useCallback(
+    (fromIndices: number[], toIndices: number[]) => {
+      if (fromIndices.length !== toIndices.length || fromIndices.length === 0) {
+        return;
+      }
+      pushUndo();
+      const empty = {
+        imageIndex: -1,
+        rotation: 0,
+        mirrorX: false,
+        mirrorY: false,
+      };
+      withBulkUpdate(() => {
+        setTiles((prev) => {
+          const current = normalizeTiles(prev, internalTotalCells, tileSourcesLength);
+          const tilesToPlace = fromIndices.map((i) => current[i] ?? empty);
+          const next = [...current];
+          fromIndices.forEach((index) => {
+            if (!lockedCellIndices?.has(index)) {
+              next[index] = { ...empty };
+            }
+          });
+          toIndices.forEach((index, idx) => {
+            if (!lockedCellIndices?.has(index) && index >= 0 && index < next.length) {
+              next[index] = { ...tilesToPlace[idx] };
+            }
+          });
+          return next;
+        });
+      });
+    },
+    [
+      internalTotalCells,
+      tileSourcesLength,
+      lockedCellIndices,
+      pushUndo,
+    ]
+  );
+
   const setCloneSource = useCallback((cellIndex: number) => {
     const full = isZoomed ? visibleToFull(cellIndex) : cellIndex;
     cloneSourceRef.current = full;
@@ -2574,5 +2615,6 @@ export const useTileGrid = ({
     clearDrawStroke,
     fullGridColumnsForZoom: isZoomed ? fullGridLayout.columns : undefined,
     fullGridRowsForZoom: isZoomed ? fullGridLayout.rows : undefined,
+    moveRegion,
   };
 };

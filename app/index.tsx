@@ -848,6 +848,11 @@ export default function TestScreen() {
     minCol: number;
     maxCol: number;
   } | null>(null);
+  const [isMoveMode, setIsMoveMode] = useState(false);
+  const [moveDragOffset, setMoveDragOffset] = useState<{ dRow: number; dCol: number } | null>(null);
+  const [showMoveConfirmDialog, setShowMoveConfirmDialog] = useState(false);
+  const [pendingMoveOffset, setPendingMoveOffset] = useState<{ dRow: number; dCol: number } | null>(null);
+  const moveDragStartRef = useRef<{ x: number; y: number } | null>(null);
   const [patternAnchorIndex, setPatternAnchorIndex] = useState<number | null>(null);
   const [showPatternSaveModal, setShowPatternSaveModal] = useState(false);
   const [showPatternChooser, setShowPatternChooser] = useState(false);
@@ -1409,6 +1414,7 @@ export default function TestScreen() {
     clearDrawStroke,
     fullGridColumnsForZoom,
     fullGridRowsForZoom,
+    moveRegion,
   } = useTileGrid({
     tileSources,
     availableWidth,
@@ -3276,6 +3282,63 @@ export default function TestScreen() {
       height,
     };
   }, [canvasSelection, gridLayout.columns, gridLayout.rows, gridLayout.tileSize, zoomRegion, fullGridColumnsForMapping]);
+
+  const selectionBoundsFullGrid = useMemo(() => {
+    if (!canvasSelection || fullGridColumnsForMapping <= 0) return null;
+    const cols = fullGridColumnsForMapping;
+    const startRow = Math.floor(canvasSelection.start / cols);
+    const startCol = canvasSelection.start % cols;
+    const endRow = Math.floor(canvasSelection.end / cols);
+    const endCol = canvasSelection.end % cols;
+    return {
+      minRow: Math.min(startRow, endRow),
+      maxRow: Math.max(startRow, endRow),
+      minCol: Math.min(startCol, endCol),
+      maxCol: Math.max(startCol, endCol),
+    };
+  }, [canvasSelection, fullGridColumnsForMapping]);
+
+  const fullGridRows = activeFile?.grid.rows ?? 0;
+
+  const movePreviewRect = useMemo(() => {
+    if (!isMoveMode || !canvasSelection || !moveDragOffset || !selectionBoundsFullGrid || gridLayout.columns === 0) {
+      return null;
+    }
+    const { minRow: fullMinRow, maxRow: fullMaxRow, minCol: fullMinCol, maxCol: fullMaxCol } = selectionBoundsFullGrid;
+    const tileStride = gridLayout.tileSize + GRID_GAP;
+    const { dRow, dCol } = moveDragOffset;
+    let visMinRow: number;
+    let visMaxRow: number;
+    let visMinCol: number;
+    let visMaxCol: number;
+    if (zoomRegion) {
+      visMinRow = fullMinRow + dRow - zoomRegion.minRow;
+      visMaxRow = fullMaxRow + dRow - zoomRegion.minRow;
+      visMinCol = fullMinCol + dCol - zoomRegion.minCol;
+      visMaxCol = fullMaxCol + dCol - zoomRegion.minCol;
+    } else {
+      visMinRow = fullMinRow + dRow;
+      visMaxRow = fullMaxRow + dRow;
+      visMinCol = fullMinCol + dCol;
+      visMaxCol = fullMaxCol + dCol;
+    }
+    if (visMinRow > gridLayout.rows - 1 || visMaxRow < 0 || visMinCol > gridLayout.columns - 1 || visMaxCol < 0) {
+      return null;
+    }
+    const clampMinR = Math.max(0, visMinRow);
+    const clampMaxR = Math.min(gridLayout.rows - 1, visMaxRow);
+    const clampMinC = Math.max(0, visMinCol);
+    const clampMaxC = Math.min(gridLayout.columns - 1, visMaxCol);
+    const width = (clampMaxC - clampMinC + 1) * tileStride - (GRID_GAP > 0 ? GRID_GAP : 0);
+    const height = (clampMaxR - clampMinR + 1) * tileStride - (GRID_GAP > 0 ? GRID_GAP : 0);
+    return {
+      left: clampMinC * tileStride,
+      top: clampMinR * tileStride,
+      width,
+      height,
+    };
+  }, [isMoveMode, canvasSelection, moveDragOffset, selectionBoundsFullGrid, gridLayout, zoomRegion]);
+
   const lockedCellIndicesSet = useMemo(() => {
     const cells = activeFile?.lockedCells ?? [];
     if (cells.length === 0) {
@@ -5587,6 +5650,10 @@ export default function TestScreen() {
                   dismissModifyBanner();
                   setIsSelectionMode((prev) => !prev);
                   setCanvasSelection(null);
+                  setIsMoveMode(false);
+                  setShowMoveConfirmDialog(false);
+                  setPendingMoveOffset(null);
+                  setMoveDragOffset(null);
                 }}
               />
               {regionToolsVisible && (
@@ -5682,10 +5749,14 @@ export default function TestScreen() {
                   <ToolbarButton
                     label="Move region"
                     icon="cursor-move"
+                    active={isMoveMode}
                     onPress={() => {
                       dismissModifyBanner();
-                      if (!canvasSelection || gridLayout.columns === 0) return;
-                      // TODO: enter move mode or show move UI
+                      if (!canvasSelection || fullGridColumnsForMapping === 0) return;
+                      setIsMoveMode((prev) => !prev);
+                      setMoveDragOffset(null);
+                      setShowMoveConfirmDialog(false);
+                      setPendingMoveOffset(null);
                     }}
                   />
                   <ToolbarButton
@@ -5892,8 +5963,15 @@ export default function TestScreen() {
           {canvasSelectionRect && (
             <View
               pointerEvents="none"
-              style={[styles.canvasSelectionBox, canvasSelectionRect]}
+              style={[
+                styles.canvasSelectionBox,
+                canvasSelectionRect,
+                isMoveMode && moveDragOffset && styles.canvasSelectionBoxDimmed,
+              ]}
             />
+          )}
+          {movePreviewRect && (
+            <View pointerEvents="none" style={[styles.movePreviewBox, movePreviewRect]} />
           )}
           {lockedBoundaryEdges.map((rect, idx) => (
             <View
@@ -5931,6 +6009,11 @@ export default function TestScreen() {
                   markInteractionStart();
                   const point = getRelativePoint(event);
                 if (point) {
+                  if (isMoveMode && canvasSelection && selectionBoundsFullGrid) {
+                    moveDragStartRef.current = { x: point.x, y: point.y };
+                    setMoveDragOffset({ dRow: 0, dCol: 0 });
+                    return;
+                  }
                   const cellIndex = getCellIndexForPoint(point.x, point.y);
                   if (cellIndex === null) {
                     return;
@@ -5967,6 +6050,17 @@ export default function TestScreen() {
                   canvasMouseDidMoveRef.current = true;
                   const point = getRelativePoint(event);
                   if (point) {
+                    if (isMoveMode && moveDragStartRef.current && selectionBoundsFullGrid) {
+                      const tileStride = gridLayout.tileSize + GRID_GAP;
+                      const fullCols = fullGridColumnsForMapping;
+                      let dCol = Math.round((point.x - moveDragStartRef.current.x) / (tileStride || 1));
+                      let dRow = Math.round((point.y - moveDragStartRef.current.y) / (tileStride || 1));
+                      const { minRow, maxRow, minCol, maxCol } = selectionBoundsFullGrid;
+                      dRow = Math.max(-minRow, Math.min(fullGridRows - 1 - maxRow, dRow));
+                      dCol = Math.max(-minCol, Math.min(fullCols - 1 - maxCol, dCol));
+                      setMoveDragOffset({ dRow, dCol });
+                      return;
+                    }
                     if (isSelectionMode) {
                       const cellIndex = getCellIndexForPoint(point.x, point.y);
                       if (cellIndex !== null) {
@@ -5997,6 +6091,16 @@ export default function TestScreen() {
                 lastPaintedRef.current = null;
               }}
               onMouseUp={(event: any) => {
+                if (isMoveMode) {
+                  if (moveDragOffset && (moveDragOffset.dRow !== 0 || moveDragOffset.dCol !== 0)) {
+                    setPendingMoveOffset(moveDragOffset);
+                    setShowMoveConfirmDialog(true);
+                  }
+                  setMoveDragOffset(null);
+                  moveDragStartRef.current = null;
+                  setInteracting(false);
+                  return;
+                }
                 isPartOfDragRef.current = false;
                 clearDrawStroke();
                 setInteracting(false);
@@ -6029,6 +6133,9 @@ export default function TestScreen() {
               onDoubleClick={() => {
                 setIsSelectionMode(false);
                 setCanvasSelection(null);
+                setIsMoveMode(false);
+                setShowMoveConfirmDialog(false);
+                setPendingMoveOffset(null);
               }}
               onTouchStartCapture={(event: any) => {
                 // Use capture phase so we receive touchstart even when the target is a child
@@ -6094,6 +6201,11 @@ export default function TestScreen() {
                 markInteractionStart();
                 const point = getRelativePoint(event);
                 if (point) {
+                  if (isMoveMode && canvasSelection && selectionBoundsFullGrid) {
+                    moveDragStartRef.current = { x: point.x, y: point.y };
+                    setMoveDragOffset({ dRow: 0, dCol: 0 });
+                    return;
+                  }
                   const cellIndex = getCellIndexForPoint(point.x, point.y);
                   if (cellIndex === null) {
                     return;
@@ -6150,6 +6262,17 @@ export default function TestScreen() {
                   }
                 }
                 if (point) {
+                  if (isMoveMode && moveDragStartRef.current && selectionBoundsFullGrid) {
+                    const tileStride = gridLayout.tileSize + GRID_GAP;
+                    const fullCols = fullGridColumnsForMapping;
+                    let dCol = Math.round((point.x - moveDragStartRef.current.x) / (tileStride || 1));
+                    let dRow = Math.round((point.y - moveDragStartRef.current.y) / (tileStride || 1));
+                    const { minRow, maxRow, minCol, maxCol } = selectionBoundsFullGrid;
+                    dRow = Math.max(-minRow, Math.min(fullGridRows - 1 - maxRow, dRow));
+                    dCol = Math.max(-minCol, Math.min(fullCols - 1 - maxCol, dCol));
+                    setMoveDragOffset({ dRow, dCol });
+                    return;
+                  }
                   if (isSelectionMode) {
                     const cellIndex = getCellIndexForPoint(point.x, point.y);
                     if (cellIndex !== null) {
@@ -6174,6 +6297,15 @@ export default function TestScreen() {
               }}
               onTouchEndCapture={(event: any) => {
                 const touchCount = event?.touches?.length ?? 0;
+                if (touchCount === 0 && isMoveMode) {
+                  if (moveDragOffset && (moveDragOffset.dRow !== 0 || moveDragOffset.dCol !== 0)) {
+                    setPendingMoveOffset(moveDragOffset);
+                    setShowMoveConfirmDialog(true);
+                  }
+                  setMoveDragOffset(null);
+                  moveDragStartRef.current = null;
+                  return;
+                }
                 if (isWeb && isMobileWeb && touchCount === 0 && pendingSingleTouchPointRef.current && multiFingerTouchCountRef.current === 0 && !canvasTouchDidMoveRef.current) {
                   const pt = pendingSingleTouchPointRef.current;
                   pendingSingleTouchPointRef.current = null;
@@ -6394,6 +6526,11 @@ export default function TestScreen() {
                   canvasTouchDidMoveRef.current = false;
                   const point = getRelativePoint(event);
                   if (point) {
+                    if (isMoveMode && canvasSelection && selectionBoundsFullGrid) {
+                      moveDragStartRef.current = { x: point.x, y: point.y };
+                      setMoveDragOffset({ dRow: 0, dCol: 0 });
+                      return;
+                    }
                     const cellIndex = getCellIndexForPoint(point.x, point.y);
                     if (cellIndex === null) {
                       return;
@@ -6434,6 +6571,17 @@ export default function TestScreen() {
                   canvasTouchDidMoveRef.current = true;
                   const point = getRelativePoint(event);
                   if (point) {
+                    if (isMoveMode && moveDragStartRef.current && selectionBoundsFullGrid) {
+                      const tileStride = gridLayout.tileSize + GRID_GAP;
+                      const fullCols = fullGridColumnsForMapping;
+                      let dCol = Math.round((point.x - moveDragStartRef.current.x) / (tileStride || 1));
+                      let dRow = Math.round((point.y - moveDragStartRef.current.y) / (tileStride || 1));
+                      const { minRow, maxRow, minCol, maxCol } = selectionBoundsFullGrid;
+                      dRow = Math.max(-minRow, Math.min(fullGridRows - 1 - maxRow, dRow));
+                      dCol = Math.max(-minCol, Math.min(fullCols - 1 - maxCol, dCol));
+                      setMoveDragOffset({ dRow, dCol });
+                      return;
+                    }
                     if (isSelectionMode) {
                       const cellIndex = getCellIndexForPoint(point.x, point.y);
                       if (cellIndex !== null) {
@@ -6461,6 +6609,16 @@ export default function TestScreen() {
                   }
                 }}
                 onResponderRelease={(event: any) => {
+                  if (isMoveMode) {
+                    if (moveDragOffset && (moveDragOffset.dRow !== 0 || moveDragOffset.dCol !== 0)) {
+                      setPendingMoveOffset(moveDragOffset);
+                      setShowMoveConfirmDialog(true);
+                    }
+                    setMoveDragOffset(null);
+                    moveDragStartRef.current = null;
+                    setInteracting(false);
+                    return;
+                  }
                   isPartOfDragRef.current = false;
                   clearDrawStroke();
                   setInteracting(false);
@@ -6553,6 +6711,72 @@ export default function TestScreen() {
             </View>
           )}
           </View>
+          {showMoveConfirmDialog && pendingMoveOffset && canvasSelection && selectionBoundsFullGrid && (
+            <>
+              <Pressable
+                style={StyleSheet.absoluteFill}
+                onPress={() => {
+                  setShowMoveConfirmDialog(false);
+                  setPendingMoveOffset(null);
+                }}
+                accessibilityRole="button"
+                accessibilityLabel="Cancel move"
+              />
+              <View style={styles.moveConfirmPanelWrap} pointerEvents="box-none">
+                <ThemedView style={styles.moveConfirmPanel}>
+                  <ThemedText type="defaultSemiBold" style={styles.moveConfirmTitle}>
+                    Move tiles?
+                  </ThemedText>
+                  <View style={styles.moveConfirmButtons}>
+                    <Pressable
+                      onPress={() => {
+                        setShowMoveConfirmDialog(false);
+                        setPendingMoveOffset(null);
+                      }}
+                      style={styles.moveConfirmButton}
+                      accessibilityRole="button"
+                      accessibilityLabel="Cancel"
+                    >
+                      <ThemedText type="defaultSemiBold">Cancel</ThemedText>
+                    </Pressable>
+                    <Pressable
+                      onPress={() => {
+                        const cols = fullGridColumnsForMapping;
+                        const fromIndices = getCellIndicesInRegion(
+                          canvasSelection.start,
+                          canvasSelection.end,
+                          cols
+                        );
+                        const toIndices = fromIndices.map((i) => {
+                          const r = Math.floor(i / cols);
+                          const c = i % cols;
+                          return (r + pendingMoveOffset.dRow) * cols + (c + pendingMoveOffset.dCol);
+                        });
+                        moveRegion(fromIndices, toIndices);
+                        const { minRow, maxRow, minCol, maxCol } = selectionBoundsFullGrid;
+                        const newMinRow = minRow + pendingMoveOffset.dRow;
+                        const newMinCol = minCol + pendingMoveOffset.dCol;
+                        const newMaxRow = maxRow + pendingMoveOffset.dRow;
+                        const newMaxCol = maxCol + pendingMoveOffset.dCol;
+                        const newStart = newMinRow * cols + newMinCol;
+                        const newEnd = newMaxRow * cols + newMaxCol;
+                        setCanvasSelection({ start: newStart, end: newEnd });
+                        setShowMoveConfirmDialog(false);
+                        setPendingMoveOffset(null);
+                      }}
+                      style={[styles.moveConfirmButton, styles.moveConfirmButtonPrimary]}
+                      accessibilityRole="button"
+                      accessibilityLabel="Move"
+                    >
+                      <ThemedText type="defaultSemiBold" style={styles.moveConfirmButtonPrimaryText}>
+                        Move
+                      </ThemedText>
+                    </Pressable>
+                  </View>
+                </ThemedView>
+              </View>
+            </>
+          )}
           {showModifyTileSetBanner && (
             <>
               <Pressable
@@ -8445,6 +8669,46 @@ const styles = StyleSheet.create({
     padding: 16,
     gap: 12,
   },
+  moveConfirmPanelWrap: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  moveConfirmPanel: {
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#1f1f1f',
+    borderRadius: 8,
+    padding: 20,
+    gap: 16,
+    minWidth: 240,
+  },
+  moveConfirmTitle: {
+    textAlign: 'center',
+  },
+  moveConfirmButtons: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 12,
+  },
+  moveConfirmButton: {
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderWidth: 1,
+    borderColor: '#1f1f1f',
+    borderRadius: 6,
+  },
+  moveConfirmButtonPrimary: {
+    backgroundColor: '#22c55e',
+    borderColor: '#22c55e',
+  },
+  moveConfirmButtonPrimaryText: {
+    color: '#fff',
+  },
   newFileGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -8522,6 +8786,16 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: '#22c55e',
     zIndex: 3,
+  },
+  canvasSelectionBoxDimmed: {
+    opacity: 0.5,
+  },
+  movePreviewBox: {
+    position: 'absolute',
+    borderWidth: 2,
+    borderColor: '#3b82f6',
+    borderStyle: 'dashed',
+    zIndex: 4,
   },
   lockedBoundaryEdge: {
     position: 'absolute',
