@@ -7,7 +7,7 @@ import * as FileSystem from 'expo-file-system';
 import { Image as ExpoImage } from 'expo-image';
 import { useRouter } from 'expo-router';
 import * as Sharing from 'expo-sharing';
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, startTransition } from 'react';
 import {
     Alert,
     Animated,
@@ -1382,6 +1382,9 @@ export default function TestScreen() {
   /** True while a paint drag is in progress so the whole stroke is one undo step. */
   const isPartOfDragRef = useRef(false);
 
+  /** Deferred so the grid and zoomed tile slice update together, avoiding one frame of junk tiles. */
+  const zoomRegionForGrid = useDeferredValue(zoomRegion);
+
   const {
     gridLayout,
     tiles,
@@ -1431,11 +1434,11 @@ export default function TestScreen() {
       : null,
     patternAnchorKey: selectedPattern?.id ?? null,
     getFixedBrushSourceName: () => fixedBrushSourceNameRef.current,
-    canvasSelection: viewMode === 'modify' && !zoomRegion ? canvasSelection : null,
+    canvasSelection: viewMode === 'modify' ? canvasSelection : null,
     lockedCells:
       viewMode === 'modify' ? (activeFile?.lockedCells ?? null) : null,
     isPartOfDragRef: viewMode === 'modify' ? isPartOfDragRef : undefined,
-    zoomRegion: viewMode === 'modify' ? zoomRegion : null,
+    zoomRegion: viewMode === 'modify' ? zoomRegionForGrid : null,
     fullGridColumns: viewMode === 'modify' && zoomRegion ? (activeFile?.grid.columns ?? undefined) : undefined,
     fullGridRows: viewMode === 'modify' && zoomRegion ? (activeFile?.grid.rows ?? undefined) : undefined,
   });
@@ -1457,22 +1460,29 @@ export default function TestScreen() {
   const showLockButton = viewMode === 'modify' && !!(canvasSelection && gridLayout.columns > 0);
   const showZoomButton =
     viewMode === 'modify' &&
-    ((!!(canvasSelection && gridLayout.columns > 0) && !zoomRegion) || !!zoomRegion);
+    !!(canvasSelection && gridLayout.columns > 0) && !zoomRegion;
 
-  /** Animate lock/zoom tools when they become available (region selected). */
+  /** Animate selected-region tools bar when it becomes available (region selected). */
   const regionToolsVisible = showLockButton || showZoomButton;
   const prevRegionToolsVisibleRef = useRef(false);
   const regionToolsOpacity = useRef(new Animated.Value(0)).current;
   const regionToolsScale = useRef(new Animated.Value(0.75)).current;
+  const regionToolsTranslateY = useRef(new Animated.Value(-16)).current;
   useEffect(() => {
     if (regionToolsVisible && !prevRegionToolsVisibleRef.current) {
       prevRegionToolsVisibleRef.current = true;
       regionToolsOpacity.setValue(0);
       regionToolsScale.setValue(0.75);
+      regionToolsTranslateY.setValue(-16);
       const useNative = Platform.OS !== 'web';
       Animated.parallel([
         Animated.timing(regionToolsOpacity, {
           toValue: 1,
+          duration: 220,
+          useNativeDriver: useNative,
+        }),
+        Animated.timing(regionToolsTranslateY, {
+          toValue: 0,
           duration: 220,
           useNativeDriver: useNative,
         }),
@@ -1491,7 +1501,7 @@ export default function TestScreen() {
       ]).start();
     }
     if (!regionToolsVisible) prevRegionToolsVisibleRef.current = false;
-  }, [regionToolsVisible, regionToolsOpacity, regionToolsScale]);
+  }, [regionToolsVisible, regionToolsOpacity, regionToolsScale, regionToolsTranslateY]);
 
   /** Ephemeral "Undoing" / "Redoing" banner over the tile canvas. */
   const [undoRedoBanner, setUndoRedoBanner] = useState<'undoing' | 'redoing' | null>(null);
@@ -3225,14 +3235,36 @@ export default function TestScreen() {
     };
   }, [patternSelection, gridLayout.columns, gridLayout.tileSize, gridLayout.rows]);
   const canvasSelectionRect = useMemo(() => {
-    if (!canvasSelection || gridLayout.columns === 0 || zoomRegion) {
+    if (!canvasSelection || gridLayout.columns === 0) {
       return null;
     }
-    const { minRow, maxRow, minCol, maxCol } = getSelectionBounds(
-      canvasSelection.start,
-      canvasSelection.end
-    );
     const tileStride = gridLayout.tileSize + GRID_GAP;
+    let minRow: number;
+    let maxRow: number;
+    let minCol: number;
+    let maxCol: number;
+    if (zoomRegion && fullGridColumnsForMapping > 0) {
+      const fullCols = fullGridColumnsForMapping;
+      const startRow = Math.floor(canvasSelection.start / fullCols);
+      const startCol = canvasSelection.start % fullCols;
+      const endRow = Math.floor(canvasSelection.end / fullCols);
+      const endCol = canvasSelection.end % fullCols;
+      const fullMinRow = Math.min(startRow, endRow);
+      const fullMaxRow = Math.max(startRow, endRow);
+      const fullMinCol = Math.min(startCol, endCol);
+      const fullMaxCol = Math.max(startCol, endCol);
+      minRow = Math.max(0, Math.min(gridLayout.rows - 1, fullMinRow - zoomRegion.minRow));
+      maxRow = Math.max(0, Math.min(gridLayout.rows - 1, fullMaxRow - zoomRegion.minRow));
+      minCol = Math.max(0, Math.min(gridLayout.columns - 1, fullMinCol - zoomRegion.minCol));
+      maxCol = Math.max(0, Math.min(gridLayout.columns - 1, fullMaxCol - zoomRegion.minCol));
+      if (minRow > maxRow || minCol > maxCol) return null;
+    } else {
+      const bounds = getSelectionBounds(canvasSelection.start, canvasSelection.end);
+      minRow = bounds.minRow;
+      maxRow = bounds.maxRow;
+      minCol = bounds.minCol;
+      maxCol = bounds.maxCol;
+    }
     const width =
       (maxCol - minCol + 1) * tileStride - (GRID_GAP > 0 ? GRID_GAP : 0);
     const height =
@@ -3243,7 +3275,7 @@ export default function TestScreen() {
       width,
       height,
     };
-  }, [canvasSelection, gridLayout.columns, gridLayout.tileSize, gridLayout.rows, zoomRegion]);
+  }, [canvasSelection, gridLayout.columns, gridLayout.rows, gridLayout.tileSize, zoomRegion, fullGridColumnsForMapping]);
   const lockedCellIndicesSet = useMemo(() => {
     const cells = activeFile?.lockedCells ?? [];
     if (cells.length === 0) {
@@ -5488,13 +5520,16 @@ export default function TestScreen() {
           <ThemedView style={styles.headerRow}>
             <Pressable
               onPress={() => {
-                persistActiveFileNow();
-                setZoomRegion(null);
-                setViewMode('file');
+                if (zoomRegion) {
+                  setZoomRegion(null);
+                } else {
+                  persistActiveFileNow();
+                  setViewMode('file');
+                }
               }}
               style={styles.navBackSquare}
               accessibilityRole="button"
-              accessibilityLabel="Back to file list"
+              accessibilityLabel={zoomRegion ? 'Zoom out to full canvas' : 'Back to file list'}
             >
               <ThemedText type="defaultSemiBold" style={styles.navButtonText}>
                 &lt;
@@ -5518,97 +5553,6 @@ export default function TestScreen() {
                 },
               ]}
             >
-            {regionToolsVisible && (
-              <Animated.View
-                style={{
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  gap: 2,
-                  opacity: regionToolsOpacity,
-                  transform: [{ scale: regionToolsScale }],
-                }}
-              >
-                {showLockButton && (() => {
-                  const rawSelectionIndices =
-                    canvasSelection && gridLayout.columns > 0
-                      ? getCellIndicesInRegion(
-                          canvasSelection.start,
-                          canvasSelection.end,
-                          gridLayout.columns
-                        )
-                      : [];
-                  const selectionIndices = zoomRegion
-                    ? rawSelectionIndices.map(getFullIndexForCanvas)
-                    : rawSelectionIndices;
-                  const allSelectedLocked =
-                    selectionIndices.length > 0 &&
-                    (lockedCellIndicesSet
-                      ? selectionIndices.every((i) => lockedCellIndicesSet.has(i))
-                      : false);
-                  return (
-                    <ToolbarButton
-                      label={allSelectedLocked ? 'Unlock region' : 'Lock region'}
-                      icon="lock"
-                      active={allSelectedLocked}
-                      color={allSelectedLocked ? '#dc2626' : undefined}
-                      onPress={() => {
-                        dismissModifyBanner();
-                        if (!canvasSelection || gridLayout.columns === 0) {
-                          return;
-                        }
-                        const indices = zoomRegion
-                          ? rawSelectionIndices.map(getFullIndexForCanvas)
-                          : getCellIndicesInRegion(
-                              canvasSelection.start,
-                              canvasSelection.end,
-                              gridLayout.columns
-                            );
-                        if (lockedCellIndicesSet && indices.every((i) => lockedCellIndicesSet.has(i))) {
-                          const next = (activeFile?.lockedCells ?? []).filter(
-                            (i) => !indices.includes(i)
-                          );
-                          updateActiveFileLockedCells(next);
-                        } else {
-                          const next = [...new Set([...(activeFile?.lockedCells ?? []), ...indices])];
-                          updateActiveFileLockedCells(next);
-                        }
-                      }}
-                    />
-                  );
-                })()}
-                {showZoomButton && (() => {
-                  if (zoomRegion) {
-                    return (
-                      <ToolbarButton
-                        label="Zoom out"
-                        icon="magnify-minus-outline"
-                        active
-                        onPress={() => {
-                          dismissModifyBanner();
-                          setZoomRegion(null);
-                        }}
-                      />
-                    );
-                  }
-                  if (!canvasSelection || gridLayout.columns === 0) return null;
-                  return (
-                    <ToolbarButton
-                      label="Zoom to selection"
-                      icon="magnify-plus-outline"
-                      onPress={() => {
-                        dismissModifyBanner();
-                        if (!canvasSelection || gridLayout.columns === 0) return;
-                        const { minRow, maxRow, minCol, maxCol } = getSelectionBounds(
-                          canvasSelection.start,
-                          canvasSelection.end
-                        );
-                        setZoomRegion({ minRow, maxRow, minCol, maxCol });
-                      }}
-                    />
-                  );
-                })()}
-              </Animated.View>
-            )}
             {!(isWeb && isMobileWeb) && (
               <>
                 <ToolbarButton
@@ -5633,17 +5577,130 @@ export default function TestScreen() {
                 />
               </>
             )}
-            <ToolbarButton
-              key={`selection-${isSelectionMode}`}
-              label="Selection"
-              icon="select-drag"
-              active={isSelectionMode}
-              onPress={() => {
-                dismissModifyBanner();
-                setIsSelectionMode((prev) => !prev);
-                setCanvasSelection(null);
-              }}
-            />
+            <View style={styles.selectionWithRegionToolsWrapper}>
+              <ToolbarButton
+                key={`selection-${isSelectionMode}`}
+                label="Selection"
+                icon="select-drag"
+                active={isSelectionMode}
+                onPress={() => {
+                  dismissModifyBanner();
+                  setIsSelectionMode((prev) => !prev);
+                  setCanvasSelection(null);
+                }}
+              />
+              {regionToolsVisible && (
+                <Animated.View
+                  style={[
+                    styles.regionToolsBarOuter,
+                    {
+                      opacity: regionToolsOpacity,
+                      transform: [
+                        { translateY: regionToolsTranslateY },
+                        { scale: regionToolsScale },
+                      ],
+                    },
+                  ]}
+                >
+                  <View style={styles.regionToolsBarInner}>
+                  {showLockButton && (() => {
+                    const selectionIndices =
+                      canvasSelection && fullGridColumnsForMapping > 0
+                        ? getCellIndicesInRegion(
+                            canvasSelection.start,
+                            canvasSelection.end,
+                            fullGridColumnsForMapping
+                          )
+                        : [];
+                    const allSelectedLocked =
+                      selectionIndices.length > 0 &&
+                      (lockedCellIndicesSet
+                        ? selectionIndices.every((i) => lockedCellIndicesSet.has(i))
+                        : false);
+                    return (
+                      <ToolbarButton
+                        label={allSelectedLocked ? 'Unlock region' : 'Lock region'}
+                        icon="lock"
+                        active={allSelectedLocked}
+                        color={allSelectedLocked ? '#dc2626' : undefined}
+                        onPress={() => {
+                          dismissModifyBanner();
+                          if (!canvasSelection || fullGridColumnsForMapping === 0) return;
+                          const indices = getCellIndicesInRegion(
+                            canvasSelection.start,
+                            canvasSelection.end,
+                            fullGridColumnsForMapping
+                          );
+                          if (lockedCellIndicesSet && indices.every((i) => lockedCellIndicesSet.has(i))) {
+                            const next = (activeFile?.lockedCells ?? []).filter(
+                              (i) => !indices.includes(i)
+                            );
+                            updateActiveFileLockedCells(next);
+                          } else {
+                            const next = [...new Set([...(activeFile?.lockedCells ?? []), ...indices])];
+                            updateActiveFileLockedCells(next);
+                          }
+                        }}
+                      />
+                    );
+                  })()}
+                  {showZoomButton && (() => {
+                    if (zoomRegion) {
+                      return (
+                        <ToolbarButton
+                          label="Zoom out"
+                          icon="magnify-minus-outline"
+                          active
+                          onPress={() => {
+                            dismissModifyBanner();
+                            setZoomRegion(null);
+                          }}
+                        />
+                      );
+                    }
+                    if (!canvasSelection || gridLayout.columns === 0) return null;
+                    return (
+                      <ToolbarButton
+                        label="Zoom to selection"
+                        icon="magnify-plus-outline"
+                        onPress={() => {
+                          dismissModifyBanner();
+                          if (!canvasSelection || gridLayout.columns === 0) return;
+                          const { minRow, maxRow, minCol, maxCol } = getSelectionBounds(
+                            canvasSelection.start,
+                            canvasSelection.end
+                          );
+                          startTransition(() => {
+                            setZoomRegion({ minRow, maxRow, minCol, maxCol });
+                            setIsSelectionMode(false);
+                            setCanvasSelection(null);
+                          });
+                        }}
+                      />
+                    );
+                  })()}
+                  <ToolbarButton
+                    label="Move region"
+                    icon="cursor-move"
+                    onPress={() => {
+                      dismissModifyBanner();
+                      if (!canvasSelection || gridLayout.columns === 0) return;
+                      // TODO: enter move mode or show move UI
+                    }}
+                  />
+                  <ToolbarButton
+                    label="Rotate region"
+                    icon="rotate-right"
+                    onPress={() => {
+                      dismissModifyBanner();
+                      if (!canvasSelection || gridLayout.columns === 0) return;
+                      // TODO: rotate selected region 90° CW
+                    }}
+                  />
+                  </View>
+                </Animated.View>
+              )}
+            </View>
             <ToolbarButton
               label="Reset"
               icon="refresh"
@@ -5879,7 +5936,8 @@ export default function TestScreen() {
                     return;
                   }
                   if (isSelectionMode) {
-                    setCanvasSelection({ start: cellIndex, end: cellIndex });
+                    const fullIdx = getFullIndexForCanvas(cellIndex);
+                    setCanvasSelection({ start: fullIdx, end: fullIdx });
                     return;
                   }
                   if (isPatternCreationMode) {
@@ -5888,7 +5946,8 @@ export default function TestScreen() {
                   }
                   if (lockedCellIndicesSet?.has(getFullIndexForCanvas(cellIndex))) {
                     setIsSelectionMode(true);
-                    setCanvasSelection({ start: cellIndex, end: cellIndex });
+                    const fullIdx = getFullIndexForCanvas(cellIndex);
+                    setCanvasSelection({ start: fullIdx, end: fullIdx });
                     return;
                   }
                   if (brush.mode === 'clone' && cloneSourceIndex === null) {
@@ -5911,8 +5970,9 @@ export default function TestScreen() {
                     if (isSelectionMode) {
                       const cellIndex = getCellIndexForPoint(point.x, point.y);
                       if (cellIndex !== null) {
+                        const fullIdx = getFullIndexForCanvas(cellIndex);
                         setCanvasSelection((prev) =>
-                          prev ? { ...prev, end: cellIndex } : prev
+                          prev ? { ...prev, end: fullIdx } : prev
                         );
                       }
                       return;
@@ -6006,7 +6066,8 @@ export default function TestScreen() {
                       if (lockedCellIndicesSet?.has(getFullIndexForCanvas(cellIndex))) {
                         multiFingerTouchCountRef.current = 0;
                         setIsSelectionMode(true);
-                        setCanvasSelection({ start: cellIndex, end: cellIndex });
+                        const fullIdx = getFullIndexForCanvas(cellIndex);
+                        setCanvasSelection({ start: fullIdx, end: fullIdx });
                         return;
                       }
                       pendingSingleTouchPointRef.current = { x: point.x, y: point.y };
@@ -6038,7 +6099,8 @@ export default function TestScreen() {
                     return;
                   }
                   if (isSelectionMode) {
-                    setCanvasSelection({ start: cellIndex, end: cellIndex });
+                    const fullIdx = getFullIndexForCanvas(cellIndex);
+                    setCanvasSelection({ start: fullIdx, end: fullIdx });
                     return;
                   }
                   if (isPatternCreationMode) {
@@ -6047,7 +6109,8 @@ export default function TestScreen() {
                   }
                   if (lockedCellIndicesSet?.has(getFullIndexForCanvas(cellIndex))) {
                     setIsSelectionMode(true);
-                    setCanvasSelection({ start: cellIndex, end: cellIndex });
+                    const fullIdx = getFullIndexForCanvas(cellIndex);
+                    setCanvasSelection({ start: fullIdx, end: fullIdx });
                     return;
                   }
                   if (brush.mode === 'clone' && cloneSourceIndex === null) {
@@ -6090,8 +6153,9 @@ export default function TestScreen() {
                   if (isSelectionMode) {
                     const cellIndex = getCellIndexForPoint(point.x, point.y);
                     if (cellIndex !== null) {
+                      const fullIdx = getFullIndexForCanvas(cellIndex);
                       setCanvasSelection((prev) =>
-                        prev ? { ...prev, end: cellIndex } : prev
+                        prev ? { ...prev, end: fullIdx } : prev
                       );
                     }
                     return;
@@ -6335,7 +6399,8 @@ export default function TestScreen() {
                       return;
                     }
                     if (isSelectionMode) {
-                      setCanvasSelection({ start: cellIndex, end: cellIndex });
+                      const fullIdx = getFullIndexForCanvas(cellIndex);
+                      setCanvasSelection({ start: fullIdx, end: fullIdx });
                       return;
                     }
                     if (isPatternCreationMode) {
@@ -6372,8 +6437,9 @@ export default function TestScreen() {
                     if (isSelectionMode) {
                       const cellIndex = getCellIndexForPoint(point.x, point.y);
                       if (cellIndex !== null) {
+                        const fullIdx = getFullIndexForCanvas(cellIndex);
                         setCanvasSelection((prev) =>
-                          prev ? { ...prev, end: cellIndex } : prev
+                          prev ? { ...prev, end: fullIdx } : prev
                         );
                       }
                       return;
@@ -6465,6 +6531,26 @@ export default function TestScreen() {
                 {undoRedoBanner === 'undoing' ? 'Undoing' : 'Redoing'}
               </Text>
             </Animated.View>
+          )}
+          {zoomRegion !== null && (
+            <View pointerEvents="box-none" style={[styles.undoRedoBanner, styles.zoomedBannerRow]}>
+              <Text
+                style={styles.undoRedoBannerText}
+                numberOfLines={1}
+                adjustsFontSizeToFit
+              >
+                Zoomed in
+              </Text>
+              <Pressable
+                onPress={() => setZoomRegion(null)}
+                hitSlop={8}
+                style={({ pressed }) => [styles.zoomedBannerBackLink, pressed && { opacity: 0.7 }]}
+                accessibilityRole="button"
+                accessibilityLabel="Zoom out to full canvas"
+              >
+                <Text style={styles.zoomedBannerBackLinkText}>Back</Text>
+              </Pressable>
+            </View>
           )}
           </View>
           {showModifyTileSetBanner && (
@@ -7583,6 +7669,33 @@ const styles = StyleSheet.create({
     overflow: 'visible',
     backgroundColor: 'transparent',
   },
+  selectionWithRegionToolsWrapper: {
+    position: 'relative',
+    flexDirection: 'column',
+    alignItems: 'center',
+  },
+  regionToolsBarOuter: {
+    position: 'absolute',
+    top: TOOLBAR_BUTTON_SIZE + 4,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'visible',
+  },
+  regionToolsBarInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+    backgroundColor: 'rgba(180, 180, 180, 0.9)',
+    borderTopLeftRadius: 0,
+    borderTopRightRadius: 0,
+    borderBottomLeftRadius: 8,
+    borderBottomRightRadius: 8,
+    paddingVertical: 0,
+    paddingHorizontal: 6,
+  },
   toggleRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -8380,6 +8493,20 @@ const styles = StyleSheet.create({
   undoRedoBannerText: {
     color: '#fff',
     fontSize: 11,
+  },
+  zoomedBannerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  zoomedBannerBackLink: {
+    paddingVertical: 4,
+    paddingHorizontal: 4,
+  },
+  zoomedBannerBackLinkText: {
+    color: '#fff',
+    fontSize: 11,
+    textDecorationLine: 'underline',
   },
   gridBackground: {
     ...StyleSheet.absoluteFillObject,

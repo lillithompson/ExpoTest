@@ -235,14 +235,6 @@ export const useTileGrid = ({
   );
 
   const selectionBounds = useMemo(() => {
-    if (isZoomed && zoomBounds) {
-      return {
-        minRow: zoomBounds.minRow,
-        maxRow: zoomBounds.maxRow,
-        minCol: zoomBounds.minCol,
-        maxCol: zoomBounds.maxCol,
-      };
-    }
     if (!canvasSelection || fullGridLayout.columns === 0) {
       return null;
     }
@@ -250,12 +242,26 @@ export const useTileGrid = ({
     const startCol = canvasSelection.start % fullGridLayout.columns;
     const endRow = Math.floor(canvasSelection.end / fullGridLayout.columns);
     const endCol = canvasSelection.end % fullGridLayout.columns;
-    return {
-      minRow: Math.min(startRow, endRow),
-      maxRow: Math.max(startRow, endRow),
-      minCol: Math.min(startCol, endCol),
-      maxCol: Math.max(startCol, endCol),
-    };
+    const minRow = Math.min(startRow, endRow);
+    const maxRow = Math.max(startRow, endRow);
+    const minCol = Math.min(startCol, endCol);
+    const maxCol = Math.max(startCol, endCol);
+    if (isZoomed && zoomBounds) {
+      const clampedMinRow = Math.max(minRow, zoomBounds.minRow);
+      const clampedMaxRow = Math.min(maxRow, zoomBounds.maxRow);
+      const clampedMinCol = Math.max(minCol, zoomBounds.minCol);
+      const clampedMaxCol = Math.min(maxCol, zoomBounds.maxCol);
+      if (clampedMinRow > clampedMaxRow || clampedMinCol > clampedMaxCol) {
+        return null;
+      }
+      return {
+        minRow: clampedMinRow,
+        maxRow: clampedMaxRow,
+        minCol: clampedMinCol,
+        maxCol: clampedMaxCol,
+      };
+    }
+    return { minRow, maxRow, minCol, maxCol };
   }, [isZoomed, zoomBounds, canvasSelection, fullGridLayout.columns]);
 
   const lockedCellIndices = useMemo(() => {
