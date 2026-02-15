@@ -105,6 +105,10 @@ type Result = {
   moveRegion: (fromIndices: number[], toIndices: number[]) => void;
   /** Rotate the rectangular region 90° clockwise. Bounds in full-grid row/col. One undo step. */
   rotateRegion: (minRow: number, maxRow: number, minCol: number, maxCol: number, gridColumns: number) => void;
+  /** Full-grid tiles for persisting; use this (not tiles) when saving so zoomed view never overwrites file. */
+  fullTilesForSave: Tile[];
+  /** Full-grid layout for persisting; use this (not gridLayout) when saving so zoomed view never overwrites file. */
+  fullGridLayoutForSave: GridLayout;
 };
 
 const toConnectionKey = (connections: boolean[] | null) =>
@@ -286,6 +290,19 @@ export const useTileGrid = ({
       for (let row = minRow; row <= maxRow; row += 1) {
         for (let col = minCol; col <= maxCol; col += 1) {
           const index = row * cols + col;
+          if (!lockedCellIndices?.has(index)) set.add(index);
+        }
+      }
+    } else if (isZoomed && zoomBounds) {
+      const zoomRows = zoomBounds.maxRow - zoomBounds.minRow + 1;
+      const zoomCols = zoomBounds.maxCol - zoomBounds.minCol + 1;
+      const maxRZoom = mirrorVertical ? Math.floor(zoomRows / 2) : zoomRows;
+      const maxCZoom = mirrorHorizontal ? Math.floor(zoomCols / 2) : zoomCols;
+      for (let row = 0; row < maxRZoom; row += 1) {
+        for (let col = 0; col < maxCZoom; col += 1) {
+          const fullRow = zoomBounds.minRow + row;
+          const fullCol = zoomBounds.minCol + col;
+          const index = fullRow * fullGridLayout.columns + fullCol;
           if (!lockedCellIndices?.has(index)) set.add(index);
         }
       }
@@ -1268,7 +1285,7 @@ export const useTileGrid = ({
     if (stroke.length > 0) {
       setTiles((prev) => {
         getNextPlacementOrder();
-        const next = applyFinalizeStrokeToTiles(prev, stroke, drawPlacementAllowSet);
+        const next = applyFinalizeStrokeToTiles(prev, stroke, drawPlacementAllowSet ?? null);
         return tilesEqual(prev, next) ? prev : next;
       });
     }
@@ -1596,7 +1613,7 @@ export const useTileGrid = ({
             let next = applyFinalizeStrokeToTiles(
               prev,
               strokeToFinalize,
-              drawPlacementAllowSet
+              drawPlacementAllowSet ?? null
             );
             applyPlacementsToArrayOverride(
               next,
@@ -1800,7 +1817,7 @@ export const useTileGrid = ({
             return next;
           });
         });
-      } else if (!selectionBounds) {
+      } else if (!selectionBounds && !(isZoomed && zoomBounds)) {
         withBulkUpdate(() => {
           applyTiles(buildInitialTiles(internalTotalCells));
         });
@@ -1813,13 +1830,14 @@ export const useTileGrid = ({
         return;
       }
       const nextTiles =
-        selectionBounds || lockedCellIndices?.size
+        selectionBounds || lockedCellIndices?.size || (isZoomed && zoomBounds)
           ? [...normalizeTiles(tiles, internalTotalCells, tileSourcesLength)]
           : buildInitialTiles(internalTotalCells);
+      const colsForIndex = isZoomed ? fullGridLayout.columns : gridLayout.columns;
       if (selectionBounds && !mirrorHorizontal && !mirrorVertical) {
         modifiableIndicesSet.forEach((index) => {
-          const row = Math.floor(index / gridLayout.columns);
-          const col = index % gridLayout.columns;
+          const row = Math.floor(index / colsForIndex);
+          const col = index % colsForIndex;
           const tile = getPatternTileForPosition(row, col);
           nextTiles[index] = tile
             ? {
@@ -1834,8 +1852,8 @@ export const useTileGrid = ({
         });
       } else if (mirrorHorizontal || mirrorVertical) {
         for (const index of modifiableIndicesArray) {
-          const row = Math.floor(index / gridLayout.columns);
-          const col = index % gridLayout.columns;
+          const row = Math.floor(index / colsForIndex);
+          const col = index % colsForIndex;
           const tile = getPatternTileForPosition(row, col);
           if (!tile) {
             continue;
@@ -1844,8 +1862,8 @@ export const useTileGrid = ({
         }
       } else {
         for (const index of modifiableIndicesArray) {
-          const row = Math.floor(index / gridLayout.columns);
-          const col = index % gridLayout.columns;
+          const row = Math.floor(index / colsForIndex);
+          const col = index % colsForIndex;
           const tile = getPatternTileForPosition(row, col);
           if (tile) {
             nextTiles[index] = {
@@ -1871,9 +1889,9 @@ export const useTileGrid = ({
       if (modifiableIndicesSet.size === 0) {
         return;
       }
-      if (mirrorHorizontal || mirrorVertical || selectionBounds) {
+      if (mirrorHorizontal || mirrorVertical || selectionBounds || (isZoomed && zoomBounds)) {
         const nextTiles =
-          selectionBounds || lockedCellIndices?.size
+          selectionBounds || lockedCellIndices?.size || (isZoomed && zoomBounds)
             ? [...normalizeTiles(tiles, internalTotalCells, tileSourcesLength)]
             : buildInitialTiles(internalTotalCells);
         const empty = {
@@ -1895,17 +1913,25 @@ export const useTileGrid = ({
                   selectionBounds.minCol,
                   selectionBounds.maxRow,
                   selectionBounds.maxCol,
-                  gridLayout.columns
+                  fullGridLayout.columns
                 ).filter((i) => !lockedCellIndices?.has(i))
-              : (() => {
-                  const spiralOrder = getSpiralCellOrder(
-                    gridLayout.columns,
-                    gridLayout.rows
-                  );
-                  return spiralOrder.filter((i) =>
-                    modifiableIndicesSet.has(i)
-                  );
-                })()
+              : isZoomed && zoomBounds
+                ? getSpiralCellOrderInRect(
+                    zoomBounds.minRow,
+                    zoomBounds.minCol,
+                    zoomBounds.maxRow,
+                    zoomBounds.maxCol,
+                    fullGridLayout.columns
+                  ).filter((i) => !lockedCellIndices?.has(i))
+                : (() => {
+                    const spiralOrder = getSpiralCellOrder(
+                      gridLayout.columns,
+                      gridLayout.rows
+                    );
+                    return spiralOrder.filter((i) =>
+                      modifiableIndicesSet.has(i)
+                    );
+                  })()
             : modifiableIndicesArray.length > 0
               ? [...modifiableIndicesArray].sort(() => Math.random() - 0.5)
               : modifiableIndicesArray;
@@ -2013,13 +2039,22 @@ export const useTileGrid = ({
       }
       if (brush.mode === 'draw') {
         const nextTiles =
-          lockedCellIndices?.size
+          lockedCellIndices?.size || (isZoomed && zoomBounds)
             ? [...normalizeTiles(tiles, internalTotalCells, tileSourcesLength)]
             : buildInitialTiles(internalTotalCells);
-        const strokeOrder = getSpiralCellOrder(
-          gridLayout.columns,
-          gridLayout.rows
-        );
+        const strokeOrder =
+          isZoomed && zoomBounds
+            ? getSpiralCellOrderInRect(
+                zoomBounds.minRow,
+                zoomBounds.minCol,
+                zoomBounds.maxRow,
+                zoomBounds.maxCol,
+                fullGridLayout.columns
+              ).filter((i) => !lockedCellIndices?.has(i))
+            : getSpiralCellOrder(
+                gridLayout.columns,
+                gridLayout.rows
+              );
         for (let i = 0; i < strokeOrder.length; i += 1) {
           const cellIndex = strokeOrder[i];
           let candidates: Tile[];
@@ -2113,7 +2148,7 @@ export const useTileGrid = ({
     }
     if (mirrorHorizontal || mirrorVertical || selectionBounds) {
       const nextTiles =
-        selectionBounds || lockedCellIndices?.size
+        selectionBounds || lockedCellIndices?.size || (isZoomed && zoomBounds)
           ? [...normalizeTiles(tiles, internalTotalCells, tileSourcesLength)]
           : buildInitialTiles(internalTotalCells);
       const fixedTile = {
@@ -2142,6 +2177,22 @@ export const useTileGrid = ({
       return;
     }
     if (lockedCellIndices?.size) {
+      const nextTiles = [...normalizeTiles(tiles, internalTotalCells, tileSourcesLength)];
+      const fixedTile = {
+        imageIndex: fixedIndex,
+        rotation: brush.rotation,
+        mirrorX: false,
+        mirrorY: false,
+        name: tileSources[fixedIndex]?.name,
+        placedOrder: placementOrderRef.current,
+      };
+      modifiableIndicesArray.forEach((index) => {
+        nextTiles[index] = { ...fixedTile };
+      });
+      withBulkUpdate(() => {
+        applyTiles(nextTiles);
+      });
+    } else if (isZoomed && zoomBounds) {
       const nextTiles = [...normalizeTiles(tiles, internalTotalCells, tileSourcesLength)];
       const fixedTile = {
         imageIndex: fixedIndex,
@@ -2212,8 +2263,10 @@ export const useTileGrid = ({
         return;
       }
       const nextTiles = [...normalizeTiles(tiles, internalTotalCells, tileSourcesLength)];
+      const colsForIndexComplete = isZoomed ? fullGridLayout.columns : gridLayout.columns;
       if ((mirrorHorizontal || mirrorVertical) && !selectionBounds) {
-        for (let index = 0; index < internalTotalCells; index += 1) {
+        const indicesToScan = isZoomed && zoomBounds ? allNonLockedIndicesSet : new Set(Array.from({ length: internalTotalCells }, (_, i) => i));
+        for (const index of indicesToScan) {
           if (nextTiles[index].imageIndex >= 0) {
             continue;
           }
@@ -2228,8 +2281,8 @@ export const useTileGrid = ({
           if (nextTiles[index].imageIndex >= 0) {
             continue;
           }
-          const row = Math.floor(index / gridLayout.columns);
-          const col = index % gridLayout.columns;
+          const row = Math.floor(index / colsForIndexComplete);
+          const col = index % colsForIndexComplete;
           const tile = getPatternTileForPosition(row, col);
           if (!tile) {
             continue;
@@ -2241,8 +2294,8 @@ export const useTileGrid = ({
           if (nextTiles[index].imageIndex >= 0) {
             continue;
           }
-          const row = Math.floor(index / gridLayout.columns);
-          const col = index % gridLayout.columns;
+          const row = Math.floor(index / colsForIndexComplete);
+          const col = index % colsForIndexComplete;
           const tile = getPatternTileForPosition(row, col);
           if (!tile) {
             continue;
@@ -2268,7 +2321,8 @@ export const useTileGrid = ({
         return;
       }
       if ((mirrorHorizontal || mirrorVertical) && !selectionBounds) {
-        for (let index = 0; index < internalTotalCells; index += 1) {
+        const indicesToScanRand = isZoomed && zoomBounds ? allNonLockedIndicesSet : new Set(Array.from({ length: internalTotalCells }, (_, i) => i));
+        for (const index of indicesToScanRand) {
           if (nextTiles[index].imageIndex >= 0) {
             continue;
           }
@@ -2310,7 +2364,8 @@ export const useTileGrid = ({
       setTiles((prev) => {
       const nextTiles = [...normalizeTiles(prev, internalTotalCells, tileSourcesLength)];
       if ((mirrorHorizontal || mirrorVertical) && !selectionBounds) {
-        for (let index = 0; index < internalTotalCells; index += 1) {
+        const indicesToScanFixed = isZoomed && zoomBounds ? allNonLockedIndicesSet : new Set(Array.from({ length: internalTotalCells }, (_, i) => i));
+        for (const index of indicesToScanFixed) {
           if (nextTiles[index].imageIndex >= 0) {
             continue;
           }
@@ -2689,5 +2744,7 @@ export const useTileGrid = ({
     fullGridRowsForZoom: isZoomed ? fullGridLayout.rows : undefined,
     moveRegion,
     rotateRegion,
+    fullTilesForSave: renderTiles,
+    fullGridLayoutForSave: fullGridLayout,
   };
 };

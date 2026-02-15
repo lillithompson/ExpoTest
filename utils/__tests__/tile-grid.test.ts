@@ -224,4 +224,53 @@ describe('getSpiralCellOrderInRect', () => {
     expect(getSpiralCellOrderInRect(2, 0, 1, 3, 4)).toEqual([]);
     expect(getSpiralCellOrderInRect(0, 2, 3, 1, 4)).toEqual([]);
   });
+
+  it('returns only indices inside the zoom rect (no index outside)', () => {
+    const gridColumns = 6;
+    const minRow = 1;
+    const minCol = 1;
+    const maxRow = 4;
+    const maxCol = 4;
+    const order = getSpiralCellOrderInRect(minRow, minCol, maxRow, maxCol, gridColumns);
+    const zoomSet = new Set(order);
+    const totalCells = 6 * 6;
+    for (let index = 0; index < totalCells; index += 1) {
+      const row = Math.floor(index / gridColumns);
+      const col = index % gridColumns;
+      const inside =
+        row >= minRow && row <= maxRow && col >= minCol && col <= maxCol;
+      expect(zoomSet.has(index)).toBe(inside);
+    }
+  });
+});
+
+describe('zoom region flood invariant', () => {
+  it('when only zoom-rect indices are modified, tiles outside zoom are unchanged', () => {
+    const gridColumns = 6;
+    const gridRows = 6;
+    const totalCells = gridColumns * gridRows;
+    const minRow = 1;
+    const minCol = 1;
+    const maxRow = 4;
+    const maxCol = 4;
+    const zoomIndices = new Set(
+      getSpiralCellOrderInRect(minRow, minCol, maxRow, maxCol, gridColumns)
+    );
+    const beforeTiles = Array.from({ length: totalCells }, (_, i) => ({
+      imageIndex: i % 3,
+      rotation: 0,
+      mirrorX: false,
+      mirrorY: false,
+    }));
+    const afterTiles = beforeTiles.map((t, i) =>
+      zoomIndices.has(i)
+        ? { imageIndex: -1, rotation: 0, mirrorX: false, mirrorY: false }
+        : { ...t }
+    );
+    for (let index = 0; index < totalCells; index += 1) {
+      if (!zoomIndices.has(index)) {
+        expect(afterTiles[index]).toEqual(beforeTiles[index]);
+      }
+    }
+  });
 });

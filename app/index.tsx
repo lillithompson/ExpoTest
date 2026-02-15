@@ -1416,6 +1416,8 @@ export default function TestScreen() {
     fullGridRowsForZoom,
     moveRegion,
     rotateRegion,
+    fullTilesForSave,
+    fullGridLayoutForSave,
   } = useTileGrid({
     tileSources,
     availableWidth,
@@ -1692,6 +1694,8 @@ export default function TestScreen() {
     preview?: boolean;
     sourceNames?: string[];
   } | null>(null);
+  /** When true, we have zoomed in this session so pending restore must not overwrite current grid on zoom out. */
+  const hasZoomedInThisSessionRef = useRef(false);
   const setHydrating = useCallback((value: boolean) => {
     isHydratingFileRef.current = value;
     setIsHydratingFile(value);
@@ -2431,8 +2435,8 @@ export default function TestScreen() {
       activeFileRef.current ??
       filesRef.current.find((entry) => entry.id === activeFileId) ??
       null;
-    const tilesSnapshot = fileSnapshot?.tiles ?? tiles;
-    const gridSnapshot = fileSnapshot?.grid ?? gridLayout;
+    const tilesSnapshot = fileSnapshot?.tiles ?? fullTilesForSave;
+    const gridSnapshot = fileSnapshot?.grid ?? fullGridLayoutForSave;
     upsertActiveFile({
       tiles: tilesSnapshot,
       gridLayout: gridSnapshot,
@@ -2451,8 +2455,8 @@ export default function TestScreen() {
     isHydratingFile,
     fileSourceNames.length,
     ensureFileSourceNames,
-    tiles,
-    gridLayout,
+    fullTilesForSave,
+    fullGridLayoutForSave,
     primaryCategory,
     activeCategories,
     selectedTileSetIds,
@@ -2514,6 +2518,7 @@ export default function TestScreen() {
     setIsSelectionMode(false);
     setCanvasSelection(null);
     setZoomRegion(null);
+    hasZoomedInThisSessionRef.current = false;
     updateActiveFileLockedCells([]);
     if (brush.mode === 'clone' || brush.mode === 'pattern') {
       setBrush({ mode: 'random' });
@@ -2712,6 +2717,12 @@ export default function TestScreen() {
           : { rows: pending.rows, columns: pending.columns, tileSize: 45 };
     const shapeForApply = tileSizeReady ? gridLayoutShape : fallbackGridShape;
     if (shapeForApply && canApplyNonEmptyRestore(pendingShape, shapeForApply)) {
+      if (hasZoomedInThisSessionRef.current) {
+        pendingRestoreRef.current = null;
+        setHydrating(false);
+        setSuspendTiles(false);
+        return;
+      }
       const nameSource =
         pending.sourceNames && pending.sourceNames.length > 0
           ? pending.sourceNames
@@ -2737,6 +2748,12 @@ export default function TestScreen() {
       return;
     }
     if (shapeForApply && canApplyEmptyNewFileRestore(pendingShape, shapeForApply)) {
+      if (hasZoomedInThisSessionRef.current) {
+        pendingRestoreRef.current = null;
+        setHydrating(false);
+        setSuspendTiles(false);
+        return;
+      }
       resetTiles();
       pendingRestoreRef.current = null;
       setHydrating(false);
@@ -2784,8 +2801,8 @@ export default function TestScreen() {
         const thumbnailUri =
           Platform.OS === 'web'
             ? await renderTileCanvasToDataUrl({
-                tiles,
-                gridLayout,
+                tiles: fullTilesForSave,
+                gridLayout: fullGridLayoutForSave,
                 tileSources,
                 gridGap: GRID_GAP,
                 blankSource: null,
@@ -2806,8 +2823,8 @@ export default function TestScreen() {
           setFileSourceNames(resolvedSourceNames);
         }
         const payload: Parameters<typeof upsertActiveFile>[0] = {
-          tiles,
-          gridLayout,
+          tiles: fullTilesForSave,
+          gridLayout: fullGridLayoutForSave,
           category: primaryCategory,
           categories: activeCategories,
           preferredTileSize: fileTileSize,
@@ -2836,8 +2853,8 @@ export default function TestScreen() {
             return;
           }
           const previewUri = await renderTileCanvasToDataUrl({
-            tiles,
-            gridLayout,
+            tiles: fullTilesForSave,
+            gridLayout: fullGridLayoutForSave,
             tileSources,
             gridGap: GRID_GAP,
             blankSource: null,
@@ -2862,8 +2879,8 @@ export default function TestScreen() {
             setFileSourceNames(resolvedSourceNames);
           }
           const payload: Parameters<typeof upsertActiveFile>[0] = {
-            tiles,
-            gridLayout,
+            tiles: fullTilesForSave,
+            gridLayout: fullGridLayoutForSave,
             category: primaryCategory,
             categories: activeCategories,
             preferredTileSize: fileTileSize,
@@ -2904,15 +2921,15 @@ export default function TestScreen() {
             const fullWidth = Math.max(
               1,
               Math.round(
-                gridLayout.columns * gridLayout.tileSize +
-                  GRID_GAP * Math.max(0, gridLayout.columns - 1)
+                fullGridLayoutForSave.columns * fullGridLayoutForSave.tileSize +
+                  GRID_GAP * Math.max(0, fullGridLayoutForSave.columns - 1)
               )
             );
             const fullHeight = Math.max(
               1,
               Math.round(
-                gridLayout.rows * gridLayout.tileSize +
-                  GRID_GAP * Math.max(0, gridLayout.rows - 1)
+                fullGridLayoutForSave.rows * fullGridLayoutForSave.tileSize +
+                  GRID_GAP * Math.max(0, fullGridLayoutForSave.rows - 1)
               )
             );
             const uri = await gridCaptureRef.current?.capture?.({
@@ -2973,8 +2990,8 @@ export default function TestScreen() {
             setFileSourceNames(resolvedSourceNames);
           }
           const payload: Parameters<typeof upsertActiveFile>[0] = {
-            tiles,
-            gridLayout,
+            tiles: fullTilesForSave,
+            gridLayout: fullGridLayoutForSave,
             category: primaryCategory,
             categories: activeCategories,
             preferredTileSize: fileTileSize,
@@ -2999,8 +3016,8 @@ export default function TestScreen() {
       }
     };
   }, [
-    tiles,
-    gridLayout,
+    fullTilesForSave,
+    fullGridLayoutForSave,
     primaryCategory,
     activeCategories,
     fileTileSize,
@@ -3527,15 +3544,15 @@ export default function TestScreen() {
         const fullWidth = Math.max(
           1,
           Math.round(
-            gridLayout.columns * gridLayout.tileSize +
-              GRID_GAP * Math.max(0, gridLayout.columns - 1)
+            fullGridLayoutForSave.columns * fullGridLayoutForSave.tileSize +
+              GRID_GAP * Math.max(0, fullGridLayoutForSave.columns - 1)
           )
         );
         const fullHeight = Math.max(
           1,
           Math.round(
-            gridLayout.rows * gridLayout.tileSize +
-              GRID_GAP * Math.max(0, gridLayout.rows - 1)
+            fullGridLayoutForSave.rows * fullGridLayoutForSave.tileSize +
+              GRID_GAP * Math.max(0, fullGridLayoutForSave.rows - 1)
           )
         );
         const uri = await gridCaptureRef.current?.capture?.({
@@ -3584,8 +3601,8 @@ export default function TestScreen() {
         setIsCapturingPreview(false);
       }
       upsertActiveFile({
-        tiles,
-        gridLayout,
+        tiles: fullTilesForSave,
+        gridLayout: fullGridLayoutForSave,
         category: primaryCategory,
         categories: activeCategories,
         preferredTileSize: fileTileSize,
@@ -3603,8 +3620,8 @@ export default function TestScreen() {
       return;
     }
     const previewUri = await renderTileCanvasToDataUrl({
-      tiles,
-      gridLayout,
+      tiles: fullTilesForSave,
+      gridLayout: fullGridLayoutForSave,
       tileSources,
       gridGap: GRID_GAP,
       blankSource: null,
@@ -3617,8 +3634,8 @@ export default function TestScreen() {
       quality: 1,
     });
     const thumbnailUri = await renderTileCanvasToDataUrl({
-      tiles,
-      gridLayout,
+      tiles: fullTilesForSave,
+      gridLayout: fullGridLayoutForSave,
       tileSources,
       gridGap: GRID_GAP,
       blankSource: null,
@@ -3629,8 +3646,8 @@ export default function TestScreen() {
       maxDimension: FILE_THUMB_SIZE,
     });
     upsertActiveFile({
-      tiles,
-      gridLayout,
+      tiles: fullTilesForSave,
+      gridLayout: fullGridLayoutForSave,
       category: primaryCategory,
       categories: activeCategories,
       preferredTileSize: fileTileSize,
@@ -5739,6 +5756,7 @@ export default function TestScreen() {
                             canvasSelection.end
                           );
                           startTransition(() => {
+                            hasZoomedInThisSessionRef.current = true;
                             setZoomRegion({ minRow, maxRow, minCol, maxCol });
                             setIsSelectionMode(false);
                             setCanvasSelection(null);
@@ -6850,8 +6868,8 @@ export default function TestScreen() {
                         }));
                         if (activeFileId) {
                           upsertActiveFile({
-                            tiles,
-                            gridLayout,
+                            tiles: fullTilesForSave,
+                            gridLayout: fullGridLayoutForSave,
                             tileSetIds: selectedTileSetIds,
                             sourceNames: nextSourceNames,
                             preferredTileSize: fileTileSize,
@@ -6925,8 +6943,8 @@ export default function TestScreen() {
                           ensureFileSourceNames(nextPaletteSources);
                         if (activeFileId) {
                           upsertActiveFile({
-                            tiles,
-                            gridLayout,
+                            tiles: fullTilesForSave,
+                            gridLayout: fullGridLayoutForSave,
                             tileSetIds: nextTileSetIds,
                             sourceNames: nextSourceNames,
                             preferredTileSize: fileTileSize,
@@ -7726,8 +7744,8 @@ export default function TestScreen() {
                         }));
                         if (activeFileId) {
                           upsertActiveFile({
-                            tiles,
-                            gridLayout,
+                            tiles: fullTilesForSave,
+                            gridLayout: fullGridLayoutForSave,
                             tileSetIds: selectedTileSetIds,
                             sourceNames: nextSourceNames,
                             preferredTileSize: fileTileSize,
@@ -7820,8 +7838,8 @@ export default function TestScreen() {
                           ensureFileSourceNames(nextPaletteSources);
                         if (activeFileId) {
                           upsertActiveFile({
-                            tiles,
-                            gridLayout,
+                            tiles: fullTilesForSave,
+                            gridLayout: fullGridLayoutForSave,
                             tileSetIds: nextTileSetIds,
                             sourceNames: nextSourceNames,
                             preferredTileSize: fileTileSize,
