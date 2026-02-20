@@ -1,7 +1,7 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { ReactNode } from 'react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
     Modal,
     Platform,
@@ -17,6 +17,11 @@ import { TileAsset } from '@/components/tile-asset';
 import { TileAtlasSprite } from '@/components/tile-atlas-sprite';
 import { type TileAtlas } from '@/utils/tile-atlas';
 import { type Tile } from '@/utils/tile-grid';
+import {
+  paletteProfileLog,
+  paletteProfileMeasure,
+  paletteProfileStartRender,
+} from '@/utils/palette-profile';
 import { getConnectionCountFromFileName } from '@/utils/tile-compat';
 
 type Brush =
@@ -85,16 +90,6 @@ const UNFAVORITE_SENTINEL = '__unfavorite__';
 const SEPARATOR_BAR_WIDTH = 18;
 
 const connectionCountCache = new Map<string, number>();
-
-/** Connection count from tile name (0–8); non-matching names yield 0. Cached per name to avoid repeated regex work. */
-function getConnectionCount(name: string): number {
-  let count = connectionCountCache.get(name);
-  if (count === undefined) {
-    count = getConnectionCountFromFileName(name);
-    connectionCountCache.set(name, count);
-  }
-  return count;
-}
 
 /** All 8 orientation variants: 4 rotations × 2 (no mirror / mirror X). */
 const ORIENTATION_VARIANTS: Array<{
@@ -232,7 +227,29 @@ export function TileBrushPanel({
     return unsubscribe;
   }, []);
 
+  const [precomputedConnectionCounts, setPrecomputedConnectionCounts] = useState<Record<string, number> | null>(null);
+  useEffect(() => {
+    import('@/assets/images/tiles/connection-counts').then((m) =>
+      setPrecomputedConnectionCounts(m.TILE_CONNECTION_COUNTS)
+    );
+  }, []);
+
+  const getConnectionCount = useCallback((name: string): number => {
+    const pre = precomputedConnectionCounts?.[name];
+    if (pre !== undefined) return pre;
+    let count = connectionCountCache.get(name);
+    if (count === undefined) {
+      count = getConnectionCountFromFileName(name);
+      connectionCountCache.set(name, count);
+    }
+    return count;
+  }, [precomputedConnectionCounts]);
+
   const [useFullOrder, setUseFullOrder] = useState(false);
+  const renderIdRef = useRef(0);
+  renderIdRef.current += 1;
+  const renderId = renderIdRef.current;
+  paletteProfileStartRender(tileSources.length, useFullOrder, renderId);
   useEffect(() => {
     setUseFullOrder(false);
     const id = requestAnimationFrame(() => setUseFullOrder(true));
@@ -241,18 +258,22 @@ export function TileBrushPanel({
   /** Connection counts deferred until after first paint to keep initial load fast. */
   const connectionCountByIndex = useMemo(
     () =>
-      useFullOrder ? tileSources.map((tile) => getConnectionCount(tile.name)) : [],
-    [tileSources, useFullOrder]
+      paletteProfileMeasure('connectionCountByIndexMs', () =>
+        useFullOrder ? tileSources.map((tile) => getConnectionCount(tile.name)) : []
+      ),
+    [tileSources, useFullOrder, getConnectionCount]
   );
   const tileEntries = useMemo(
     () =>
-      tileSources.map((tile, index) => ({
-        type: 'fixed' as const,
-        tile,
-        index,
-        isFavorite: Boolean(favorites[tile.name]),
-        connectionCount: connectionCountByIndex[index] ?? 0,
-      })),
+      paletteProfileMeasure('tileEntriesMs', () =>
+        tileSources.map((tile, index) => ({
+          type: 'fixed' as const,
+          tile,
+          index,
+          isFavorite: Boolean(favorites[tile.name]),
+          connectionCount: connectionCountByIndex[index] ?? 0,
+        }))
+      ),
     [favorites, tileSources, connectionCountByIndex]
   );
   const favoriteColorOptions = useMemo(
@@ -270,62 +291,77 @@ export function TileBrushPanel({
     [favoriteColorOptions]
   );
   /** Cheap order for first paint: favorites first, then rest; no connection grouping. */
-  const simpleOrderedEntries = useMemo((): PaletteEntry[] => {
-    const favoritesList = tileEntries
-      .filter((e) => e.isFavorite)
-      .sort((a, b) => {
-        const rankA = colorRank(favorites[a.tile.name] ?? '');
-        const rankB = colorRank(favorites[b.tile.name] ?? '');
-        if (rankA !== rankB) return rankA - rankB;
-        return a.index - b.index;
-      });
-    const nonFavorites = tileEntries.filter((e) => !e.isFavorite);
-    return [...favoritesList, ...nonFavorites];
-  }, [tileEntries, favorites, colorRank]);
-  const fullOrderedEntries = useMemo((): PaletteEntry[] => {
-    const favoritesList = tileEntries
-      .filter((e) => e.isFavorite)
-      .sort((a, b) => {
-        const rankA = colorRank(favorites[a.tile.name] ?? '');
-        const rankB = colorRank(favorites[b.tile.name] ?? '');
-        if (rankA !== rankB) return rankA - rankB;
-        return a.index - b.index;
-      });
-    const byConnections = new Map<number, (typeof tileEntries)[number][]>();
-    for (let n = 0; n <= 8; n++) byConnections.set(n, []);
-    for (const e of tileEntries) {
-      byConnections.get(e.connectionCount)!.push(e);
-    }
-    const result: PaletteEntry[] = [...favoritesList];
-    for (let n = 0; n <= 8; n++) {
-      const group = byConnections.get(n) ?? [];
-      if (group.length > 0) {
-        result.push({ type: 'separator', connectionCount: n });
-        result.push(...group);
-      }
-    }
-    return result;
-  }, [tileEntries, favorites, colorRank]);
+  const simpleOrderedEntries = useMemo(
+    (): PaletteEntry[] =>
+      paletteProfileMeasure('simpleOrderedEntriesMs', () => {
+        const favoritesList = tileEntries
+          .filter((e) => e.isFavorite)
+          .sort((a, b) => {
+            const rankA = colorRank(favorites[a.tile.name] ?? '');
+            const rankB = colorRank(favorites[b.tile.name] ?? '');
+            if (rankA !== rankB) return rankA - rankB;
+            return a.index - b.index;
+          });
+        const nonFavorites = tileEntries.filter((e) => !e.isFavorite);
+        return [...favoritesList, ...nonFavorites];
+      }),
+    [tileEntries, favorites, colorRank]
+  );
+  const fullOrderedEntries = useMemo(
+    (): PaletteEntry[] =>
+      paletteProfileMeasure('fullOrderedEntriesMs', () => {
+        const favoritesList = tileEntries
+          .filter((e) => e.isFavorite)
+          .sort((a, b) => {
+            const rankA = colorRank(favorites[a.tile.name] ?? '');
+            const rankB = colorRank(favorites[b.tile.name] ?? '');
+            if (rankA !== rankB) return rankA - rankB;
+            return a.index - b.index;
+          });
+        const byConnections = new Map<number, (typeof tileEntries)[number][]>();
+        for (let n = 0; n <= 8; n++) byConnections.set(n, []);
+        for (const e of tileEntries) {
+          byConnections.get(e.connectionCount)!.push(e);
+        }
+        const result: PaletteEntry[] = [...favoritesList];
+        for (let n = 0; n <= 8; n++) {
+          const group = byConnections.get(n) ?? [];
+          if (group.length > 0) {
+            result.push({ type: 'separator', connectionCount: n });
+            result.push(...group);
+          }
+        }
+        return result;
+      }),
+    [tileEntries, favorites, colorRank]
+  );
   const orderedTileEntries = useFullOrder ? fullOrderedEntries : simpleOrderedEntries;
   const [collapsedFolders, setCollapsedFolders] = useState<Set<number>>(() => new Set());
-  const displayOrderedEntries = useMemo((): PaletteEntry[] => {
-    const result: PaletteEntry[] = [];
-    let i = 0;
-    while (i < orderedTileEntries.length) {
-      const e = orderedTileEntries[i];
-      if (e.type === 'separator') {
-        result.push(e);
-        i++;
-        if (collapsedFolders.has(e.connectionCount)) {
-          while (i < orderedTileEntries.length && orderedTileEntries[i].type !== 'separator') i++;
+  const displayOrderedEntries = useMemo(
+    (): PaletteEntry[] =>
+      paletteProfileMeasure('displayOrderedEntriesMs', () => {
+        const result: PaletteEntry[] = [];
+        let i = 0;
+        while (i < orderedTileEntries.length) {
+          const e = orderedTileEntries[i];
+          if (e.type === 'separator') {
+            result.push(e);
+            i++;
+            if (collapsedFolders.has(e.connectionCount)) {
+              while (i < orderedTileEntries.length && orderedTileEntries[i].type !== 'separator') i++;
+            }
+          } else {
+            result.push(e);
+            i++;
+          }
         }
-      } else {
-        result.push(e);
-        i++;
-      }
-    }
-    return result;
-  }, [orderedTileEntries, collapsedFolders]);
+        return result;
+      }),
+    [orderedTileEntries, collapsedFolders]
+  );
+  useEffect(() => {
+    paletteProfileLog();
+  });
   const toggleFolder = (connectionCount: number) => {
     setCollapsedFolders((prev) => {
       const next = new Set(prev);

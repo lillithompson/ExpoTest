@@ -7,7 +7,18 @@ const path = require('path');
 const root = process.cwd();
 const tilesDir = path.join(root, 'assets', 'images', 'tiles');
 const outputPath = path.join(tilesDir, 'manifest.ts');
+const connectionCountsPath = path.join(tilesDir, 'connection-counts.ts');
 const imageExt = /\.(png|jpg|jpeg|webp|svg)$/i;
+const TILE_NAME_PATTERN = /^.+_([01]{8})\.(png|jpe?g|webp|svg)$/i;
+
+function getConnectionCount(fileName) {
+  const match = fileName.match(TILE_NAME_PATTERN);
+  if (!match) return 0;
+  let count = 0;
+  const digits = match[1];
+  for (let i = 0; i < 8; i++) if (digits[i] === '1') count++;
+  return count;
+}
 
 if (!fs.existsSync(tilesDir)) {
   console.error('Tiles directory not found:', tilesDir);
@@ -24,6 +35,7 @@ const directories = fs
 
 const manifestEntries = [];
 const thumbnailEntries = [];
+const connectionCounts = {};
 
 for (const dirName of directories) {
   const dirPath = path.join(tilesDir, dirName);
@@ -34,6 +46,10 @@ for (const dirName of directories) {
 
   const tileFiles = files.filter((file) => file.toLowerCase() !== THUMBNAIL_FILENAME.toLowerCase());
   const hasThumbnail = files.some((f) => f.toLowerCase() === THUMBNAIL_FILENAME.toLowerCase());
+
+  tileFiles.forEach((file) => {
+    connectionCounts[file] = getConnectionCount(file);
+  });
 
   const tileEntries = tileFiles
     .map(
@@ -59,3 +75,8 @@ const output = `export const TILE_MANIFEST = {\n${manifestEntries.join(',\n')}\n
 
 fs.writeFileSync(outputPath, output, 'utf8');
 console.log(`Generated tile manifest at ${path.relative(root, outputPath)}`);
+
+const connectionCountsJson = JSON.stringify(connectionCounts, null, 0);
+const connectionCountsOutput = `/** Precomputed at build time by scripts/generate-tiles-manifest.js. Used for fast palette ordering. */\nexport const TILE_CONNECTION_COUNTS: Record<string, number> = ${connectionCountsJson};\n`;
+fs.writeFileSync(connectionCountsPath, connectionCountsOutput, 'utf8');
+console.log(`Generated connection counts at ${path.relative(root, connectionCountsPath)}`);

@@ -86,6 +86,7 @@ import {
     serializeFileBundle,
     serializePatternBundle,
 } from '@/utils/tile-bundle-format';
+import { paletteProfileLogParent } from '@/utils/palette-profile';
 import { getTransformedConnectionsForName, parseTileConnections, transformConnections } from '@/utils/tile-compat';
 import {
     buildSourceXmlCache,
@@ -996,10 +997,12 @@ export default function TestScreen() {
     },
     [bakedSourcesBySetId, currentBakedNameSets]
   );
-  const paletteSources = useMemo(
-    () => getSourcesForSelection(activeCategories, selectedTileSetIds),
-    [activeCategories, selectedTileSetIds, getSourcesForSelection]
-  );
+  const paletteSources = useMemo(() => {
+    const t0 = performance.now();
+    const result = getSourcesForSelection(activeCategories, selectedTileSetIds);
+    paletteProfileLogParent('paletteSources', performance.now() - t0, `sources=${result.length}`);
+    return result;
+  }, [activeCategories, selectedTileSetIds, getSourcesForSelection]);
   const allSourceLookup = useMemo(() => {
     const map = new Map<string, TileSource>();
     TILE_CATEGORIES.forEach((category) => {
