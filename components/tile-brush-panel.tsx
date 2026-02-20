@@ -1076,7 +1076,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#3f3f3f',
   },
   separatorBar: {
-    marginRight: 1,
+    marginRight: 2,
     alignItems: 'center',
     justifyContent: 'flex-start',
     paddingTop: 4,
@@ -1099,19 +1099,19 @@ const styles = StyleSheet.create({
     opacity: 0.9,
   },
   item: {
-    marginRight: 1,
-    backgroundColor: '#000',
+    marginRight: 2,
+    backgroundColor: '#0F1430',
     alignItems: 'center',
     justifyContent: 'center',
     padding: 0,
     overflow: 'hidden',
   },
   itemLabelMode: {
-    backgroundColor: '#1a1a28',
+    backgroundColor: '#0F1430',
   },
   itemBorderOverlay: {
     ...StyleSheet.absoluteFillObject,
-    borderWidth: 6,
+    borderWidth: 4,
   },
   itemDimmed: {
     opacity: 0.7,

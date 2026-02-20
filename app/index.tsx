@@ -109,7 +109,7 @@ const TITLE_SPACING = 0;
 const BRUSH_PANEL_HEIGHT = 160;
 const PATTERN_THUMB_HEIGHT = 70;
 const PATTERN_THUMB_PADDING = 4;
-const BRUSH_PANEL_ROW_GAP = 1;
+const BRUSH_PANEL_ROW_GAP = 2;
 /** Reserve space for horizontal scrollbar so the bottom row is not cut off on desktop web. */
 const WEB_SCROLLBAR_HEIGHT = 17;
 /** On mobile web, only commit single-finger paint on touchmove after this delay (ms) so a second finger can register. */
