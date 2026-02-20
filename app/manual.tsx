@@ -155,7 +155,7 @@ export default function ManualScreen() {
         <ToolRow
           icon="view-grid"
           label="Pattern"
-          description="Long press or double tap to open the pattern picker; create, select, or manage patterns. Pattern can use mirror and 90° rotation in the picker."
+          description="Long press or double tap to open the pattern picker; tap a pattern to select it. Long press or double tap a pattern for Pattern Properties (orientation)."
         />
 
         <ThemedText type="defaultSemiBold" style={styles.subsection}>Pattern creation</ThemedText>

@@ -88,7 +88,7 @@ The strip at the bottom is your **brush panel**: tile palette + special brushes.
 - **Palette tiles** — Each small tile is a fixed brush. **Tap** to select it, then **tap on the grid** to place it. **Double tap** a palette tile to cycle rotation and mirror. **Long press** a palette tile to add or remove it from **Favorites** (with a color tag); favorites appear at the front of the palette.
 - **Clone** (copy icon) — **Tap** a cell to set the source; then **tap or drag** elsewhere to paint a copy. Clone “wraps” around the grid. **Long press on the grid** to set a new clone source at that cell.
 - **Erase** (eraser icon) — **Tap** a cell to clear it. **Flood** with Erase selected clears the whole grid.
-- **Pattern** (grid icon) — Uses a saved pattern. **Long press** or **double tap** the Pattern button to open the **pattern picker**: create new patterns, select one, or enter select mode. When creating a pattern, drag on the grid to define the shape, then save it in a category. Pattern can use mirror and 90° rotation options in the picker.
+- **Pattern** (grid icon) — Uses a saved pattern. **Long press** or **double tap** the Pattern button to open the **pattern picker**: create new patterns, select one, or enter select mode. **Tap** a pattern to select it. **Long press** or **double tap** a pattern in the picker to open **Pattern Properties**: set orientation (eight options: 0°, 90°, 180°, 270° with and without mirror). When creating a pattern, drag on the grid to define the shape, then save it in a category.
 
 ---
 

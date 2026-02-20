@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 
 import { type TileSource } from '@/assets/images/tiles/manifest';
+import { PatternThumbnail } from '@/components/pattern-thumbnail';
 import { ThemedText } from '@/components/themed-text';
 import { TileAsset } from '@/components/tile-asset';
 import { TileAtlasSprite } from '@/components/tile-atlas-sprite';
@@ -54,6 +55,7 @@ type Props = {
   onRotate: (index: number) => void;
   onMirror: (index: number) => void;
   onMirrorVertical: (index: number) => void;
+  onPatternPress?: () => void;
   onPatternLongPress?: () => void;
   onPatternDoubleTap?: () => void;
   onRandomLongPress?: () => void;
@@ -66,6 +68,24 @@ type Props = {
     index: number,
     orientation: { rotation: number; mirrorX: boolean; mirrorY: boolean }
   ) => void;
+  /** All patterns for the patterns section (Pattern button + these thumbs). Shown in a collapsible section like tile groups. */
+  patternList?: Array<{
+    id: string;
+    pattern: { tiles: Tile[]; width: number; height: number };
+    rotation: number;
+    mirrorX: boolean;
+    tileSetIds?: string[];
+  }>;
+  /** Resolve a tile for a pattern thumbnail (tile set context). */
+  resolveTileForPatternList?: (
+    tile: Tile,
+    tileSetIds: string[] | undefined
+  ) => { source: unknown | null; name: string };
+  onSelectPattern?: (patternId: string) => void;
+  /** When user long-presses a pattern thumb, open Pattern Properties for that pattern. */
+  onPatternThumbLongPress?: (patternId: string) => void;
+  /** Current pattern id when brush mode is pattern (to highlight the pattern thumb). */
+  selectedPatternId?: string | null;
   height: number;
   itemSize: number;
   rowGap: number;
@@ -88,6 +108,8 @@ const defaultFavoritesState: FavoritesState = {
 const UNFAVORITE_SENTINEL = '__unfavorite__';
 
 const SEPARATOR_BAR_WIDTH = 18;
+/** Section key for the collapsible patterns section (connection counts are 0–8). */
+const PATTERNS_SECTION_KEY = -1;
 
 const connectionCountCache = new Map<string, number>();
 
@@ -185,6 +207,7 @@ export function TileBrushPanel({
   onRotate,
   onMirror,
   onMirrorVertical,
+  onPatternPress,
   onPatternLongPress,
   onPatternDoubleTap,
   onRandomLongPress,
@@ -193,6 +216,11 @@ export function TileBrushPanel({
   getMirror,
   getMirrorVertical,
   onSetOrientation,
+  patternList,
+  resolveTileForPatternList,
+  onSelectPattern,
+  onPatternThumbLongPress,
+  selectedPatternId,
   height,
   itemSize,
   rowGap,
@@ -337,18 +365,62 @@ export function TileBrushPanel({
   );
   const orderedTileEntries = useFullOrder ? fullOrderedEntries : simpleOrderedEntries;
   const [collapsedFolders, setCollapsedFolders] = useState<Set<number>>(() => new Set());
+  type PatternSectionEntry =
+    | { type: 'separator'; connectionCount: number }
+    | { type: 'pattern' }
+    | {
+        type: 'pattern-thumb';
+        id: string;
+        pattern: { tiles: Tile[]; width: number; height: number };
+        rotation: number;
+        mirrorX: boolean;
+        tileSetIds?: string[];
+      };
+  const fullOrderedEntriesWithPatterns = useMemo((): (PaletteEntry | PatternSectionEntry)[] => {
+    if (!showPattern) {
+      return orderedTileEntries;
+    }
+    const sep: PatternSectionEntry = {
+      type: 'separator',
+      connectionCount: PATTERNS_SECTION_KEY,
+    };
+    const patternBtn: PatternSectionEntry = { type: 'pattern' };
+    const thumbs: PatternSectionEntry[] = (patternList ?? []).map((p) => ({
+      type: 'pattern-thumb' as const,
+      id: p.id,
+      pattern: p.pattern,
+      rotation: p.rotation,
+      mirrorX: p.mirrorX,
+      tileSetIds: p.tileSetIds,
+    }));
+    return [sep, patternBtn, ...thumbs, ...orderedTileEntries];
+  }, [orderedTileEntries, patternList, showPattern]);
   const displayOrderedEntries = useMemo(
-    (): PaletteEntry[] =>
+    (): (PaletteEntry | PatternSectionEntry)[] =>
       paletteProfileMeasure('displayOrderedEntriesMs', () => {
-        const result: PaletteEntry[] = [];
+        const result: (PaletteEntry | PatternSectionEntry)[] = [];
         let i = 0;
-        while (i < orderedTileEntries.length) {
-          const e = orderedTileEntries[i];
+        const list = fullOrderedEntriesWithPatterns;
+        while (i < list.length) {
+          const e = list[i];
           if (e.type === 'separator') {
             result.push(e);
             i++;
-            if (collapsedFolders.has(e.connectionCount)) {
-              while (i < orderedTileEntries.length && orderedTileEntries[i].type !== 'separator') i++;
+            if (
+              e.connectionCount === PATTERNS_SECTION_KEY &&
+              collapsedFolders.has(PATTERNS_SECTION_KEY)
+            ) {
+              while (
+                i < list.length &&
+                (list[i].type === 'pattern' || list[i].type === 'pattern-thumb')
+              ) {
+                i++;
+              }
+            } else if (
+              e.connectionCount !== PATTERNS_SECTION_KEY &&
+              collapsedFolders.has(e.connectionCount)
+            ) {
+              while (i < list.length && list[i].type !== 'separator') i++;
             }
           } else {
             result.push(e);
@@ -357,7 +429,7 @@ export function TileBrushPanel({
         }
         return result;
       }),
-    [orderedTileEntries, collapsedFolders]
+    [fullOrderedEntriesWithPatterns, collapsedFolders]
   );
   useEffect(() => {
     paletteProfileLog();
@@ -463,7 +535,6 @@ export function TileBrushPanel({
             { type: 'draw' as const },
             { type: 'clone' as const },
             { type: 'erase' as const },
-            ...(showPattern ? [{ type: 'pattern' as const }] : []),
             ...displayOrderedEntries,
           ].map((entry, idx) => {
             const rowIndex = idx % rowCount;
@@ -471,6 +542,7 @@ export function TileBrushPanel({
             if (entry.type === 'separator') {
               const n = entry.connectionCount;
               const isCollapsed = collapsedFolders.has(n);
+              const isPatternsSection = n === PATTERNS_SECTION_KEY;
               return (
                 <Pressable
                   key={`sep-${n}`}
@@ -481,20 +553,41 @@ export function TileBrushPanel({
                     { width: SEPARATOR_BAR_WIDTH, height: columnHeight },
                   ]}
                   accessibilityRole="button"
-                  accessibilityLabel={isCollapsed ? `Expand folder ${n}` : `Collapse folder ${n}`}
+                  accessibilityLabel={
+                    isPatternsSection
+                      ? isCollapsed
+                        ? 'Expand patterns'
+                        : 'Collapse patterns'
+                      : isCollapsed
+                        ? `Expand folder ${n}`
+                        : `Collapse folder ${n}`
+                  }
                 >
-                  <ThemedText type="default" style={styles.separatorBarText}>
-                    {String(n)}
-                  </ThemedText>
-                  {isCollapsed && (
+                  {isPatternsSection ? (
                     <View style={styles.separatorBarIconWrap} pointerEvents="none">
                       <MaterialCommunityIcons
-                        name="chevron-right"
+                        name={isCollapsed ? 'chevron-right' : 'view-grid-outline'}
                         size={SEPARATOR_BAR_WIDTH * 0.75}
                         color="#374151"
                         style={styles.separatorBarIcon}
                       />
                     </View>
+                  ) : (
+                    <>
+                      <ThemedText type="default" style={styles.separatorBarText}>
+                        {String(n)}
+                      </ThemedText>
+                      {isCollapsed && (
+                        <View style={styles.separatorBarIconWrap} pointerEvents="none">
+                          <MaterialCommunityIcons
+                            name="chevron-right"
+                            size={SEPARATOR_BAR_WIDTH * 0.75}
+                            color="#374151"
+                            style={styles.separatorBarIcon}
+                          />
+                        </View>
+                      )}
+                    </>
                   )}
                 </Pressable>
               );
@@ -504,6 +597,7 @@ export function TileBrushPanel({
             const isErase = entry.type === 'erase';
             const isClone = entry.type === 'clone';
             const isPattern = entry.type === 'pattern';
+            const isPatternThumb = entry.type === 'pattern-thumb';
             const isTile = entry.type === 'fixed';
             const isSelected = isRandom
               ? selected.mode === 'random'
@@ -514,8 +608,10 @@ export function TileBrushPanel({
                   : isClone
                     ? selected.mode === 'clone'
                     : isPattern
-                      ? selected.mode === 'pattern'
-                      : isTile && selected.mode === 'fixed' && selected.index === entry.index;
+                      ? false
+                      : isPatternThumb
+                        ? selected.mode === 'pattern' && selectedPatternId === entry.id
+                        : isTile && selected.mode === 'fixed' && selected.index === entry.index;
             const isLabelMode = isRandom || isDraw || isErase || isClone || isPattern;
             const rotation =
               isTile ? getRotation(entry.index) : 0;
@@ -527,38 +623,6 @@ export function TileBrushPanel({
               isTile ? favorites[entry.tile.name] : null;
             const tileScale =
               isTile ? strokeScaleByName?.get(entry.tile.name) ?? 1 : 1;
-            const previewRotationCW = ((selectedPattern?.rotation ?? 0) + 360) % 360;
-            const previewRotationCCW = (360 - previewRotationCW) % 360;
-            const previewMirrorX = selectedPattern?.mirrorX ?? false;
-            const previewWidth =
-              previewRotationCW % 180 === 0
-                ? selectedPattern?.width ?? 0
-                : selectedPattern?.height ?? 0;
-            const previewHeight =
-              previewRotationCW % 180 === 0
-                ? selectedPattern?.height ?? 0
-                : selectedPattern?.width ?? 0;
-            const previewMax = Math.max(10, Math.floor(itemSize * 0.6));
-            const previewTileSize = Math.max(
-              4,
-              Math.floor(previewMax / Math.max(1, previewHeight))
-            );
-            const previewSizeSquare =
-              previewWidth > 0 && previewHeight > 0
-                ? Math.min(previewWidth, previewHeight)
-                : 0;
-            const previewStartRow =
-              previewHeight > 0 && previewSizeSquare > 0
-                ? Math.floor((previewHeight - previewSizeSquare) / 2)
-                : 0;
-            const previewStartCol =
-              previewWidth > 0 && previewSizeSquare > 0
-                ? Math.floor((previewWidth - previewSizeSquare) / 2)
-                : 0;
-            const previewTileSizeFill =
-              previewSizeSquare > 0
-                ? Math.max(1, Math.ceil(itemSize / previewSizeSquare))
-                : 0;
             return (
               <Pressable
                 key={
@@ -570,13 +634,20 @@ export function TileBrushPanel({
                         ? 'erase'
                         : isClone
                           ? 'clone'
-                          : isPattern
+                            : isPattern
                             ? 'pattern'
-                            : isTile
-                              ? `palette-${idx}`
-                              : 'tile'
+                            : isPatternThumb
+                              ? `pattern-thumb-${entry.id}`
+                              : isTile
+                                ? `palette-${idx}`
+                                : 'tile'
                 }
-                onPressIn={() =>
+                onPressIn={() => {
+                  if (isPatternThumb) {
+                    onSelectPattern?.(entry.id);
+                    onSelect({ mode: 'pattern' });
+                    return;
+                  }
                   onSelect(
                     isRandom
                       ? { mode: 'random' }
@@ -589,10 +660,10 @@ export function TileBrushPanel({
                             : isPattern
                               ? { mode: 'pattern' }
                               : { mode: 'fixed', index: entry.index, rotation, mirrorX, mirrorY }
-                  )
-                }
+                  );
+                }}
                 onPress={() => {
-                  if (isErase || isClone) {
+                  if (isErase || isClone || isPatternThumb) {
                     return;
                   }
                   const now = Date.now();
@@ -619,6 +690,7 @@ export function TileBrushPanel({
                       onPatternDoubleTap?.();
                       lastTapRef.current = null;
                     } else {
+                      onPatternPress?.();
                       lastTapRef.current = { time: now, index: idx };
                     }
                     return;
@@ -649,6 +721,10 @@ export function TileBrushPanel({
                     onPatternLongPress?.();
                     return;
                   }
+                  if (isPatternThumb) {
+                    onPatternThumbLongPress?.(entry.id);
+                    return;
+                  }
                   if (isTile) {
                     openFavoriteDialog(entry);
                   }
@@ -670,11 +746,13 @@ export function TileBrushPanel({
                         ? 'Erase brush'
                         : isClone
                           ? 'Clone brush'
-                          : isPattern
+                            : isPattern
                             ? 'Pattern brush'
-                            : isTile
-                              ? `Brush ${entry.tile.name}`
-                              : 'Brush'
+                            : isPatternThumb
+                              ? `Pattern ${entry.id}`
+                              : isTile
+                                ? `Brush ${entry.tile.name}`
+                                : 'Brush'
                 }
               >
                 <View
@@ -735,119 +813,50 @@ export function TileBrushPanel({
                     </ThemedText>
                   </View>
                 ) : isPattern ? (
-                  selectedPattern && (patternThumbnailNode ?? previewSizeSquare > 0) ? (
-                    <View style={[styles.patternButton, styles.patternThumbnailFull]}>
-                      {patternThumbnailNode ?? (
-                        <View
-                          style={{
-                            width: previewSizeSquare * previewTileSizeFill,
-                            height: previewSizeSquare * previewTileSizeFill,
-                            flexDirection: 'column',
-                          }}
-                        >
-                          {Array.from({ length: previewSizeSquare }, (_, rowIndex) => {
-                            const actualRow = previewStartRow + rowIndex;
-                            return (
-                              <View
-                                key={`pattern-preview-row-${rowIndex}`}
-                                style={{ flexDirection: 'row' }}
-                              >
-                                {Array.from(
-                                  { length: previewSizeSquare },
-                                  (_, colIndex) => {
-                                    const actualCol = previewStartCol + colIndex;
-                                    let mappedRow = actualRow;
-                                    let mappedCol = actualCol;
-                                    if (previewMirrorX) {
-                                      mappedCol = previewWidth - 1 - mappedCol;
-                                    }
-                                    let sourceRow = mappedRow;
-                                    let sourceCol = mappedCol;
-                                    if (previewRotationCCW === 90) {
-                                      sourceRow = mappedCol;
-                                      sourceCol =
-                                        (selectedPattern?.width ?? 0) - 1 - mappedRow;
-                                    } else if (previewRotationCCW === 180) {
-                                      sourceRow =
-                                        (selectedPattern?.height ?? 0) - 1 - mappedRow;
-                                      sourceCol =
-                                        (selectedPattern?.width ?? 0) - 1 - mappedCol;
-                                    } else if (previewRotationCCW === 270) {
-                                      sourceRow =
-                                        (selectedPattern?.height ?? 0) - 1 - mappedCol;
-                                      sourceCol = mappedRow;
-                                    }
-                                    const index =
-                                      sourceRow * (selectedPattern?.width ?? 0) + sourceCol;
-                                    const tile = selectedPattern?.tiles[index];
-                                    const resolved =
-                                      tile && resolvePatternTile
-                                        ? resolvePatternTile(tile as Tile)
-                                        : tile && tile.imageIndex >= 0
-                                          ? {
-                                              source: tileSources[tile.imageIndex]?.source ?? null,
-                                              name: tileSources[tile.imageIndex]?.name ?? '',
-                                            }
-                                          : { source: null as unknown | null, name: '' };
-                                    const tileName = resolved.name;
-                                    const source = resolved.source;
-                                    return (
-                                      <View
-                                        key={`pattern-preview-cell-${rowIndex}-${colIndex}`}
-                                        style={{
-                                          width: previewTileSizeFill,
-                                          height: previewTileSizeFill,
-                                          backgroundColor: 'transparent',
-                                        }}
-                                      >
-                                        {source && tile && (
-                                          <TileAsset
-                                            source={source}
-                                            name={tileName}
-                                            strokeColor={strokeColor}
-                                            strokeWidth={
-                                              strokeWidth !== undefined
-                                                ? strokeWidth *
-                                                  (strokeScaleByName?.get(tileName) ?? 1)
-                                                : undefined
-                                            }
-                                            style={{
-                                              width: '100%',
-                                              height: '100%',
-                                              transform: [
-                                                { scaleX: tile.mirrorX ? -1 : 1 },
-                                                { scaleY: tile.mirrorY ? -1 : 1 },
-                                                {
-                                                  rotate: `${(tile.rotation + previewRotationCW) % 360}deg`,
-                                                },
-                                              ],
-                                            }}
-                                            resizeMode="cover"
-                                          />
-                                        )}
-                                      </View>
-                                    );
-                                  }
-                                )}
-                              </View>
-                            );
-                          })}
-                        </View>
+                  <View style={styles.labelButton}>
+                    <MaterialCommunityIcons
+                      name="view-grid-outline"
+                      size={itemSize * 0.4}
+                      color="#fff"
+                      style={styles.labelIcon}
+                    />
+                    <ThemedText type="default" style={styles.labelTextSmall}>
+                      Pattern
+                    </ThemedText>
+                  </View>
+                ) : isPatternThumb && resolveTileForPatternList ? (
+                  <View
+                    style={[
+                      styles.tileContentWrapper,
+                      { width: itemSize, height: itemSize },
+                    ]}
+                  >
+                    <PatternThumbnail
+                      pattern={entry.pattern}
+                      rotationCW={entry.rotation}
+                      mirrorX={entry.mirrorX}
+                      tileSize={Math.max(
+                        4,
+                        Math.floor(
+                          itemSize /
+                            Math.max(
+                              entry.rotation % 180 === 0
+                                ? entry.pattern.width
+                                : entry.pattern.height,
+                              entry.rotation % 180 === 0
+                                ? entry.pattern.height
+                                : entry.pattern.width
+                            )
+                        )
                       )}
-                    </View>
-                  ) : (
-                    <View style={styles.labelButton}>
-                      <MaterialCommunityIcons
-                        name="view-grid-outline"
-                        size={itemSize * 0.4}
-                        color="#fff"
-                        style={styles.labelIcon}
-                      />
-                      <ThemedText type="default" style={styles.labelTextSmall}>
-                        Pattern
-                      </ThemedText>
-                    </View>
-                  )
+                      resolveTile={(t) =>
+                        resolveTileForPatternList(t, entry.tileSetIds)
+                      }
+                      strokeColor={strokeColor}
+                      strokeWidth={strokeWidth}
+                      strokeScaleByName={strokeScaleByName}
+                    />
+                  </View>
                 ) : (
                   <View
                     style={[
