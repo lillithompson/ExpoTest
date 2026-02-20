@@ -7173,6 +7173,27 @@ export default function TestScreen() {
           getRotation={(index) => paletteRotations[index] ?? 0}
           getMirror={(index) => paletteMirrors[index] ?? false}
           getMirrorVertical={(index) => paletteMirrorsY[index] ?? false}
+          onSetOrientation={(index, orientation) => {
+            dismissModifyBanner();
+            setPaletteRotations((prev) => ({ ...prev, [index]: orientation.rotation }));
+            setPaletteMirrors((prev) => ({ ...prev, [index]: orientation.mirrorX }));
+            setPaletteMirrorsY((prev) => ({ ...prev, [index]: orientation.mirrorY }));
+            const source = paletteSources[index];
+            const fileIndex = source ? tileIndexByName.get(source.name) ?? -1 : -1;
+            if (brush.mode === 'fixed' && fileIndex >= 0 && brush.index === fileIndex) {
+              if (source?.name != null) {
+                fixedBrushSourceNameRef.current = source.name;
+              }
+              setBrush({
+                mode: 'fixed',
+                index: fileIndex,
+                sourceName: source?.name,
+                rotation: orientation.rotation,
+                mirrorX: orientation.mirrorX,
+                mirrorY: orientation.mirrorY,
+              });
+            }
+          }}
           onPatternLongPress={() => {
             dismissModifyBanner();
             if (brush.mode !== 'pattern') {

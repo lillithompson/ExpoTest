@@ -1348,6 +1348,23 @@ export default function ModifyTileScreen() {
           getRotation={(index) => paletteRotations[index] ?? 0}
           getMirror={(index) => paletteMirrors[index] ?? false}
           getMirrorVertical={(index) => paletteMirrorsY[index] ?? false}
+          onSetOrientation={(index, orientation) => {
+            dismissModifyBanner();
+            setPaletteRotations((prev) => ({ ...prev, [index]: orientation.rotation }));
+            setPaletteMirrors((prev) => ({ ...prev, [index]: orientation.mirrorX }));
+            setPaletteMirrorsY((prev) => ({ ...prev, [index]: orientation.mirrorY }));
+            if (brush.mode === 'fixed' && brush.index === index) {
+              const src = tileSources[index];
+              setBrush({
+                mode: 'fixed',
+                index,
+                sourceName: src?.name,
+                rotation: orientation.rotation,
+                mirrorX: orientation.mirrorX,
+                mirrorY: orientation.mirrorY,
+              });
+            }
+          }}
           onRandomLongPress={() => {
             dismissModifyBanner();
             setShowTileSetChooser(true);

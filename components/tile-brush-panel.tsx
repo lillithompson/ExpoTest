@@ -55,6 +55,11 @@ type Props = {
   getRotation: (index: number) => number;
   getMirror: (index: number) => boolean;
   getMirrorVertical: (index: number) => boolean;
+  /** When user picks an orientation in the long-press modal, set palette tile to that transform. */
+  onSetOrientation?: (
+    index: number,
+    orientation: { rotation: number; mirrorX: boolean; mirrorY: boolean }
+  ) => void;
   height: number;
   itemSize: number;
   rowGap: number;
@@ -72,6 +77,25 @@ const defaultFavoritesState: FavoritesState = {
   favorites: {},
   lastColor: '#f59e0b',
 };
+
+/** Draft value meaning "remove from favorites". */
+const UNFAVORITE_SENTINEL = '__unfavorite__';
+
+/** All 8 orientation variants: 4 rotations × 2 (no mirror / mirror X). */
+const ORIENTATION_VARIANTS: Array<{
+  rotation: number;
+  mirrorX: boolean;
+  mirrorY: boolean;
+}> = [
+  { rotation: 0, mirrorX: false, mirrorY: false },
+  { rotation: 90, mirrorX: false, mirrorY: false },
+  { rotation: 180, mirrorX: false, mirrorY: false },
+  { rotation: 270, mirrorX: false, mirrorY: false },
+  { rotation: 0, mirrorX: true, mirrorY: false },
+  { rotation: 90, mirrorX: true, mirrorY: false },
+  { rotation: 180, mirrorX: true, mirrorY: false },
+  { rotation: 270, mirrorX: true, mirrorY: false },
+];
 
 const favoritesStore = (() => {
   let state: FavoritesState = defaultFavoritesState;
@@ -158,6 +182,7 @@ export function TileBrushPanel({
   getRotation,
   getMirror,
   getMirrorVertical,
+  onSetOrientation,
   height,
   itemSize,
   rowGap,
@@ -203,7 +228,7 @@ export function TileBrushPanel({
     [favorites, tileSources]
   );
   const favoriteColorOptions = useMemo(
-    () => ['#ef4444', '#f59e0b', '#22c55e', '#3b82f6', '#a855f7', '#e5e7eb'],
+    () => ['#ef4444', '#f59e0b', '#22c55e', '#3b82f6', '#a855f7'],
     []
   );
   const orderedTileEntries = useMemo(() => {
@@ -236,7 +261,7 @@ export function TileBrushPanel({
   };
 
   const applyFavoriteColorImmediate = (color: string) => {
-    if (!favoriteDialog) return;
+    if (!favoriteDialog || color === UNFAVORITE_SENTINEL) return;
     const trimmed = color.trim();
     if (!trimmed) return;
     const current = favoritesStore.getState();
@@ -244,6 +269,17 @@ export function TileBrushPanel({
       favorites: { ...current.favorites, [favoriteDialog.name]: trimmed },
       lastColor: trimmed,
     });
+  };
+
+  const removeFromFavorites = () => {
+    if (!favoriteDialog) return;
+    const nextFavorites = { ...favorites };
+    delete nextFavorites[favoriteDialog.name];
+    favoritesStore.setState({
+      favorites: nextFavorites,
+      lastColor: lastFavoriteColorRef.current,
+    });
+    setFavoriteColorDraft(UNFAVORITE_SENTINEL);
   };
 
   const closeFavoriteDialog = () => {
@@ -254,18 +290,18 @@ export function TileBrushPanel({
     if (!favoriteDialog) {
       return;
     }
-    if (favoriteDialog.mode === 'remove') {
-    const nextFavorites = { ...favorites };
-    delete nextFavorites[favoriteDialog.name];
-    favoritesStore.setState({
-      favorites: nextFavorites,
-      lastColor: lastFavoriteColorRef.current,
-    });
-    closeFavoriteDialog();
-    return;
-  }
-  const nextColor = favoriteColorDraft.trim();
-  if (!nextColor) {
+    if (favoriteColorDraft === UNFAVORITE_SENTINEL) {
+      const nextFavorites = { ...favorites };
+      delete nextFavorites[favoriteDialog.name];
+      favoritesStore.setState({
+        favorites: nextFavorites,
+        lastColor: lastFavoriteColorRef.current,
+      });
+      closeFavoriteDialog();
+      return;
+    }
+    const nextColor = favoriteColorDraft.trim();
+    if (!nextColor) {
       closeFavoriteDialog();
       return;
     }
@@ -698,13 +734,20 @@ export function TileBrushPanel({
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalPanel}>
+            <ScrollView
+              style={styles.modalScroll}
+              contentContainerStyle={styles.modalScrollContent}
+              showsVerticalScrollIndicator={true}
+              keyboardShouldPersistTaps="handled"
+            >
             <ThemedText type="title" style={styles.modalTitle}>
-              {favoriteDialog?.mode === 'remove'
-                ? 'Unfavorite Tile?'
-                : 'Favorite Tile?'}
+              Tile Properties
             </ThemedText>
             {(favoriteDialog?.mode === 'add' || favoriteDialog?.mode === 'remove') && (
               <View style={styles.modalSection}>
+                <ThemedText type="defaultSemiBold" style={styles.sectionLabel}>
+                  Favorite
+                </ThemedText>
                 <View style={styles.colorOptions}>
                   {favoriteColorOptions.map((color) => (
                     <Pressable
@@ -724,15 +767,102 @@ export function TileBrushPanel({
                       accessibilityLabel={`Choose ${color}`}
                     />
                   ))}
+                  <Pressable
+                    onPress={removeFromFavorites}
+                    style={[
+                      styles.colorSwatch,
+                      styles.unfavoriteSwatch,
+                      favoriteColorDraft === UNFAVORITE_SENTINEL &&
+                        styles.colorSwatchSelected,
+                    ]}
+                    accessibilityRole="button"
+                    accessibilityLabel="Remove from favorites"
+                  >
+                    <MaterialCommunityIcons
+                      name="star-off-outline"
+                      size={20}
+                      color="#6b7280"
+                    />
+                  </Pressable>
                 </View>
               </View>
             )}
+            {favoriteDialog != null && onSetOrientation && tileSources[favoriteDialog.index] && (
+              <View style={styles.modalSection}>
+                <ThemedText type="defaultSemiBold" style={styles.sectionLabel}>
+                  Orientation
+                </ThemedText>
+                <View style={styles.orientationGrid}>
+                  {[0, 1].map((row) => (
+                    <View key={row} style={styles.orientationRow}>
+                      {ORIENTATION_VARIANTS.slice(row * 4, row * 4 + 4).map((orient, i) => {
+                        const idx = row * 4 + i;
+                        const curR = getRotation(favoriteDialog.index);
+                        const curX = getMirror(favoriteDialog.index);
+                        const curY = getMirrorVertical(favoriteDialog.index);
+                        const isActive =
+                          curR === orient.rotation &&
+                          curX === orient.mirrorX &&
+                          curY === orient.mirrorY;
+                        const tileSource = tileSources[favoriteDialog.index];
+                        return (
+                          <Pressable
+                            key={idx}
+                            onPress={() =>
+                              onSetOrientation(favoriteDialog.index, {
+                                rotation: orient.rotation,
+                                mirrorX: orient.mirrorX,
+                                mirrorY: orient.mirrorY,
+                              })
+                            }
+                            style={[
+                              styles.orientationThumb,
+                              isActive && styles.orientationThumbSelected,
+                            ]}
+                            accessibilityRole="button"
+                            accessibilityLabel={`Orientation ${idx + 1}`}
+                          >
+                            <View style={styles.orientationThumbImageWrap}>
+                              <TileAtlasSprite
+                                atlas={atlas}
+                                source={tileSource.source}
+                                name={tileSource.name}
+                                strokeColor={favorites[tileSource.name] ?? strokeColor}
+                                strokeWidth={
+                                  strokeWidth !== undefined
+                                    ? strokeWidth *
+                                      (strokeScaleByName?.get(tileSource.name) ?? 1)
+                                    : undefined
+                                }
+                                preferAtlas={false}
+                                style={[
+                                  styles.orientationThumbImage,
+                                  {
+                                    transform: [
+                                      { scaleX: orient.mirrorX ? -1 : 1 },
+                                      { scaleY: orient.mirrorY ? -1 : 1 },
+                                      { rotate: `${orient.rotation}deg` },
+                                    ],
+                                  },
+                                ]}
+                                resizeMode="contain"
+                              />
+                            </View>
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+                  ))}
+                </View>
+              </View>
+            )}
+            </ScrollView>
             <View style={styles.modalActions}>
               <Pressable
                 onPress={closeFavoriteDialog}
                 style={[styles.modalButton, styles.modalButtonGhost]}
                 accessibilityRole="button"
-                accessibilityLabel="Cancel favorite"
+                accessibilityLabel="Cancel"
               >
                 <ThemedText type="defaultSemiBold">Cancel</ThemedText>
               </Pressable>
@@ -740,14 +870,10 @@ export function TileBrushPanel({
                 onPress={commitFavorite}
                 style={[styles.modalButton, styles.modalButtonPrimary]}
                 accessibilityRole="button"
-                accessibilityLabel={
-                  favoriteDialog?.mode === 'remove'
-                    ? 'Remove from favorites'
-                    : 'Favorite tile'
-                }
+                accessibilityLabel="Done"
               >
                 <ThemedText type="defaultSemiBold" style={styles.modalButtonText}>
-                  {favoriteDialog?.mode === 'remove' ? 'Remove' : 'Favorite'}
+                  Done
                 </ThemedText>
               </Pressable>
             </View>
@@ -862,11 +988,19 @@ const styles = StyleSheet.create({
     padding: 20,
   },
   modalPanel: {
-    width: '100%',
-    maxWidth: 360,
+    alignSelf: 'center',
+    maxWidth: 280,
+    maxHeight: '80%',
     backgroundColor: '#fff',
     borderRadius: 10,
     padding: 16,
+    gap: 12,
+  },
+  modalScroll: {
+    maxHeight: 320,
+  },
+  modalScrollContent: {
+    paddingBottom: 8,
     gap: 12,
   },
   modalTitle: {
@@ -887,9 +1021,48 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#d1d5db',
   },
+  unfavoriteSwatch: {
+    backgroundColor: '#f3f4f6',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   colorSwatchSelected: {
     borderColor: '#111',
     borderWidth: 2,
+  },
+  sectionLabel: {
+    color: '#111',
+    marginBottom: 6,
+  },
+  orientationGrid: {
+    gap: 6,
+  },
+  orientationRow: {
+    flexDirection: 'row',
+    gap: 6,
+  },
+  orientationThumb: {
+    width: 48,
+    height: 48,
+    borderRadius: 4,
+    borderWidth: 1,
+    borderColor: '#d1d5db',
+    overflow: 'hidden',
+    backgroundColor: '#000',
+  },
+  orientationThumbSelected: {
+    borderColor: '#22c55e',
+    borderWidth: 2,
+  },
+  orientationThumbImageWrap: {
+    width: '100%',
+    height: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  orientationThumbImage: {
+    width: '100%',
+    height: '100%',
   },
   modalActions: {
     flexDirection: 'row',
