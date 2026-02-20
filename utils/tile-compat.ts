@@ -55,6 +55,16 @@ export const parseTileConnections = (fileName: string) => {
   return connections;
 };
 
+/** Lightweight 0–8 count from filename; no array allocation. Use for palette ordering. */
+export function getConnectionCountFromFileName(fileName: string): number {
+  const match = fileName.match(TILE_NAME_PATTERN);
+  if (!match) return 0;
+  let count = 0;
+  const digits = match[1];
+  for (let i = 0; i < 8; i++) if (digits[i] === '1') count++;
+  return count;
+}
+
 export const rotateConnections = (
   connections: TileConnections,
   rotationSteps: number

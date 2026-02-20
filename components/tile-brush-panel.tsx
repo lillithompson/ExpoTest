@@ -17,6 +17,7 @@ import { TileAsset } from '@/components/tile-asset';
 import { TileAtlasSprite } from '@/components/tile-atlas-sprite';
 import { type TileAtlas } from '@/utils/tile-atlas';
 import { type Tile } from '@/utils/tile-grid';
+import { getConnectionCountFromFileName } from '@/utils/tile-compat';
 
 type Brush =
   | { mode: 'random' }
@@ -80,6 +81,20 @@ const defaultFavoritesState: FavoritesState = {
 
 /** Draft value meaning "remove from favorites". */
 const UNFAVORITE_SENTINEL = '__unfavorite__';
+
+const SEPARATOR_BAR_WIDTH = 14;
+
+const connectionCountCache = new Map<string, number>();
+
+/** Connection count from tile name (0–8); non-matching names yield 0. Cached per name to avoid repeated regex work. */
+function getConnectionCount(name: string): number {
+  let count = connectionCountCache.get(name);
+  if (count === undefined) {
+    count = getConnectionCountFromFileName(name);
+    connectionCountCache.set(name, count);
+  }
+  return count;
+}
 
 /** All 8 orientation variants: 4 rotations × 2 (no mirror / mirror X). */
 const ORIENTATION_VARIANTS: Array<{
@@ -217,6 +232,18 @@ export function TileBrushPanel({
     return unsubscribe;
   }, []);
 
+  const [useFullOrder, setUseFullOrder] = useState(false);
+  useEffect(() => {
+    setUseFullOrder(false);
+    const id = requestAnimationFrame(() => setUseFullOrder(true));
+    return () => cancelAnimationFrame(id);
+  }, [tileSources, favorites]);
+  /** Connection counts deferred until after first paint to keep initial load fast. */
+  const connectionCountByIndex = useMemo(
+    () =>
+      useFullOrder ? tileSources.map((tile) => getConnectionCount(tile.name)) : [],
+    [tileSources, useFullOrder]
+  );
   const tileEntries = useMemo(
     () =>
       tileSources.map((tile, index) => ({
@@ -224,29 +251,62 @@ export function TileBrushPanel({
         tile,
         index,
         isFavorite: Boolean(favorites[tile.name]),
+        connectionCount: connectionCountByIndex[index] ?? 0,
       })),
-    [favorites, tileSources]
+    [favorites, tileSources, connectionCountByIndex]
   );
   const favoriteColorOptions = useMemo(
     () => ['#ef4444', '#f59e0b', '#22c55e', '#3b82f6', '#a855f7'],
     []
   );
-  const orderedTileEntries = useMemo(() => {
-    const colorRank = (color: string) => {
+  type PaletteEntry =
+    | { type: 'separator'; connectionCount: number }
+    | (typeof tileEntries)[number];
+  const colorRank = useMemo(
+    () => (color: string) => {
       const i = favoriteColorOptions.indexOf(color);
       return i >= 0 ? i : favoriteColorOptions.length;
-    };
-    return [...tileEntries].sort((a, b) => {
-      if (a.isFavorite === b.isFavorite) {
-        if (!a.isFavorite) return a.index - b.index;
+    },
+    [favoriteColorOptions]
+  );
+  /** Cheap order for first paint: favorites first, then rest; no connection grouping. */
+  const simpleOrderedEntries = useMemo((): PaletteEntry[] => {
+    const favoritesList = tileEntries
+      .filter((e) => e.isFavorite)
+      .sort((a, b) => {
         const rankA = colorRank(favorites[a.tile.name] ?? '');
         const rankB = colorRank(favorites[b.tile.name] ?? '');
         if (rankA !== rankB) return rankA - rankB;
         return a.index - b.index;
+      });
+    const nonFavorites = tileEntries.filter((e) => !e.isFavorite);
+    return [...favoritesList, ...nonFavorites];
+  }, [tileEntries, favorites, colorRank]);
+  const fullOrderedEntries = useMemo((): PaletteEntry[] => {
+    const favoritesList = tileEntries
+      .filter((e) => e.isFavorite)
+      .sort((a, b) => {
+        const rankA = colorRank(favorites[a.tile.name] ?? '');
+        const rankB = colorRank(favorites[b.tile.name] ?? '');
+        if (rankA !== rankB) return rankA - rankB;
+        return a.index - b.index;
+      });
+    const byConnections = new Map<number, (typeof tileEntries)[number][]>();
+    for (let n = 0; n <= 8; n++) byConnections.set(n, []);
+    for (const e of tileEntries) {
+      byConnections.get(e.connectionCount)!.push(e);
+    }
+    const result: PaletteEntry[] = [...favoritesList];
+    for (let n = 0; n <= 8; n++) {
+      const group = byConnections.get(n) ?? [];
+      if (group.length > 0) {
+        result.push({ type: 'separator', connectionCount: n });
+        result.push(...group);
       }
-      return a.isFavorite ? -1 : 1;
-    });
-  }, [tileEntries, favorites, favoriteColorOptions]);
+    }
+    return result;
+  }, [tileEntries, favorites, colorRank]);
+  const orderedTileEntries = useFullOrder ? fullOrderedEntries : simpleOrderedEntries;
   const cycleRef = useRef<Record<string, number>>({});
 
   const openFavoriteDialog = (entry: { tile: TileSource; index: number }) => {
@@ -343,11 +403,31 @@ export function TileBrushPanel({
             ...(showPattern ? [{ type: 'pattern' as const }] : []),
             ...orderedTileEntries,
           ].map((entry, idx) => {
+            const rowIndex = idx % rowCount;
+            const isLastRow = rowIndex === rowCount - 1;
+            if (entry.type === 'separator') {
+              const n = entry.connectionCount;
+              return (
+                <View
+                  key={`sep-${n}`}
+                  style={[
+                    styles.separatorBar,
+                    { width: SEPARATOR_BAR_WIDTH, height: columnHeight },
+                  ]}
+                  pointerEvents="none"
+                >
+                  <ThemedText type="default" style={styles.separatorBarText}>
+                    {String(n)}
+                  </ThemedText>
+                </View>
+              );
+            }
             const isRandom = entry.type === 'random';
             const isDraw = entry.type === 'draw';
             const isErase = entry.type === 'erase';
             const isClone = entry.type === 'clone';
             const isPattern = entry.type === 'pattern';
+            const isTile = entry.type === 'fixed';
             const isSelected = isRandom
               ? selected.mode === 'random'
               : isDraw
@@ -358,20 +438,18 @@ export function TileBrushPanel({
                     ? selected.mode === 'clone'
                     : isPattern
                       ? selected.mode === 'pattern'
-                      : selected.mode === 'fixed' && selected.index === entry.index;
-            const rowIndex = idx % rowCount;
-            const isLastRow = rowIndex === rowCount - 1;
+                      : isTile && selected.mode === 'fixed' && selected.index === entry.index;
             const isLabelMode = isRandom || isDraw || isErase || isClone || isPattern;
             const rotation =
-              !isLabelMode ? getRotation(entry.index) : 0;
+              isTile ? getRotation(entry.index) : 0;
             const mirrorX =
-              !isLabelMode ? getMirror(entry.index) : false;
+              isTile ? getMirror(entry.index) : false;
             const mirrorY =
-              !isLabelMode ? getMirrorVertical(entry.index) : false;
+              isTile ? getMirrorVertical(entry.index) : false;
             const favoriteColor =
-              !isLabelMode ? favorites[entry.tile.name] : null;
+              isTile ? favorites[entry.tile.name] : null;
             const tileScale =
-              !isLabelMode ? strokeScaleByName?.get(entry.tile.name) ?? 1 : 1;
+              isTile ? strokeScaleByName?.get(entry.tile.name) ?? 1 : 1;
             const previewRotationCW = ((selectedPattern?.rotation ?? 0) + 360) % 360;
             const previewRotationCCW = (360 - previewRotationCW) % 360;
             const previewMirrorX = selectedPattern?.mirrorX ?? false;
@@ -417,7 +495,9 @@ export function TileBrushPanel({
                           ? 'clone'
                           : isPattern
                             ? 'pattern'
-                            : `tile-${entry.index}`
+                            : isTile
+                              ? `palette-${idx}`
+                              : 'tile'
                 }
                 onPressIn={() =>
                   onSelect(
@@ -443,30 +523,30 @@ export function TileBrushPanel({
                   if (isRandom) {
                     if (
                       lastTap &&
-                      lastTap.index === entry.index &&
+                      lastTap.index === idx &&
                       now - lastTap.time < 260
                     ) {
                       onRandomDoubleTap?.();
                       lastTapRef.current = null;
                     } else {
-                      lastTapRef.current = { time: now, index: entry.index };
+                      lastTapRef.current = { time: now, index: idx };
                     }
                     return;
                   }
                   if (isPattern) {
                     if (
                       lastTap &&
-                      lastTap.index === entry.index &&
+                      lastTap.index === idx &&
                       now - lastTap.time < 260
                     ) {
                       onPatternDoubleTap?.();
                       lastTapRef.current = null;
                     } else {
-                      lastTapRef.current = { time: now, index: entry.index };
+                      lastTapRef.current = { time: now, index: idx };
                     }
                     return;
                   }
-                  if (lastTap && lastTap.index === entry.index && now - lastTap.time < 260) {
+                  if (isTile && lastTap && lastTap.index === idx && now - lastTap.time < 260) {
                     const name = entry.tile.name;
                     const current = cycleRef.current[name] ?? 0;
                     const next = (current + 1) % 5;
@@ -480,7 +560,7 @@ export function TileBrushPanel({
                     }
                     lastTapRef.current = null;
                   } else {
-                    lastTapRef.current = { time: now, index: entry.index };
+                    lastTapRef.current = { time: now, index: idx };
                   }
                 }}
                 onLongPress={() => {
@@ -492,7 +572,7 @@ export function TileBrushPanel({
                     onPatternLongPress?.();
                     return;
                   }
-                  if (!isRandom && !isErase && !isClone && !isPattern) {
+                  if (isTile) {
                     openFavoriteDialog(entry);
                   }
                 }}
@@ -515,7 +595,9 @@ export function TileBrushPanel({
                           ? 'Clone brush'
                           : isPattern
                             ? 'Pattern brush'
-                            : `Brush ${entry.tile.name}`
+                            : isTile
+                              ? `Brush ${entry.tile.name}`
+                              : 'Brush'
                 }
               >
                 <View
@@ -754,9 +836,7 @@ export function TileBrushPanel({
                       key={color}
                       onPress={() => {
                         setFavoriteColorDraft(color);
-                        if (favoriteDialog?.mode === 'remove') {
-                          applyFavoriteColorImmediate(color);
-                        }
+                        applyFavoriteColorImmediate(color);
                       }}
                       style={[
                         styles.colorSwatch,
@@ -886,7 +966,8 @@ export function TileBrushPanel({
 
 const styles = StyleSheet.create({
   container: {
-    borderTopWidth: 1,
+    borderTopWidth: 2,
+    borderTopColor: '#9ca3af',
     borderColor: '#1f1f1f',
     paddingHorizontal: 1,
     paddingVertical: 0,
@@ -917,6 +998,18 @@ const styles = StyleSheet.create({
     gap: 0,
     backgroundColor: '#3f3f3f',
   },
+  separatorBar: {
+    marginRight: 1,
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+    paddingTop: 4,
+    backgroundColor: '#9ca3af',
+  },
+  separatorBarText: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#374151',
+  },
   item: {
     marginRight: 1,
     backgroundColor: '#000',
@@ -930,7 +1023,7 @@ const styles = StyleSheet.create({
   },
   itemBorderOverlay: {
     ...StyleSheet.absoluteFillObject,
-    borderWidth: 4,
+    borderWidth: 5,
   },
   itemDimmed: {
     opacity: 0.7,
