@@ -82,7 +82,7 @@ const defaultFavoritesState: FavoritesState = {
 /** Draft value meaning "remove from favorites". */
 const UNFAVORITE_SENTINEL = '__unfavorite__';
 
-const SEPARATOR_BAR_WIDTH = 14;
+const SEPARATOR_BAR_WIDTH = 18;
 
 const connectionCountCache = new Map<string, number>();
 
@@ -307,6 +307,33 @@ export function TileBrushPanel({
     return result;
   }, [tileEntries, favorites, colorRank]);
   const orderedTileEntries = useFullOrder ? fullOrderedEntries : simpleOrderedEntries;
+  const [collapsedFolders, setCollapsedFolders] = useState<Set<number>>(() => new Set());
+  const displayOrderedEntries = useMemo((): PaletteEntry[] => {
+    const result: PaletteEntry[] = [];
+    let i = 0;
+    while (i < orderedTileEntries.length) {
+      const e = orderedTileEntries[i];
+      if (e.type === 'separator') {
+        result.push(e);
+        i++;
+        if (collapsedFolders.has(e.connectionCount)) {
+          while (i < orderedTileEntries.length && orderedTileEntries[i].type !== 'separator') i++;
+        }
+      } else {
+        result.push(e);
+        i++;
+      }
+    }
+    return result;
+  }, [orderedTileEntries, collapsedFolders]);
+  const toggleFolder = (connectionCount: number) => {
+    setCollapsedFolders((prev) => {
+      const next = new Set(prev);
+      if (next.has(connectionCount)) next.delete(connectionCount);
+      else next.add(connectionCount);
+      return next;
+    });
+  };
   const cycleRef = useRef<Record<string, number>>({});
 
   const openFavoriteDialog = (entry: { tile: TileSource; index: number }) => {
@@ -401,25 +428,39 @@ export function TileBrushPanel({
             { type: 'clone' as const },
             { type: 'erase' as const },
             ...(showPattern ? [{ type: 'pattern' as const }] : []),
-            ...orderedTileEntries,
+            ...displayOrderedEntries,
           ].map((entry, idx) => {
             const rowIndex = idx % rowCount;
             const isLastRow = rowIndex === rowCount - 1;
             if (entry.type === 'separator') {
               const n = entry.connectionCount;
+              const isCollapsed = collapsedFolders.has(n);
               return (
-                <View
+                <Pressable
                   key={`sep-${n}`}
+                  onPress={() => toggleFolder(n)}
                   style={[
                     styles.separatorBar,
+                    isCollapsed && styles.separatorBarCollapsed,
                     { width: SEPARATOR_BAR_WIDTH, height: columnHeight },
                   ]}
-                  pointerEvents="none"
+                  accessibilityRole="button"
+                  accessibilityLabel={isCollapsed ? `Expand folder ${n}` : `Collapse folder ${n}`}
                 >
                   <ThemedText type="default" style={styles.separatorBarText}>
                     {String(n)}
                   </ThemedText>
-                </View>
+                  {isCollapsed && (
+                    <View style={styles.separatorBarIconWrap} pointerEvents="none">
+                      <MaterialCommunityIcons
+                        name="chevron-right"
+                        size={SEPARATOR_BAR_WIDTH * 0.75}
+                        color="#374151"
+                        style={styles.separatorBarIcon}
+                      />
+                    </View>
+                  )}
+                </Pressable>
               );
             }
             const isRandom = entry.type === 'random';
@@ -1005,10 +1046,21 @@ const styles = StyleSheet.create({
     paddingTop: 4,
     backgroundColor: '#9ca3af',
   },
+  separatorBarCollapsed: {
+    backgroundColor: '#c4c8d0',
+  },
   separatorBarText: {
     fontSize: 12,
     fontWeight: '800',
     color: '#374151',
+  },
+  separatorBarIconWrap: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  separatorBarIcon: {
+    opacity: 0.9,
   },
   item: {
     marginRight: 1,
