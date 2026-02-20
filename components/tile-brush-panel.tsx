@@ -556,7 +556,10 @@ export function TileBrushPanel({
                   style={[
                     styles.separatorBar,
                     isCollapsed && styles.separatorBarCollapsed,
-                    { width: SEPARATOR_BAR_WIDTH, height: columnHeight },
+                    {
+                      width: isCollapsed ? SEPARATOR_BAR_WIDTH * 2 : SEPARATOR_BAR_WIDTH,
+                      height: columnHeight,
+                    },
                   ]}
                   accessibilityRole="button"
                   accessibilityLabel={
