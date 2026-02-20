@@ -520,7 +520,7 @@ export default function ModifyTileScreen() {
       ? Math.max(0, brushPanelHeight - WEB_SCROLLBAR_HEIGHT)
       : brushPanelHeight;
   /** If row height would exceed this (px), use more rows so each row stays at or below it. */
-  const MAX_BRUSH_ROW_HEIGHT = 120;
+  const MAX_BRUSH_ROW_HEIGHT = 80;
   const minRowsForHeight = Math.ceil(
     (brushContentHeight + BRUSH_PANEL_ROW_GAP) /
       (MAX_BRUSH_ROW_HEIGHT + BRUSH_PANEL_ROW_GAP)

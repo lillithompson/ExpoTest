@@ -1111,7 +1111,7 @@ const styles = StyleSheet.create({
   },
   itemBorderOverlay: {
     ...StyleSheet.absoluteFillObject,
-    borderWidth: 5,
+    borderWidth: 6,
   },
   itemDimmed: {
     opacity: 0.7,
