@@ -934,12 +934,26 @@ export default function TestScreen() {
     showPatternChooser && brush.mode === 'pattern' && !isPatternCreationMode;
 
   const availableWidth = contentWidth - CONTENT_PADDING * 2;
+  /** In modify view, reserve space for the brush panel (pinned to bottom); else use constant. */
+  const reservedBrushHeight =
+    viewMode === 'modify'
+      ? Math.min(
+          200,
+          Math.max(
+            0,
+            contentHeight -
+              HEADER_HEIGHT -
+              CONTENT_PADDING * 2 -
+              TITLE_SPACING
+          )
+        )
+      : BRUSH_PANEL_HEIGHT;
   const availableHeight = Math.max(
     contentHeight -
       HEADER_HEIGHT -
       CONTENT_PADDING * 2 -
       TITLE_SPACING -
-      BRUSH_PANEL_HEIGHT,
+      reservedBrushHeight,
     0
   );
 
@@ -1642,14 +1656,21 @@ export default function TestScreen() {
   const gridHeight =
     gridLayout.rows * gridLayout.tileSize +
     GRID_GAP * Math.max(0, gridLayout.rows - 1);
-  const brushPanelHeight = Math.max(
-    0,
-    contentHeight -
-      HEADER_HEIGHT -
-      CONTENT_PADDING * 2 -
-      TITLE_SPACING -
-      gridHeight
-  );
+  /** In modify view the panel is pinned to the bottom with reserved height; else dynamic. */
+  const brushPanelHeight =
+    viewMode === 'modify'
+      ? reservedBrushHeight
+      : Math.min(
+          200,
+          Math.max(
+            0,
+            contentHeight -
+              HEADER_HEIGHT -
+              CONTENT_PADDING * 2 -
+              TITLE_SPACING -
+              gridHeight
+          )
+        );
   const isDesktopWeb =
     Platform.OS === 'web' && width >= FILE_VIEW_DESKTOP_BREAKPOINT;
   const brushContentHeight =
@@ -1657,12 +1678,12 @@ export default function TestScreen() {
       ? Math.max(0, brushPanelHeight - WEB_SCROLLBAR_HEIGHT)
       : brushPanelHeight;
   /** If row height would exceed this (px), use more rows so each row stays at or below it. */
-  const MAX_BRUSH_ROW_HEIGHT = 80;
+  const MAX_BRUSH_ROW_HEIGHT = 100;
   const minRowsForHeight = Math.ceil(
     (brushContentHeight + BRUSH_PANEL_ROW_GAP) /
       (MAX_BRUSH_ROW_HEIGHT + BRUSH_PANEL_ROW_GAP)
   );
-  const brushRows = Math.max(2, Math.min(minRowsForHeight, 5));
+  const brushRows = Math.max(2, Math.min(minRowsForHeight, 3));
   const brushItemSize = Math.max(
     0,
     Math.floor(
@@ -5945,6 +5966,7 @@ export default function TestScreen() {
         <View
           style={[
             Platform.OS === 'web' && styles.gridCanvasWebCenter,
+            viewMode === 'modify' && styles.gridCanvasAreaCentered,
           ]}
         >
           <View
@@ -9092,6 +9114,13 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
     position: 'relative',
     backgroundColor: '#3F3F3F',
+    flexDirection: 'column',
+  },
+  /** Canvas area between header and brush panel: takes remaining space and centers the grid vertically. */
+  gridCanvasAreaCentered: {
+    flex: 1,
+    justifyContent: 'center',
+    backgroundColor: '#111111',
   },
   grid: {
     alignContent: 'flex-start',
