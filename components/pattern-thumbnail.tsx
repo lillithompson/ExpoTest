@@ -37,85 +37,87 @@ export function PatternThumbnail({
   strokeWidth,
   strokeScaleByName,
 }: Props) {
-  const rotationCCW = (360 - rotationCW) % 360;
   const rotatedWidth =
     rotationCW % 180 === 0 ? pattern.width : pattern.height;
   const rotatedHeight =
     rotationCW % 180 === 0 ? pattern.height : pattern.width;
   const keyPrefix = pattern.id ?? 'pattern';
 
+  // Rotate the whole pattern as a single group (one transform), not each tile.
+  const innerWidth = pattern.width * tileSize;
+  const innerHeight = pattern.height * tileSize;
+  // Mirror in pattern space first, then rotate the group.
+  const groupTransform = [
+    ...(mirrorX ? [{ scaleX: -1 }] : []),
+    { rotate: `${rotationCW}deg` },
+  ];
+
   return (
     <View
       style={{
         width: rotatedWidth * tileSize,
         height: rotatedHeight * tileSize,
-        flexDirection: 'column',
+        justifyContent: 'center',
+        alignItems: 'center',
+        overflow: 'hidden',
       }}
     >
-      {Array.from({ length: rotatedHeight }, (_, rowIndex) => (
-        <View
-          key={`pattern-row-${keyPrefix}-${rowIndex}`}
-          style={{ flexDirection: 'row' }}
-        >
-          {Array.from({ length: rotatedWidth }, (_, colIndex) => {
-            let mappedRow = rowIndex;
-            let mappedCol = colIndex;
-            if (mirrorX) {
-              mappedCol = rotatedWidth - 1 - mappedCol;
-            }
-            let sourceRow = mappedRow;
-            let sourceCol = mappedCol;
-            if (rotationCCW === 90) {
-              sourceRow = mappedCol;
-              sourceCol = pattern.width - 1 - mappedRow;
-            } else if (rotationCCW === 180) {
-              sourceRow = pattern.height - 1 - mappedRow;
-              sourceCol = pattern.width - 1 - mappedCol;
-            } else if (rotationCCW === 270) {
-              sourceRow = pattern.height - 1 - mappedCol;
-              sourceCol = mappedRow;
-            }
-            const index = sourceRow * pattern.width + sourceCol;
-            const tile = pattern.tiles[index];
-            const resolved = tile ? resolveTile(tile) : { source: null as unknown | null, name: '' };
-            const tileName = resolved.name;
-            const source = resolved.source;
-            return (
-              <View
-                key={`pattern-cell-${keyPrefix}-${index}`}
-                style={{
-                  width: tileSize,
-                  height: tileSize,
-                  backgroundColor: 'transparent',
-                }}
-              >
-                {source && tile && (
-                  <TileAsset
-                    source={source}
-                    name={tileName}
-                    strokeColor={strokeColor}
-                    strokeWidth={
-                      strokeWidth !== undefined && strokeScaleByName?.get(tileName) !== undefined
-                        ? strokeWidth * (strokeScaleByName.get(tileName) ?? 1)
-                        : strokeWidth
-                    }
-                    style={{
-                      width: '100%',
-                      height: '100%',
-                      transform: [
-                        { scaleX: tile.mirrorX !== mirrorX ? -1 : 1 },
-                        { scaleY: tile.mirrorY ? -1 : 1 },
-                        { rotate: `${(tile.rotation + rotationCW) % 360}deg` },
-                      ],
-                    }}
-                    resizeMode="cover"
-                  />
-                )}
-              </View>
-            );
-          })}
-        </View>
-      ))}
+      <View
+        style={{
+          width: innerWidth,
+          height: innerHeight,
+          transform: groupTransform,
+          flexDirection: 'column',
+        }}
+      >
+        {Array.from({ length: pattern.height }, (_, rowIndex) => (
+          <View
+            key={`pattern-row-${keyPrefix}-${rowIndex}`}
+            style={{ flexDirection: 'row' }}
+          >
+            {Array.from({ length: pattern.width }, (_, colIndex) => {
+              const index = rowIndex * pattern.width + colIndex;
+              const tile = pattern.tiles[index];
+              const resolved = tile ? resolveTile(tile) : { source: null as unknown | null, name: '' };
+              const tileName = resolved.name;
+              const source = resolved.source;
+              return (
+                <View
+                  key={`pattern-cell-${keyPrefix}-${index}`}
+                  style={{
+                    width: tileSize,
+                    height: tileSize,
+                    backgroundColor: 'transparent',
+                  }}
+                >
+                  {source && tile && (
+                    <TileAsset
+                      source={source}
+                      name={tileName}
+                      strokeColor={strokeColor}
+                      strokeWidth={
+                        strokeWidth !== undefined && strokeScaleByName?.get(tileName) !== undefined
+                          ? strokeWidth * (strokeScaleByName.get(tileName) ?? 1)
+                          : strokeWidth
+                      }
+                      style={{
+                        width: '100%',
+                        height: '100%',
+                        transform: [
+                          { scaleX: tile.mirrorX ? -1 : 1 },
+                          { scaleY: tile.mirrorY ? -1 : 1 },
+                          { rotate: `${tile.rotation}deg` },
+                        ],
+                      }}
+                      resizeMode="cover"
+                    />
+                  )}
+                </View>
+              );
+            })}
+          </View>
+        ))}
+      </View>
     </View>
   );
 }

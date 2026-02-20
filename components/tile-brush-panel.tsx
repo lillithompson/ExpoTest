@@ -82,8 +82,12 @@ type Props = {
     tileSetIds: string[] | undefined
   ) => { source: unknown | null; name: string };
   onSelectPattern?: (patternId: string) => void;
+  /** When user taps the pattern icon on the separator bar, open the pattern management modal. */
+  onPatternSeparatorIconPress?: () => void;
   /** When user long-presses a pattern thumb, open Pattern Properties for that pattern. */
   onPatternThumbLongPress?: (patternId: string) => void;
+  /** When user double-taps a pattern thumb, rotate the pattern (like double-tap on a tile). */
+  onPatternThumbDoubleTap?: (patternId: string) => void;
   /** Current pattern id when brush mode is pattern (to highlight the pattern thumb). */
   selectedPatternId?: string | null;
   height: number;
@@ -219,7 +223,9 @@ export function TileBrushPanel({
   patternList,
   resolveTileForPatternList,
   onSelectPattern,
+  onPatternSeparatorIconPress,
   onPatternThumbLongPress,
+  onPatternThumbDoubleTap,
   selectedPatternId,
   height,
   itemSize,
@@ -564,14 +570,33 @@ export function TileBrushPanel({
                   }
                 >
                   {isPatternsSection ? (
-                    <View style={styles.separatorBarIconWrap} pointerEvents="none">
-                      <MaterialCommunityIcons
-                        name={isCollapsed ? 'chevron-right' : 'view-grid-outline'}
-                        size={SEPARATOR_BAR_WIDTH * 0.75}
-                        color="#374151"
-                        style={styles.separatorBarIcon}
-                      />
-                    </View>
+                    <>
+                      {isCollapsed && (
+                        <Pressable
+                          style={styles.separatorBarIconWrapTop}
+                          onPress={() => onPatternSeparatorIconPress?.()}
+                          accessibilityRole="button"
+                          accessibilityLabel="Open pattern management"
+                        >
+                          <MaterialCommunityIcons
+                            name="view-grid-outline"
+                            size={SEPARATOR_BAR_WIDTH * 0.75}
+                            color="#374151"
+                            style={styles.separatorBarIcon}
+                          />
+                        </Pressable>
+                      )}
+                      {isCollapsed && (
+                        <View style={styles.separatorBarIconWrap} pointerEvents="none">
+                          <MaterialCommunityIcons
+                            name="chevron-right"
+                            size={SEPARATOR_BAR_WIDTH * 0.75}
+                            color="#374151"
+                            style={styles.separatorBarIcon}
+                          />
+                        </View>
+                      )}
+                    </>
                   ) : (
                     <>
                       <ThemedText type="default" style={styles.separatorBarText}>
@@ -663,11 +688,24 @@ export function TileBrushPanel({
                   );
                 }}
                 onPress={() => {
-                  if (isErase || isClone || isPatternThumb) {
+                  if (isErase || isClone) {
                     return;
                   }
                   const now = Date.now();
                   const lastTap = lastTapRef.current;
+                  if (isPatternThumb) {
+                    if (
+                      lastTap &&
+                      lastTap.index === idx &&
+                      now - lastTap.time < 260
+                    ) {
+                      onPatternThumbDoubleTap?.(entry.id);
+                      lastTapRef.current = null;
+                    } else {
+                      lastTapRef.current = { time: now, index: idx };
+                    }
+                    return;
+                  }
                   if (isRandom) {
                     if (
                       lastTap &&
@@ -1103,6 +1141,12 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  /** Icon at top of separator bar to align with tops of numbers on other separators. */
+  separatorBarIconWrapTop: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 4,
   },
   separatorBarIcon: {
     opacity: 0.9,

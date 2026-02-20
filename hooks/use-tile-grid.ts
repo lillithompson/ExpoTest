@@ -4,6 +4,15 @@ import { type TileSource } from '@/assets/images/tiles/manifest';
 import { validateDrawStroke } from '@/utils/draw-stroke';
 import { buildCompatibilityTables } from '@/utils/tile-compat';
 import {
+    displayToPatternCell,
+    getRotatedDimensions,
+} from '@/utils/pattern-transform';
+import {
+    applyGroupRotationToTile,
+    normalizeRotationCW,
+    rotateCell,
+} from '@/utils/tile-group-rotate';
+import {
     buildInitialTiles,
     computeFixedGridLayout,
     computeGridLayout,
@@ -1296,38 +1305,41 @@ export const useTileGrid = ({
       return null;
     }
     const rotationCW = ((pattern.rotation % 360) + 360) % 360;
-    const rotationCCW = (360 - rotationCW) % 360;
-    const rotW = rotationCW % 180 === 0 ? pattern.width : pattern.height;
-    const rotH = rotationCW % 180 === 0 ? pattern.height : pattern.width;
+    const W = pattern.width;
+    const H = pattern.height;
+    const { rotW, rotH } = getRotatedDimensions(rotationCW, W, H);
     const localRow = ((row % rotH) + rotH) % rotH;
     const localCol = ((col % rotW) + rotW) % rotW;
-    let mappedRow = localRow;
-    let mappedCol = localCol;
-    if (pattern.mirrorX) {
-      mappedCol = rotW - 1 - mappedCol;
+    const mapped = displayToPatternCell(
+      localRow,
+      localCol,
+      W,
+      H,
+      rotationCW,
+      pattern.mirrorX
+    );
+    if (!mapped) {
+      return null;
     }
-    let sourceRow = mappedRow;
-    let sourceCol = mappedCol;
-    if (rotationCCW === 90) {
-      sourceRow = mappedCol;
-      sourceCol = pattern.width - 1 - mappedRow;
-    } else if (rotationCCW === 180) {
-      sourceRow = pattern.height - 1 - mappedRow;
-      sourceCol = pattern.width - 1 - mappedCol;
-    } else if (rotationCCW === 270) {
-      sourceRow = pattern.height - 1 - mappedCol;
-      sourceCol = mappedRow;
-    }
+    const { sourceRow, sourceCol } = mapped;
     const patternIndex = sourceRow * pattern.width + sourceCol;
     const patternTile = pattern.tiles[patternIndex];
     if (!patternTile) {
       return null;
     }
+    // Apply group rotation to the tile (same as selection-tool rotate region).
+    const rot = normalizeRotationCW(rotationCW);
+    const transformed = applyGroupRotationToTile(
+      patternTile.rotation,
+      patternTile.mirrorX,
+      patternTile.mirrorY,
+      rot
+    );
     return {
       imageIndex: patternTile.imageIndex,
-      rotation: (patternTile.rotation + rotationCW) % 360,
-      mirrorX: patternTile.mirrorX !== pattern.mirrorX,
-      mirrorY: patternTile.mirrorY,
+      rotation: transformed.rotation,
+      mirrorX: pattern.mirrorX ? !transformed.mirrorX : transformed.mirrorX,
+      mirrorY: transformed.mirrorY,
       name: patternTile.name,
     };
   };
@@ -2645,8 +2657,7 @@ export const useTileGrid = ({
       for (let r = 0; r < height; r += 1) {
         for (let c = 0; c < width; c += 1) {
           fromIndices.push((minRow + r) * gridColumns + (minCol + c));
-          const newR = c;
-          const newC = height - 1 - r;
+          const { newR, newC } = rotateCell(r, c, height, width, 90);
           toIndices.push((newMinRow + newR) * gridColumns + (newMinCol + newC));
         }
       }
@@ -2670,11 +2681,17 @@ export const useTileGrid = ({
           toIndices.forEach((index, idx) => {
             if (!lockedCellIndices?.has(index) && index >= 0 && index < next.length) {
               const tile = tilesToPlace[idx];
+              const transformed = applyGroupRotationToTile(
+                tile.rotation,
+                tile.mirrorX,
+                tile.mirrorY,
+                90
+              );
               next[index] = {
                 ...tile,
-                rotation: (tile.rotation + 90) % 360,
-                mirrorX: tile.mirrorY,
-                mirrorY: tile.mirrorX,
+                rotation: transformed.rotation,
+                mirrorX: transformed.mirrorX,
+                mirrorY: transformed.mirrorY,
               };
             }
           });

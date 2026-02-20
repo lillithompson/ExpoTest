@@ -7088,6 +7088,21 @@ export default function TestScreen() {
             dismissModifyBanner();
             setPatternPropertiesDialogPatternId(id);
           }}
+          onPatternThumbDoubleTap={(id) => {
+            dismissModifyBanner();
+            setPatternRotations((prev) => ({
+              ...prev,
+              [id]: ((prev[id] ?? 0) + 90) % 360,
+            }));
+          }}
+          onPatternSeparatorIconPress={() => {
+            dismissModifyBanner();
+            if (brush.mode !== 'pattern') {
+              setBrush({ mode: 'pattern' });
+            }
+            setIsPatternCreationMode(false);
+            setShowPatternChooser(true);
+          }}
           selectedPatternId={selectedPatternId}
           onSelect={(next) => {
             dismissModifyBanner();
@@ -7556,7 +7571,7 @@ export default function TestScreen() {
                       keyboardShouldPersistTaps="handled"
                     >
                       <ThemedText type="title" style={styles.patternPropertiesModalTitle}>
-                        Pattern Properties
+                        Properties
                       </ThemedText>
                       <View style={styles.patternPropertiesModalSection}>
                         <ThemedText type="defaultSemiBold" style={styles.patternPropertiesSectionLabel}>
