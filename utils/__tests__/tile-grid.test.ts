@@ -6,6 +6,8 @@
 import type { Tile } from '../tile-grid';
 import {
     buildInitialTiles,
+    getGridLevelLinePositions,
+    getMaxGridResolutionLevel,
     getSpiralCellOrder,
     getSpiralCellOrderInRect,
     getTileSourceIndexByName,
@@ -272,5 +274,63 @@ describe('zoom region flood invariant', () => {
         expect(afterTiles[index]).toEqual(beforeTiles[index]);
       }
     }
+  });
+});
+
+describe('grid resolution level', () => {
+  it('getMaxGridResolutionLevel returns 1 for 1×1 and 0 for empty', () => {
+    expect(getMaxGridResolutionLevel(1, 1)).toBe(1);
+    expect(getMaxGridResolutionLevel(0, 8)).toBe(0);
+    expect(getMaxGridResolutionLevel(10, 0)).toBe(0);
+  });
+
+  it('getMaxGridResolutionLevel: center-out needs ≥2 lines each way for a complete cell', () => {
+    expect(getMaxGridResolutionLevel(10, 8)).toBe(2);
+    expect(getMaxGridResolutionLevel(8, 8)).toBe(2);
+    expect(getMaxGridResolutionLevel(4, 4)).toBe(1);
+  });
+
+  it('getMaxGridResolutionLevel for 14×24: max level 3 (no complete 8×8 cell when centered)', () => {
+    expect(getMaxGridResolutionLevel(14, 24)).toBe(3);
+  });
+
+  it('getMaxGridResolutionLevel requires ≥2 lines each way so 10×1 and 1×8 only have level 1', () => {
+    expect(getMaxGridResolutionLevel(10, 1)).toBe(1);
+    expect(getMaxGridResolutionLevel(1, 8)).toBe(1);
+  });
+
+  it('getGridLevelLinePositions level 1 matches tile boundaries', () => {
+    const tileSize = 50;
+    const gap = 0;
+    const { verticalPx, horizontalPx } = getGridLevelLinePositions(4, 3, 1, tileSize, gap);
+    expect(verticalPx).toEqual([50, 100, 150]);
+    expect(horizontalPx).toEqual([50, 100]);
+  });
+
+  it('getGridLevelLinePositions level 2 for 10×8: center-out; center at 5,4; lines at 1,3,5,7,9 and 2,4,6', () => {
+    const tileSize = 50;
+    const gap = 0;
+    const { verticalPx, horizontalPx } = getGridLevelLinePositions(10, 8, 2, tileSize, gap);
+    // centerCol=5, centerRow=4, cellTiles=2. Vertical: 5±0,±2,±4 → 1,3,5,7,9. Horizontal: 4±0,±2 → 2,4,6.
+    expect(verticalPx).toHaveLength(5);
+    expect(verticalPx).toEqual([1 * 50, 3 * 50, 5 * 50, 7 * 50, 9 * 50]);
+    expect(horizontalPx).toHaveLength(3);
+    expect(horizontalPx).toEqual([2 * 50, 4 * 50, 6 * 50]);
+  });
+
+  it('getGridLevelLinePositions level 3 for 10×8: center-out; lines at 1,5,9 and 4 (center row)', () => {
+    const tileSize = 50;
+    const gap = 0;
+    const { verticalPx, horizontalPx } = getGridLevelLinePositions(10, 8, 3, tileSize, gap);
+    // centerCol=5, centerRow=4, cellTiles=4. Vertical: 5±0,±4 → 1,5,9. Horizontal: 4±0 → 4.
+    expect(verticalPx).toEqual([1 * 50, 5 * 50, 9 * 50]);
+    expect(horizontalPx).toEqual([4 * 50]);
+  });
+
+  it('getGridLevelLinePositions level 4 for 10×8: center line only (5 and 4)', () => {
+    const { verticalPx, horizontalPx } = getGridLevelLinePositions(10, 8, 4, 50, 0);
+    // cellTiles=8; center ± 8 is out of range. Only center 5 and 4.
+    expect(verticalPx).toEqual([5 * 50]);
+    expect(horizontalPx).toEqual([4 * 50]);
   });
 });

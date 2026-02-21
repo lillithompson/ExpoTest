@@ -99,7 +99,13 @@ import {
     renderTileCanvasToSvg,
 } from '@/utils/tile-export';
 import { deserializeTileFile, serializeTileFile } from '@/utils/tile-format';
-import { hydrateTilesWithSourceNames, normalizeTiles, type Tile } from '@/utils/tile-grid';
+import {
+  getGridLevelLinePositions,
+  getMaxGridResolutionLevel,
+  hydrateTilesWithSourceNames,
+  normalizeTiles,
+  type Tile,
+} from '@/utils/tile-grid';
 import { deserializePattern, deserializeTileSet, serializePattern } from '@/utils/tile-ugc-format';
 import JSZip from 'jszip';
 
@@ -515,6 +521,9 @@ type GridBackgroundProps = {
   backgroundColor: string;
   lineColor: string;
   lineWidth: number;
+  gridGap?: number;
+  /** 1 = tile grid; 2+ = subdivided halves (centered). Clamped to valid range by caller. */
+  gridResolutionLevel?: number;
 };
 
 function GridBackground({
@@ -526,13 +535,20 @@ function GridBackground({
   backgroundColor,
   lineColor,
   lineWidth,
+  gridGap = 0,
+  gridResolutionLevel = 1,
 }: GridBackgroundProps) {
   if (rows <= 0 || columns <= 0 || tileSize <= 0) {
     return null;
   }
-  const verticalLines = Array.from({ length: Math.max(0, columns - 1) }, (_, i) => i + 1);
-  const horizontalLines = Array.from({ length: Math.max(0, rows - 1) }, (_, i) => i + 1);
   const strokeWidth = Math.max(0, lineWidth);
+  const { verticalPx, horizontalPx } = getGridLevelLinePositions(
+    columns,
+    rows,
+    gridResolutionLevel,
+    tileSize,
+    gridGap
+  );
   return (
     <View
       pointerEvents="none"
@@ -542,13 +558,13 @@ function GridBackground({
       ]}
     >
       {strokeWidth > 0 &&
-        verticalLines.map((col) => (
+        verticalPx.map((left, i) => (
           <View
-            key={`grid-v-${col}`}
+            key={`grid-v-${i}`}
             style={[
               styles.gridLineVertical,
               {
-                left: col * tileSize - strokeWidth / 2,
+                left: left - strokeWidth / 2,
                 width: strokeWidth,
                 height,
                 backgroundColor: lineColor,
@@ -557,13 +573,13 @@ function GridBackground({
           />
         ))}
       {strokeWidth > 0 &&
-        horizontalLines.map((row) => (
+        horizontalPx.map((top, i) => (
           <View
-            key={`grid-h-${row}`}
+            key={`grid-h-${i}`}
             style={[
               styles.gridLineHorizontal,
               {
-                top: row * tileSize - strokeWidth / 2,
+                top: top - strokeWidth / 2,
                 height: strokeWidth,
                 width,
                 backgroundColor: lineColor,
@@ -741,6 +757,7 @@ export default function TestScreen() {
   );
   const [showSettingsOverlay, setShowSettingsOverlay] = useState(false);
   const [showDebugModal, setShowDebugModal] = useState(false);
+  const [showGridResolutionModal, setShowGridResolutionModal] = useState(false);
   const [showTileSetChooser, setShowTileSetChooser] = useState(false);
   const [showModifyTileSetBanner, setShowModifyTileSetBanner] = useState(false);
   const MODIFY_BANNER_HEIGHT = 52;
@@ -5964,6 +5981,22 @@ export default function TestScreen() {
                 controlledRandomize();
               }}
             />
+            {viewMode === 'modify' &&
+              gridLayout.rows > 0 &&
+              gridLayout.columns > 0 && (
+                <ToolbarButton
+                  label={`Grid L${Math.min(
+                    Math.max(1, settings.gridResolutionLevel ?? 1),
+                    getMaxGridResolutionLevel(gridLayout.columns, gridLayout.rows)
+                  )}`}
+                  icon="view-grid-outline"
+                  onPress={() => {
+                    dismissModifyBanner();
+                    setShowGridResolutionModal(true);
+                  }}
+                  accessibilityLabel="Grid resolution"
+                />
+              )}
             <ToolbarButton
               label={
                 !settings.mirrorHorizontal && !settings.mirrorVertical
@@ -6090,6 +6123,11 @@ export default function TestScreen() {
             backgroundColor={settings.backgroundColor}
             lineColor={settings.backgroundLineColor}
             lineWidth={settings.backgroundLineWidth}
+            gridGap={GRID_GAP}
+            gridResolutionLevel={Math.min(
+              Math.max(1, settings.gridResolutionLevel ?? 1),
+              getMaxGridResolutionLevel(gridLayout.columns, gridLayout.rows)
+            )}
           />
           {showPreview && (loadPreviewUri || clearPreviewUri) && (
             <>
@@ -8123,6 +8161,64 @@ export default function TestScreen() {
             </ThemedView>
           </ThemedView>
         )}
+        {showGridResolutionModal && viewMode === 'modify' && gridLayout.rows > 0 && gridLayout.columns > 0 && (
+          <ThemedView style={styles.overlay} accessibilityRole="dialog">
+            <Pressable
+              style={styles.overlayBackdrop}
+              onPress={() => setShowGridResolutionModal(false)}
+              accessibilityRole="button"
+              accessibilityLabel="Close grid resolution"
+            />
+            <ThemedView style={styles.overlayPanel}>
+              <ThemedView style={styles.settingsHeader}>
+                <ThemedText type="title">Grid resolution</ThemedText>
+                <Pressable
+                  onPress={() => setShowGridResolutionModal(false)}
+                  style={styles.settingsClose}
+                  accessibilityRole="button"
+                  accessibilityLabel="Close grid resolution"
+                >
+                  <ThemedText type="defaultSemiBold">X</ThemedText>
+                </Pressable>
+              </ThemedView>
+              <ThemedText type="default" style={styles.gridResolutionHint}>
+                Level 1 = tile grid. Higher levels: grid from center out (mirror cross = grid lines); partial cells at edges; lines align with tile grid.
+              </ThemedText>
+              {(() => {
+                const maxLevel = getMaxGridResolutionLevel(gridLayout.columns, gridLayout.rows);
+                const current = Math.min(
+                  Math.max(1, settings.gridResolutionLevel ?? 1),
+                  maxLevel
+                );
+                return Array.from({ length: maxLevel }, (_, i) => i + 1).map((level) => (
+                  <Pressable
+                    key={level}
+                    onPress={() => {
+                      setSettings((prev) => ({ ...prev, gridResolutionLevel: level }));
+                      setShowGridResolutionModal(false);
+                    }}
+                    style={[
+                      styles.gridResolutionOption,
+                      level === current && styles.gridResolutionOptionActive,
+                    ]}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Level ${level}${level === current ? ', selected' : ''}`}
+                  >
+                    <ThemedText
+                      type="defaultSemiBold"
+                      style={level === current ? styles.gridResolutionOptionTextActive : undefined}
+                    >
+                      Level {level}
+                    </ThemedText>
+                    {level === current && (
+                      <MaterialCommunityIcons name="check" size={20} color="#22c55e" />
+                    )}
+                  </Pressable>
+                ));
+              })()}
+            </ThemedView>
+          </ThemedView>
+        )}
         {showTileSetChooser && (
           <ThemedView style={styles.overlay} accessibilityRole="dialog">
             <Pressable
@@ -8528,6 +8624,26 @@ const styles = StyleSheet.create({
   debugResolutionText: {
     color: '#9ca3af',
     fontSize: 14,
+  },
+  gridResolutionHint: {
+    marginBottom: 12,
+    color: '#9ca3af',
+    fontSize: 13,
+  },
+  gridResolutionOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    marginBottom: 4,
+    borderRadius: 8,
+  },
+  gridResolutionOptionActive: {
+    backgroundColor: 'rgba(34, 197, 94, 0.15)',
+  },
+  gridResolutionOptionTextActive: {
+    color: '#22c55e',
   },
   settingsClose: {
     paddingHorizontal: 8,

@@ -11,6 +11,8 @@ export type AppSettings = {
   backgroundColor: string;
   backgroundLineColor: string;
   backgroundLineWidth: number;
+  /** Background grid resolution level (1 = tile grid; 2+ = subdivided halves, centered). */
+  gridResolutionLevel?: number;
   tileSetCategories?: string[];
   tileSetIds?: string[];
   tileModifyCategories?: string[];
@@ -28,6 +30,7 @@ export const getDefaultSettings = (): AppSettings => ({
   backgroundColor: '#050408',
   backgroundLineColor: '#2B2D30',
   backgroundLineWidth: 1,
+  gridResolutionLevel: 1,
   tileSetCategories: [],
   tileSetIds: [],
   tileModifyCategories: [],

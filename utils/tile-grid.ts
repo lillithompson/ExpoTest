@@ -306,3 +306,93 @@ export const computeFixedGridLayout = (
   const tileSize = Math.max(0, Math.floor(Math.min(maxTileWidth, maxTileHeight)));
   return { columns: cappedColumns, rows: cappedRows, tileSize };
 };
+
+/**
+ * Background grid resolution levels: level 1 = one grid cell per tile (full resolution).
+ * Each level halves the resolution (level 2 = 2×2 tiles per cell, level 3 = 4×4, etc.).
+ * Returns the maximum level such that the center-out grid has at least one complete
+ * cellTiles×cellTiles cell (i.e. at least two vertical and two horizontal lines).
+ */
+export function getMaxGridResolutionLevel(columns: number, rows: number): number {
+  if (columns <= 0 || rows <= 0) return 0;
+  let level = 1;
+  while (true) {
+    if (level >= 2) {
+      const cellTiles = Math.pow(2, level - 1);
+      const centerCol = Math.floor(columns / 2);
+      const centerRow = Math.floor(rows / 2);
+      const kMinV = Math.ceil((1 - centerCol) / cellTiles);
+      const kMaxV = Math.floor((columns - 1 - centerCol) / cellTiles);
+      const nVertical = Math.max(0, kMaxV - kMinV + 1);
+      const kMinH = Math.ceil((1 - centerRow) / cellTiles);
+      const kMaxH = Math.floor((rows - 1 - centerRow) / cellTiles);
+      const nHorizontal = Math.max(0, kMaxH - kMinH + 1);
+      if (nVertical < 2 || nHorizontal < 2) {
+        return level - 1;
+      }
+    }
+    level += 1;
+    if (level > 32) break;
+  }
+  return level - 1;
+}
+
+export type GridLevelLinePositions = {
+  verticalPx: number[];
+  horizontalPx: number[];
+};
+
+/**
+ * Returns pixel positions for grid lines at the given resolution level.
+ * Level 1 = all tile boundaries. Level 2+ = coarser grid with 2^(level-1) tiles
+ * per cell; lines are drawn only at level-1 boundaries so they always align.
+ * Grid is built from the center out (center = where mirror lines cross); partial
+ * cells at the edges are left. The center horizontal and vertical lines are
+ * grid lines at all levels.
+ */
+export function getGridLevelLinePositions(
+  columns: number,
+  rows: number,
+  level: number,
+  tileSize: number,
+  gridGap: number
+): GridLevelLinePositions {
+  const stride = tileSize + gridGap;
+  if (columns <= 0 || rows <= 0 || level < 1 || stride <= 0) {
+    return { verticalPx: [], horizontalPx: [] };
+  }
+  if (level === 1) {
+    const verticalPx = Array.from(
+      { length: Math.max(0, columns - 1) },
+      (_, i) => (i + 1) * stride
+    );
+    const horizontalPx = Array.from(
+      { length: Math.max(0, rows - 1) },
+      (_, i) => (i + 1) * stride
+    );
+    return { verticalPx, horizontalPx };
+  }
+  const cellTiles = Math.pow(2, level - 1);
+  const centerCol = Math.floor(columns / 2);
+  const centerRow = Math.floor(rows / 2);
+  const verticalIndices: number[] = [];
+  for (let k = Math.ceil((1 - centerCol) / cellTiles); k <= Math.floor((columns - 1 - centerCol) / cellTiles); k += 1) {
+    const pos = centerCol + k * cellTiles;
+    if (pos >= 1 && pos <= columns - 1) {
+      verticalIndices.push(pos);
+    }
+  }
+  verticalIndices.sort((a, b) => a - b);
+  const horizontalIndices: number[] = [];
+  for (let k = Math.ceil((1 - centerRow) / cellTiles); k <= Math.floor((rows - 1 - centerRow) / cellTiles); k += 1) {
+    const pos = centerRow + k * cellTiles;
+    if (pos >= 1 && pos <= rows - 1) {
+      horizontalIndices.push(pos);
+    }
+  }
+  horizontalIndices.sort((a, b) => a - b);
+  return {
+    verticalPx: verticalIndices.map((t) => t * stride),
+    horizontalPx: horizontalIndices.map((t) => t * stride),
+  };
+}
