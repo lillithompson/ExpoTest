@@ -3,7 +3,7 @@ import * as FileSystem from 'expo-file-system';
 import { Platform, Image as RNImage } from 'react-native';
 
 import { type TileSource } from '@/assets/images/tiles/manifest';
-import { type GridLayout, type Tile } from '@/utils/tile-grid';
+import { type GridLayout, type LevelGridInfo, type Tile } from '@/utils/tile-grid';
 
 type ExportParams = {
   tiles: Tile[];
@@ -639,6 +639,17 @@ export const exportTileCanvasAsSvg = async ({
   return { ok: true };
 };
 
+/** One overlay layer (e.g. L2 or L3) drawn on top of the base grid for composite thumbnails. */
+export type OverlayLayerParams = {
+  tiles: Tile[];
+  levelInfo: LevelGridInfo;
+  level1TileSize: number;
+  gridGap: number;
+  lineColor?: string;
+  lineWidth?: number;
+  strokeScaleByName?: Map<string, number>;
+};
+
 export const renderTileCanvasToDataUrl = async ({
   tiles,
   gridLayout,
@@ -652,11 +663,13 @@ export const renderTileCanvasToDataUrl = async ({
   backgroundLineColor,
   backgroundLineWidth,
   strokeScaleByName,
+  overlayLayers,
   maxDimension = 256,
   format = 'image/png',
   quality,
 }: Omit<ExportParams, 'fileName'> & {
   strokeScaleByName?: Map<string, number>;
+  overlayLayers?: OverlayLayerParams[];
   maxDimension?: number;
   format?: 'image/png' | 'image/jpeg';
   quality?: number;
@@ -847,6 +860,69 @@ export const renderTileCanvasToDataUrl = async ({
       gridLayout.tileSize
     );
     ctx.restore();
+  }
+
+  if (overlayLayers?.length) {
+    for (const layer of overlayLayers) {
+      const {
+        tiles: overlayTiles,
+        levelInfo,
+        level1TileSize,
+        gridGap: layerGap,
+        lineColor: layerLineColor,
+        lineWidth: layerLineWidth,
+        strokeScaleByName: layerStrokeScaleByName,
+      } = layer;
+      const layerStride = level1TileSize + layerGap;
+      for (let i = 0; i < levelInfo.cells.length; i += 1) {
+        const tile = overlayTiles[i];
+        if (!tile) continue;
+        const { minCol, maxCol, minRow, maxRow } = levelInfo.cells[i];
+        const left = minCol * layerStride;
+        const top = minRow * layerStride;
+        const cellW =
+          (maxCol - minCol + 1) * level1TileSize + (maxCol - minCol) * layerGap;
+        const cellH =
+          (maxRow - minRow + 1) * level1TileSize + (maxRow - minRow) * layerGap;
+        const sourceByIndex =
+          tile.imageIndex >= 0
+            ? (tileSources[tile.imageIndex] as { name?: string; source?: unknown } | undefined)
+            : null;
+        const sourceByName = tile.name
+          ? (tileSources as { name?: string; source?: unknown }[]).find((s) => s.name === tile.name)
+          : null;
+        const resolvedSource = sourceByName ?? sourceByIndex;
+        const source =
+          tile.imageIndex < 0
+            ? tile.imageIndex === -2
+              ? errorSource
+              : null
+            : resolvedSource?.source ?? errorSource;
+        if (!source) continue;
+        const tileName = (resolvedSource?.name ?? tile.name) ?? '';
+        const scale = layerStrokeScaleByName?.get(tileName) ?? 1;
+        const strokeW =
+          layerLineWidth != null && level1TileSize > 0 && cellW > 0
+            ? layerLineWidth * scale * (level1TileSize / cellW)
+            : undefined;
+        const img = await getImage(
+          source,
+          resolvedSource != null
+            ? {
+                strokeColor: layerLineColor ?? lineColor,
+                strokeWidth: strokeW,
+              }
+            : undefined
+        );
+        if (!img) continue;
+        ctx.save();
+        ctx.translate(left + cellW / 2, top + cellH / 2);
+        ctx.scale(tile.mirrorX ? -1 : 1, tile.mirrorY ? -1 : 1);
+        ctx.rotate(((tile.rotation || 0) * Math.PI) / 180);
+        ctx.drawImage(img, -cellW / 2, -cellH / 2, cellW, cellH);
+        ctx.restore();
+      }
+    }
   }
 
   if (maxDimension > 0) {

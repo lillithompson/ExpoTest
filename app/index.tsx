@@ -108,6 +108,7 @@ import {
   getMaxGridResolutionLevel,
   hydrateTilesWithSourceNames,
   normalizeTiles,
+  type LevelGridInfo,
   type Tile,
 } from '@/utils/tile-grid';
 import { deserializePattern, deserializeTileSet, serializePattern } from '@/utils/tile-ugc-format';
@@ -1863,6 +1864,60 @@ export default function TestScreen() {
       ? fullGridLayoutForSave
       : (level1LayoutForPersist ?? fullGridLayoutForSave);
 
+  /** Overlay layers (L2, L3) for composite thumbnail/preview so file thumbnails show all layers. */
+  const overlayLayersForThumbnail = useMemo(() => {
+    const cols = gridLayoutForSaveImage.columns;
+    const rows = gridLayoutForSaveImage.rows;
+    const level1TileSize = gridLayoutForSaveImage.tileSize;
+    if (cols <= 0 || rows <= 0) return undefined;
+    const layers: Array<{
+      tiles: Tile[];
+      levelInfo: LevelGridInfo;
+      level1TileSize: number;
+      gridGap: number;
+      lineColor?: string;
+      lineWidth?: number;
+      strokeScaleByName?: Map<string, number>;
+    }> = [];
+    const level2Info = getLevelGridInfo(cols, rows, 2);
+    const l2Tiles = editingLevel === 2 ? tiles : (activeFile?.layers?.[2] ?? []);
+    if (level2Info && l2Tiles.length === level2Info.cells.length) {
+      layers.push({
+        tiles: l2Tiles,
+        levelInfo: level2Info,
+        level1TileSize,
+        gridGap: GRID_GAP,
+        lineColor: activeLineColor,
+        lineWidth: activeLineWidth,
+        strokeScaleByName,
+      });
+    }
+    const level3Info = getLevelGridInfo(cols, rows, 3);
+    const l3Tiles = editingLevel === 3 ? tiles : (activeFile?.layers?.[3] ?? []);
+    if (level3Info && l3Tiles.length === level3Info.cells.length) {
+      layers.push({
+        tiles: l3Tiles,
+        levelInfo: level3Info,
+        level1TileSize,
+        gridGap: GRID_GAP,
+        lineColor: activeLineColor,
+        lineWidth: activeLineWidth,
+        strokeScaleByName,
+      });
+    }
+    return layers.length > 0 ? layers : undefined;
+  }, [
+    gridLayoutForSaveImage.columns,
+    gridLayoutForSaveImage.rows,
+    gridLayoutForSaveImage.tileSize,
+    editingLevel,
+    tiles,
+    activeFile?.layers,
+    activeLineColor,
+    activeLineWidth,
+    strokeScaleByName,
+  ]);
+
   const gridWidth = displayGridWidth;
   const gridHeight = displayGridHeight;
 
@@ -3109,6 +3164,7 @@ export default function TestScreen() {
                 lineColor: activeLineColor,
                 lineWidth: activeLineWidth,
                 strokeScaleByName,
+                overlayLayers: overlayLayersForThumbnail,
                 maxDimension: FILE_THUMB_SIZE,
               })
             : undefined;
@@ -3161,6 +3217,7 @@ export default function TestScreen() {
             lineColor: activeLineColor,
             lineWidth: activeLineWidth,
             strokeScaleByName,
+            overlayLayers: overlayLayersForThumbnail,
             maxDimension: 0,
             format: 'image/png',
             quality: 1,
@@ -3983,6 +4040,7 @@ export default function TestScreen() {
       lineColor: activeLineColor,
       lineWidth: activeLineWidth,
       strokeScaleByName,
+      overlayLayers: overlayLayersForThumbnail,
       maxDimension: 0,
       format: 'image/png',
       quality: 1,
@@ -3997,6 +4055,7 @@ export default function TestScreen() {
       lineColor: activeLineColor,
       lineWidth: activeLineWidth,
       strokeScaleByName,
+      overlayLayers: overlayLayersForThumbnail,
       maxDimension: FILE_THUMB_SIZE,
     });
     upsertActiveFile({
