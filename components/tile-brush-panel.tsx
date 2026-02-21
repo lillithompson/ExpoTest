@@ -114,6 +114,8 @@ const UNFAVORITE_SENTINEL = '__unfavorite__';
 const SEPARATOR_BAR_WIDTH = 18;
 /** Section key for the collapsible patterns section (connection counts are 0–8). */
 const PATTERNS_SECTION_KEY = -1;
+/** Section key for the collapsible favorites section. */
+const FAVORITES_SECTION_KEY = -2;
 
 const connectionCountCache = new Map<string, number>();
 
@@ -357,7 +359,11 @@ export function TileBrushPanel({
         for (const e of tileEntries) {
           byConnections.get(e.connectionCount)!.push(e);
         }
-        const result: PaletteEntry[] = [...favoritesList];
+        const result: PaletteEntry[] = [];
+        if (favoritesList.length > 0) {
+          result.push({ type: 'separator', connectionCount: FAVORITES_SECTION_KEY });
+          result.push(...favoritesList);
+        }
         for (let n = 0; n <= 8; n++) {
           const group = byConnections.get(n) ?? [];
           if (group.length > 0) {
@@ -567,9 +573,13 @@ export function TileBrushPanel({
                       ? isCollapsed
                         ? 'Expand patterns'
                         : 'Collapse patterns'
-                      : isCollapsed
-                        ? `Expand folder ${n}`
-                        : `Collapse folder ${n}`
+                      : n === FAVORITES_SECTION_KEY
+                        ? isCollapsed
+                          ? 'Expand favorites'
+                          : 'Collapse favorites'
+                        : isCollapsed
+                          ? `Expand folder ${n}`
+                          : `Collapse folder ${n}`
                   }
                 >
                   {isPatternsSection ? (
@@ -589,6 +599,25 @@ export function TileBrushPanel({
                           />
                         </Pressable>
                       )}
+                      {isCollapsed && (
+                        <View style={styles.separatorBarIconWrap} pointerEvents="none">
+                          <MaterialCommunityIcons
+                            name="chevron-right"
+                            size={SEPARATOR_BAR_WIDTH * 0.75}
+                            color="#374151"
+                            style={styles.separatorBarIcon}
+                          />
+                        </View>
+                      )}
+                    </>
+                  ) : n === FAVORITES_SECTION_KEY ? (
+                    <>
+                      <MaterialCommunityIcons
+                        name="heart"
+                        size={SEPARATOR_BAR_WIDTH * 0.75}
+                        color="#374151"
+                        style={[styles.separatorBarIcon, { marginTop: 5 }]}
+                      />
                       {isCollapsed && (
                         <View style={styles.separatorBarIconWrap} pointerEvents="none">
                           <MaterialCommunityIcons
