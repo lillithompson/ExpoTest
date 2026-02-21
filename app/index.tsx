@@ -126,7 +126,7 @@ const PATTERN_ORIENTATION_VARIANTS: Array<{
   { rotation: 270, mirrorX: true, mirrorY: false },
 ];
 const BRUSH_PANEL_ROW_GAP = 2;
-/** Reserve space for horizontal scrollbar so the bottom row is not cut off on desktop web. */
+/** Reserve space for horizontal scrollbar on desktop web so the bottom row is not cut off. */
 const WEB_SCROLLBAR_HEIGHT = 17;
 /** On mobile web, only commit single-finger paint on touchmove after this delay (ms) so a second finger can register. */
 const MOBILE_WEB_COMMIT_MOVE_DELAY_MS = 180;
@@ -934,11 +934,21 @@ export default function TestScreen() {
     showPatternChooser && brush.mode === 'pattern' && !isPatternCreationMode;
 
   const availableWidth = contentWidth - CONTENT_PADDING * 2;
-  /** In modify view, reserve space for the brush panel (pinned to bottom); else use constant. */
+  /** Tile palette (File Modify): fixed 2 rows, 75px per tile. Reserve this height so canvas can center above. */
+  const PALETTE_FIXED_TILE_SIZE = 75;
+  const PALETTE_FIXED_ROWS = 2;
+  const fixedPaletteHeight =
+    PALETTE_FIXED_ROWS * PALETTE_FIXED_TILE_SIZE +
+    BRUSH_PANEL_ROW_GAP * (PALETTE_FIXED_ROWS - 1);
+  const isDesktopWeb =
+    Platform.OS === 'web' && width >= FILE_VIEW_DESKTOP_BREAKPOINT;
+  const paletteReservedHeight =
+    fixedPaletteHeight +
+    (isDesktopWeb ? WEB_SCROLLBAR_HEIGHT : 0);
   const reservedBrushHeight =
     viewMode === 'modify'
       ? Math.min(
-          200,
+          paletteReservedHeight,
           Math.max(
             0,
             contentHeight -
@@ -1656,41 +1666,9 @@ export default function TestScreen() {
   const gridHeight =
     gridLayout.rows * gridLayout.tileSize +
     GRID_GAP * Math.max(0, gridLayout.rows - 1);
-  /** In modify view the panel is pinned to the bottom with reserved height; else dynamic. */
-  const brushPanelHeight =
-    viewMode === 'modify'
-      ? reservedBrushHeight
-      : Math.min(
-          200,
-          Math.max(
-            0,
-            contentHeight -
-              HEADER_HEIGHT -
-              CONTENT_PADDING * 2 -
-              TITLE_SPACING -
-              gridHeight
-          )
-        );
-  const isDesktopWeb =
-    Platform.OS === 'web' && width >= FILE_VIEW_DESKTOP_BREAKPOINT;
-  const brushContentHeight =
-    isDesktopWeb
-      ? Math.max(0, brushPanelHeight - WEB_SCROLLBAR_HEIGHT)
-      : brushPanelHeight;
-  /** If row height would exceed this (px), use more rows so each row stays at or below it. */
-  const MAX_BRUSH_ROW_HEIGHT = 100;
-  const minRowsForHeight = Math.ceil(
-    (brushContentHeight + BRUSH_PANEL_ROW_GAP) /
-      (MAX_BRUSH_ROW_HEIGHT + BRUSH_PANEL_ROW_GAP)
-  );
-  const brushRows = Math.max(2, Math.min(minRowsForHeight, 3));
-  const brushItemSize = Math.max(
-    0,
-    Math.floor(
-      (brushContentHeight - BRUSH_PANEL_ROW_GAP * Math.max(0, brushRows - 1)) /
-        brushRows
-    )
-  );
+  const brushPanelHeight = reservedBrushHeight;
+  const brushRows = PALETTE_FIXED_ROWS;
+  const brushItemSize = PALETTE_FIXED_TILE_SIZE;
   const gridAtlas = useTileAtlas({
     tileSources: renderTileSources,
     tileSize: gridLayout.tileSize,
