@@ -115,7 +115,7 @@ import { deserializePattern, deserializeTileSet, serializePattern } from '@/util
 import JSZip from 'jszip';
 
 const GRID_GAP = 0;
-/** Max grid resolution level offered in the chooser and used for editing (level 3 = 4×4 cells per tile). */
+/** Max internal grid level (3 = 4×4 cells per tile). Display: L1 = coarsest, Lmax = finest. */
 const MAX_EDITABLE_GRID_LEVEL = 3;
 const CONTENT_PADDING = 0;
 const HEADER_HEIGHT = 50;
@@ -1470,18 +1470,6 @@ export default function TestScreen() {
   const activeLineColor = activeFile?.lineColor ?? '#ffffff';
   const [lineWidthDraft, setLineWidthDraft] = useState(activeLineWidth);
 
-  /** Current resolution layer being edited (1 = level 1; 2+ = higher layers). Capped at MAX_EDITABLE_GRID_LEVEL so chooser only offers clickable levels. */
-  const editingLevel = useMemo(() => {
-    const cols = activeFile?.grid.columns ?? 0;
-    const rows = activeFile?.grid.rows ?? 0;
-    const maxL = getMaxGridResolutionLevel(cols, rows);
-    return Math.min(
-      Math.max(1, settings.gridResolutionLevel ?? 1),
-      maxL,
-      MAX_EDITABLE_GRID_LEVEL
-    );
-  }, [activeFile?.grid?.columns, activeFile?.grid?.rows, settings.gridResolutionLevel]);
-
   /** Max resolution level from file grid (level-1 dimensions only). Does not change when switching editing level. */
   const maxResolutionLevelFromFile = useMemo(
     () =>
@@ -1490,6 +1478,24 @@ export default function TestScreen() {
         activeFile?.grid?.rows ?? 0
       ),
     [activeFile?.grid?.columns, activeFile?.grid?.rows]
+  );
+
+  /** Same cap used by the modal (1..maxLevel). Ensures display level and options stay in sync. */
+  const maxDisplayLevel = Math.min(maxResolutionLevelFromFile, MAX_EDITABLE_GRID_LEVEL);
+
+  /** Internal editing level (1 = tile grid, 2 = 2×2, 3 = 4×4). No change to grid/layout. */
+  const editingLevel = useMemo(() => {
+    return Math.min(
+      Math.max(1, settings.gridResolutionLevel ?? 1),
+      maxResolutionLevelFromFile,
+      MAX_EDITABLE_GRID_LEVEL
+    );
+  }, [maxResolutionLevelFromFile, settings.gridResolutionLevel]);
+
+  /** Display only: L1 = coarsest, Lmax = finest. Uses same max as modal so selection highlight matches. */
+  const displayResolutionLevel = useMemo(
+    () => maxDisplayLevel - editingLevel + 1,
+    [maxDisplayLevel, editingLevel]
   );
 
   /** Level-1 layout (for persist when editing a higher layer). */
@@ -6346,17 +6352,13 @@ export default function TestScreen() {
               (activeFile?.grid?.columns ?? 0) > 0 &&
               (activeFile?.grid?.rows ?? 0) > 0 && (
                 <ToolbarButton
-                  label={`Grid L${Math.min(
-                    Math.max(1, settings.gridResolutionLevel ?? 1),
-                    maxResolutionLevelFromFile,
-                    MAX_EDITABLE_GRID_LEVEL
-                  )}`}
-                  icon="view-grid-outline"
+                  label={`Layers L${displayResolutionLevel}`}
+                  icon="layers-outline"
                   onPress={() => {
                     dismissModifyBanner();
                     setShowGridResolutionModal(true);
                   }}
-                  accessibilityLabel="Grid resolution"
+                  accessibilityLabel="Layers"
                 />
               )}
             <ToolbarButton
@@ -6490,11 +6492,7 @@ export default function TestScreen() {
             lineColor={settings.backgroundLineColor}
             lineWidth={settings.backgroundLineWidth}
             gridGap={GRID_GAP}
-            gridResolutionLevel={Math.min(
-              Math.max(1, settings.gridResolutionLevel ?? 1),
-              maxResolutionLevelFromFile,
-              MAX_EDITABLE_GRID_LEVEL
-            )}
+            gridResolutionLevel={editingLevel}
           />
           {showPreview && (loadPreviewUri || clearPreviewUri) && (
             <>
@@ -8845,37 +8843,30 @@ export default function TestScreen() {
               style={styles.overlayBackdrop}
               onPress={() => setShowGridResolutionModal(false)}
               accessibilityRole="button"
-              accessibilityLabel="Close grid resolution"
+              accessibilityLabel="Close layers"
             />
             <ThemedView style={styles.overlayPanel}>
               <ThemedView style={styles.settingsHeader}>
-                <ThemedText type="title">Grid resolution</ThemedText>
+                <ThemedText type="title">Layers</ThemedText>
                 <Pressable
                   onPress={() => setShowGridResolutionModal(false)}
                   style={styles.settingsClose}
                   accessibilityRole="button"
-                  accessibilityLabel="Close grid resolution"
+                  accessibilityLabel="Close layers"
                 >
                   <ThemedText type="defaultSemiBold">X</ThemedText>
                 </Pressable>
               </ThemedView>
               <ThemedText type="default" style={styles.gridResolutionHint}>
-                Level 1 = tile grid. Higher levels: grid from center out (mirror cross = grid lines); partial cells at edges; lines align with tile grid.
+                L1 = coarsest (largest cells), L{maxDisplayLevel} = finest (tile grid). Grid from center out; mirror cross = grid lines.
               </ThemedText>
               {(() => {
-                const maxLevel = Math.min(
-                  maxResolutionLevelFromFile,
-                  MAX_EDITABLE_GRID_LEVEL
-                );
-                const current = Math.min(
-                  Math.max(1, settings.gridResolutionLevel ?? 1),
-                  maxLevel
-                );
-                return Array.from({ length: maxLevel }, (_, i) => i + 1).map((level) => (
+                const current = displayResolutionLevel;
+                return Array.from({ length: maxDisplayLevel }, (_, i) => i + 1).map((level) => (
                   <Pressable
                     key={level}
                     onPress={() => {
-                      setSettings((prev) => ({ ...prev, gridResolutionLevel: level }));
+                      setSettings((prev) => ({ ...prev, gridResolutionLevel: maxDisplayLevel - level + 1 }));
                       setShowGridResolutionModal(false);
                     }}
                     style={[
@@ -8883,13 +8874,13 @@ export default function TestScreen() {
                       level === current && styles.gridResolutionOptionActive,
                     ]}
                     accessibilityRole="button"
-                    accessibilityLabel={`Level ${level}${level === current ? ', selected' : ''}`}
+                    accessibilityLabel={`L${level}${level === current ? ', selected' : ''}`}
                   >
                     <ThemedText
                       type="defaultSemiBold"
                       style={level === current ? styles.gridResolutionOptionTextActive : undefined}
                     >
-                      Level {level}
+                      L{level}
                     </ThemedText>
                     {level === current && (
                       <MaterialCommunityIcons name="check" size={20} color="#22c55e" />

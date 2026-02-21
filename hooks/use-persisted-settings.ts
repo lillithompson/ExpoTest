@@ -11,7 +11,7 @@ export type AppSettings = {
   backgroundColor: string;
   backgroundLineColor: string;
   backgroundLineWidth: number;
-  /** Background grid resolution level (1 = tile grid; 2+ = subdivided halves, centered). */
+  /** Internal grid resolution level (1 = tile grid, 2 = 2×2, 3 = 4×4). UI shows reversed as L1=coarsest, Lmax=finest. */
   gridResolutionLevel?: number;
   tileSetCategories?: string[];
   tileSetIds?: string[];
