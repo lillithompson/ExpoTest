@@ -412,9 +412,29 @@ export const useTileGrid = ({
   const placementOrderRef = useRef(0);
   const onTilesChangeRef = useRef(onTilesChange);
   onTilesChangeRef.current = onTilesChange;
+  const latestTilesForPersistRef = useRef<Tile[]>(tiles);
+  latestTilesForPersistRef.current = tiles;
+  const persistTilesTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const LAYER_PERSIST_DEBOUNCE_MS = 120;
   useEffect(() => {
-    onTilesChangeRef.current?.(tiles);
+    if (!onTilesChangeRef.current) return;
+    if (persistTilesTimeoutRef.current) clearTimeout(persistTilesTimeoutRef.current);
+    persistTilesTimeoutRef.current = setTimeout(() => {
+      persistTilesTimeoutRef.current = null;
+      onTilesChangeRef.current?.(latestTilesForPersistRef.current);
+    }, LAYER_PERSIST_DEBOUNCE_MS);
+    return () => {
+      if (persistTilesTimeoutRef.current) {
+        clearTimeout(persistTilesTimeoutRef.current);
+        persistTilesTimeoutRef.current = null;
+      }
+    };
   }, [tiles]);
+  useEffect(() => {
+    return () => {
+      onTilesChangeRef.current?.(latestTilesForPersistRef.current);
+    };
+  }, []);
 
   const getNextPlacementOrder = () => {
     placementOrderRef.current += 1;

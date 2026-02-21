@@ -286,10 +286,10 @@ describe('grid resolution level', () => {
     expect(getMaxGridResolutionLevel(10, 0)).toBe(0);
   });
 
-  it('getMaxGridResolutionLevel: center-out needs ≥2 lines each way for a complete cell', () => {
-    expect(getMaxGridResolutionLevel(10, 8)).toBe(2);
-    expect(getMaxGridResolutionLevel(8, 8)).toBe(2);
-    expect(getMaxGridResolutionLevel(4, 4)).toBe(1);
+  it('getMaxGridResolutionLevel: center-out only complete cells; 10×8 and 8×8 max L3, 4×4 max L2', () => {
+    expect(getMaxGridResolutionLevel(10, 8)).toBe(3);
+    expect(getMaxGridResolutionLevel(8, 8)).toBe(3);
+    expect(getMaxGridResolutionLevel(4, 4)).toBe(2);
   });
 
   it('getMaxGridResolutionLevel for 14×24: max level 3 (no complete 8×8 cell when centered)', () => {
@@ -336,14 +336,14 @@ describe('grid resolution level', () => {
     expect(horizontalPx).toEqual([4 * 50]);
   });
 
-  it('getLevelGridInfo level 2 for 10×8: 4×2 grid of complete 2×2 cells (row boundaries 2,4,6)', () => {
+  it('getLevelGridInfo level 2 for 10×8: 4×4 grid of complete 2×2 cells (only fully contained)', () => {
     const info = getLevelGridInfo(10, 8, 2);
     expect(info).not.toBeNull();
     expect(info!.levelCols).toBe(4);
-    expect(info!.levelRows).toBe(2);
-    expect(info!.cells).toHaveLength(8);
-    expect(info!.cells[0]).toEqual({ minCol: 1, maxCol: 2, minRow: 2, maxRow: 3 });
-    expect(info!.cells[5]).toEqual({ minCol: 3, maxCol: 4, minRow: 4, maxRow: 5 });
+    expect(info!.levelRows).toBe(4);
+    expect(info!.cells).toHaveLength(16);
+    expect(info!.cells[0]).toEqual({ minCol: 1, maxCol: 2, minRow: 0, maxRow: 1 });
+    expect(info!.cells[5]).toEqual({ minCol: 3, maxCol: 4, minRow: 2, maxRow: 3 });
   });
 
   it('getLevelGridInfo level 4 for 10×8: null (no complete 8×8 cell)', () => {
@@ -354,20 +354,37 @@ describe('grid resolution level', () => {
 describe('getLevelCellIndexForPoint', () => {
   const tileSize = 10;
   const gridGap = 2;
+  const level1Rows = 8;
 
   it('returns level-2 cell index when point is inside a complete cell', () => {
     const info = getLevelGridInfo(10, 8, 2)!;
-    expect(info.cells[0]).toEqual({ minCol: 1, maxCol: 2, minRow: 2, maxRow: 3 });
+    expect(info.cells[0]).toEqual({ minCol: 1, maxCol: 2, minRow: 0, maxRow: 1 });
     const stride = tileSize + gridGap;
     const left0 = 1 * stride;
-    const top0 = 2 * stride;
-    expect(getLevelCellIndexForPoint(left0, top0, info, tileSize, gridGap)).toBe(0);
-    expect(getLevelCellIndexForPoint(left0 + 5, top0 + 5, info, tileSize, gridGap)).toBe(0);
+    const top0 = 0 * stride;
+    expect(getLevelCellIndexForPoint(left0, top0, info, tileSize, gridGap, level1Rows)).toBe(0);
+    expect(getLevelCellIndexForPoint(left0 + 5, top0 + 5, info, tileSize, gridGap, level1Rows)).toBe(0);
   });
 
   it('returns null when point is in partial cell or outside', () => {
     const info = getLevelGridInfo(10, 8, 2)!;
-    expect(getLevelCellIndexForPoint(0, 0, info, tileSize, gridGap)).toBeNull();
-    expect(getLevelCellIndexForPoint(1, 1, info, tileSize, gridGap)).toBeNull();
+    expect(getLevelCellIndexForPoint(0, 0, info, tileSize, gridGap, level1Rows)).toBeNull();
+    expect(getLevelCellIndexForPoint(1, 1, info, tileSize, gridGap, level1Rows)).toBeNull();
+  });
+
+  it('assigns horizontal mirror boundary row to cell above (20×16 level 3)', () => {
+    const info = getLevelGridInfo(20, 16, 3)!;
+    expect(info.levelCols).toBe(4);
+    expect(info.levelRows).toBe(4);
+    const stride = tileSize + gridGap;
+    const centerRow = Math.floor(16 / 2);
+    const boundaryY = centerRow * stride;
+    const level1Rows = 16;
+    const tileSizeL3 = 10;
+    const xCenter = 10 * stride;
+    const cellAbove = getLevelCellIndexForPoint(xCenter, boundaryY, info, tileSizeL3, gridGap, level1Rows);
+    expect(cellAbove).not.toBeNull();
+    const rowAbove = cellAbove! < info.levelCols ? 0 : Math.floor(cellAbove! / info.levelCols);
+    expect(rowAbove).toBe(1);
   });
 });

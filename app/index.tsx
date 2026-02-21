@@ -3447,12 +3447,14 @@ export default function TestScreen() {
 
   const getCellIndexForPoint = (x: number, y: number) => {
     if (isEditingHigherLayer && levelGridInfo && level1LayoutForPersist) {
+      const level1Rows = activeFile?.grid.rows ?? 0;
       return getLevelCellIndexForPoint(
         x,
         y,
         levelGridInfo,
         level1LayoutForPersist.tileSize,
-        GRID_GAP
+        GRID_GAP,
+        level1Rows
       );
     }
     if (gridLayout.columns === 0 || gridLayout.rows === 0) {

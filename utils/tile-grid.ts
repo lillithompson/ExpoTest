@@ -311,7 +311,7 @@ export const computeFixedGridLayout = (
  * Background grid resolution levels: level 1 = one grid cell per tile (full resolution).
  * Each level halves the resolution (level 2 = 2×2 tiles per cell, level 3 = 4×4, etc.).
  * Returns the maximum level such that the level grid has at least one complete cell
- * (same k-range as getLevelGridInfo).
+ * (same k-range as getLevelGridInfo: only fully contained cells).
  */
 export function getMaxGridResolutionLevel(columns: number, rows: number): number {
   if (columns <= 0 || rows <= 0) return 0;
@@ -322,10 +322,10 @@ export function getMaxGridResolutionLevel(columns: number, rows: number): number
       const centerCol = Math.floor(columns / 2);
       const centerRow = Math.floor(rows / 2);
       const kMinV = Math.ceil((0 - centerCol) / cellTiles);
-      const kMaxV = Math.floor((columns - 1 - centerCol) / cellTiles);
+      const kMaxV = Math.floor((columns - centerCol) / cellTiles) - 1;
       const nVertical = Math.max(0, kMaxV - kMinV + 1);
       const kMinH = Math.ceil((0 - centerRow) / cellTiles);
-      const kMaxH = Math.floor((rows - 1 - centerRow) / cellTiles);
+      const kMaxH = Math.floor((rows - centerRow) / cellTiles) - 1;
       const nHorizontal = Math.max(0, kMaxH - kMinH + 1);
       if (nVertical < 1 || nHorizontal < 1) {
         return level - 1;
@@ -433,12 +433,13 @@ export function getLevelGridInfo(
   const cellTiles = Math.pow(2, level - 1);
   const centerCol = Math.floor(columns / 2);
   const centerRow = Math.floor(rows / 2);
-  // Same k-range as grid lines: first cell starts at column 0, last ends at columns-1.
+  // Only include cells that are fully inside the grid (no partial cells at edges).
+  // Cell k spans [centerCol + k*cellTiles, centerCol + (k+1)*cellTiles - 1]; require maxCol <= columns-1.
   const kMinV = Math.ceil((0 - centerCol) / cellTiles);
-  const kMaxV = Math.floor((columns - 1 - centerCol) / cellTiles);
+  const kMaxV = Math.floor((columns - centerCol) / cellTiles) - 1;
   const nVertical = Math.max(0, kMaxV - kMinV + 1);
   const kMinH = Math.ceil((0 - centerRow) / cellTiles);
-  const kMaxH = Math.floor((rows - 1 - centerRow) / cellTiles);
+  const kMaxH = Math.floor((rows - centerRow) / cellTiles) - 1;
   const nHorizontal = Math.max(0, kMaxH - kMinH + 1);
   if (nVertical < 1 || nHorizontal < 1) return null;
   const levelCols = nVertical;
@@ -460,24 +461,31 @@ export function getLevelGridInfo(
  * Converts a point (x, y) in level-1 pixel coordinates to the level-L cell index
  * when (x,y) lies inside a complete level-L cell. Returns null if the point is
  * in a partial cell or outside the grid. Used for hit-testing when editing a higher layer.
+ * level1Rows is used to resolve the horizontal mirror boundary: points on the center row
+ * are assigned to the cell above the line so mirroring is not offset.
  */
 export function getLevelCellIndexForPoint(
   x: number,
   y: number,
   levelInfo: LevelGridInfo,
   level1TileSize: number,
-  gridGap: number
+  gridGap: number,
+  level1Rows: number
 ): number | null {
   const stride = level1TileSize + gridGap;
+  const centerRow = Math.floor(level1Rows / 2);
+  const boundaryY = centerRow * stride;
+  const onBoundaryRow = y >= boundaryY && y < boundaryY + stride;
   for (let i = 0; i < levelInfo.cells.length; i += 1) {
     const { minCol, maxCol, minRow, maxRow } = levelInfo.cells[i];
+    if (onBoundaryRow && maxRow >= centerRow) continue;
     const left = minCol * stride;
     const top = minRow * stride;
     const w = (maxCol - minCol + 1) * level1TileSize + (maxCol - minCol) * gridGap;
     const h = (maxRow - minRow + 1) * level1TileSize + (maxRow - minRow) * gridGap;
-    if (x >= left && x < left + w && y >= top && y < top + h) {
-      return i;
-    }
+    const inX = x >= left && x < left + w;
+    if (onBoundaryRow && maxRow === centerRow - 1 && inX && y >= boundaryY && y < boundaryY + stride) return i;
+    if (inX && y >= top && y <= top + h) return i;
   }
   return null;
 }
