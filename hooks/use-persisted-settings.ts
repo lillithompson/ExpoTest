@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 export type AppSettings = {
   preferredTileSize: number;
   showDebug: boolean;
+  developerMode: boolean;
   allowEdgeConnections: boolean;
   mirrorHorizontal: boolean;
   mirrorVertical: boolean;
@@ -20,6 +21,7 @@ const STORAGE_KEY = 'tile-settings-v1';
 export const getDefaultSettings = (): AppSettings => ({
   preferredTileSize: 45,
   showDebug: false,
+  developerMode: false,
   allowEdgeConnections: true,
   mirrorHorizontal: false,
   mirrorVertical: false,

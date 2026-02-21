@@ -738,6 +738,7 @@ export default function TestScreen() {
     null
   );
   const [showSettingsOverlay, setShowSettingsOverlay] = useState(false);
+  const [showDebugModal, setShowDebugModal] = useState(false);
   const [showTileSetChooser, setShowTileSetChooser] = useState(false);
   const [showModifyTileSetBanner, setShowModifyTileSetBanner] = useState(false);
   const MODIFY_BANNER_HEIGHT = 52;
@@ -5505,6 +5506,16 @@ export default function TestScreen() {
                 <ThemedText type="defaultSemiBold">View manual</ThemedText>
               </Pressable>
               <ThemedView style={styles.toggleRow}>
+                <ThemedText type="defaultSemiBold">Developer mode</ThemedText>
+                <Switch
+                  value={settings.developerMode}
+                  onValueChange={(value) =>
+                    setSettings((prev) => ({ ...prev, developerMode: value }))
+                  }
+                  accessibilityLabel="Toggle developer mode"
+                />
+              </ThemedView>
+              <ThemedView style={styles.toggleRow}>
                 <ThemedText type="defaultSemiBold">Show Debug</ThemedText>
                 <Switch
                   value={settings.showDebug}
@@ -5938,6 +5949,16 @@ export default function TestScreen() {
                 });
               }}
             />
+            {settings.developerMode && (
+              <ToolbarButton
+                label="Debug"
+                icon="bug"
+                onPress={() => {
+                  dismissModifyBanner();
+                  setShowDebugModal(true);
+                }}
+              />
+            )}
             </ThemedView>
           </ThemedView>
         </ThemedView>
@@ -7846,6 +7867,16 @@ export default function TestScreen() {
                 <ThemedText type="defaultSemiBold">Download PNG</ThemedText>
               </Pressable>
               <ThemedView style={styles.toggleRow}>
+                <ThemedText type="defaultSemiBold">Developer mode</ThemedText>
+                <Switch
+                  value={settings.developerMode}
+                  onValueChange={(value) =>
+                    setSettings((prev) => ({ ...prev, developerMode: value }))
+                  }
+                  accessibilityLabel="Toggle developer mode"
+                />
+              </ThemedView>
+              <ThemedView style={styles.toggleRow}>
                 <ThemedText type="defaultSemiBold">Show Debug</ThemedText>
                 <Switch
                   value={settings.showDebug}
@@ -7902,6 +7933,44 @@ export default function TestScreen() {
                 <ThemedText style={styles.settingsPlatformLabel}>{platformLabel}</ThemedText>
               </ThemedView>
             </ScrollView>
+          </ThemedView>
+        )}
+        {showDebugModal && (
+          <ThemedView style={styles.overlay} accessibilityRole="dialog">
+            <Pressable
+              style={styles.overlayBackdrop}
+              onPress={() => setShowDebugModal(false)}
+              accessibilityRole="button"
+              accessibilityLabel="Close debug"
+            />
+            <ThemedView style={styles.overlayPanel}>
+              <ThemedView style={styles.settingsHeader}>
+                <ThemedText type="title">Debug</ThemedText>
+                <Pressable
+                  onPress={() => setShowDebugModal(false)}
+                  style={styles.settingsClose}
+                  accessibilityRole="button"
+                  accessibilityLabel="Close debug"
+                >
+                  <ThemedText type="defaultSemiBold">X</ThemedText>
+                </Pressable>
+              </ThemedView>
+              <ThemedView style={styles.toggleRow}>
+                <ThemedText type="defaultSemiBold">Show Debug</ThemedText>
+                <Switch
+                  value={settings.showDebug}
+                  onValueChange={(value) =>
+                    setSettings((prev) => ({ ...prev, showDebug: value }))
+                  }
+                  accessibilityLabel="Toggle debug overlay"
+                />
+              </ThemedView>
+              <ThemedView style={styles.debugResolutionRow}>
+                <ThemedText style={styles.debugResolutionText}>
+                  Resolution: {gridLayout.rows} × {gridLayout.columns} tiles
+                </ThemedText>
+              </ThemedView>
+            </ThemedView>
           </ThemedView>
         )}
         {showTileSetChooser && (
@@ -8281,6 +8350,13 @@ const styles = StyleSheet.create({
   settingsPlatformLabel: {
     color: '#9ca3af',
     fontSize: 13,
+  },
+  debugResolutionRow: {
+    paddingVertical: 12,
+  },
+  debugResolutionText: {
+    color: '#9ca3af',
+    fontSize: 14,
   },
   settingsClose: {
     paddingHorizontal: 8,
