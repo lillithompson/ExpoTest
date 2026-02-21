@@ -381,7 +381,14 @@ export function TileBrushPanel({
     [tileEntries, favorites, colorRank]
   );
   const orderedTileEntries = useFullOrder ? fullOrderedEntries : simpleOrderedEntries;
-  const [collapsedFolders, setCollapsedFolders] = useState<Set<number>>(() => new Set());
+  const [collapsedFolders, setCollapsedFolders] = useState<Set<number>>(
+    () =>
+      new Set([
+        FAVORITES_SECTION_KEY,
+        PATTERNS_SECTION_KEY,
+        0, 1, 2, 3, 4, 5, 6, 7, 8,
+      ])
+  );
   type PatternSectionEntry =
     | { type: 'separator'; connectionCount: number }
     | {
