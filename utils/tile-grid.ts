@@ -310,8 +310,8 @@ export const computeFixedGridLayout = (
 /**
  * Background grid resolution levels: level 1 = one grid cell per tile (full resolution).
  * Each level halves the resolution (level 2 = 2×2 tiles per cell, level 3 = 4×4, etc.).
- * Returns the maximum level such that the center-out grid has at least one complete
- * cellTiles×cellTiles cell (i.e. at least two vertical and two horizontal lines).
+ * Returns the maximum level such that the level grid has at least one complete cell
+ * (same k-range as getLevelGridInfo).
  */
 export function getMaxGridResolutionLevel(columns: number, rows: number): number {
   if (columns <= 0 || rows <= 0) return 0;
@@ -321,13 +321,13 @@ export function getMaxGridResolutionLevel(columns: number, rows: number): number
       const cellTiles = Math.pow(2, level - 1);
       const centerCol = Math.floor(columns / 2);
       const centerRow = Math.floor(rows / 2);
-      const kMinV = Math.ceil((1 - centerCol) / cellTiles);
+      const kMinV = Math.ceil((0 - centerCol) / cellTiles);
       const kMaxV = Math.floor((columns - 1 - centerCol) / cellTiles);
       const nVertical = Math.max(0, kMaxV - kMinV + 1);
-      const kMinH = Math.ceil((1 - centerRow) / cellTiles);
+      const kMinH = Math.ceil((0 - centerRow) / cellTiles);
       const kMaxH = Math.floor((rows - 1 - centerRow) / cellTiles);
       const nHorizontal = Math.max(0, kMaxH - kMinH + 1);
-      if (nVertical < 2 || nHorizontal < 2) {
+      if (nVertical < 1 || nHorizontal < 1) {
         return level - 1;
       }
     }
@@ -395,4 +395,89 @@ export function getGridLevelLinePositions(
     verticalPx: verticalIndices.map((t) => t * stride),
     horizontalPx: horizontalIndices.map((t) => t * stride),
   };
+}
+
+export type LevelCellBounds = {
+  minCol: number;
+  maxCol: number;
+  minRow: number;
+  maxRow: number;
+};
+
+export type LevelGridInfo = {
+  levelCols: number;
+  levelRows: number;
+  /** Bounds of each complete cell in level-1 tile coordinates (row-major: index = row * levelCols + col). */
+  cells: LevelCellBounds[];
+};
+
+/**
+ * Returns the grid of complete cells for a given level (center-out).
+ * Used for resolution layers: only these cells are editable at this level.
+ */
+export function getLevelGridInfo(
+  columns: number,
+  rows: number,
+  level: number
+): LevelGridInfo | null {
+  if (columns <= 0 || rows <= 0 || level < 1) return null;
+  if (level === 1) {
+    const cells: LevelCellBounds[] = [];
+    for (let r = 0; r < rows; r += 1) {
+      for (let c = 0; c < columns; c += 1) {
+        cells.push({ minCol: c, maxCol: c, minRow: r, maxRow: r });
+      }
+    }
+    return { levelCols: columns, levelRows: rows, cells };
+  }
+  const cellTiles = Math.pow(2, level - 1);
+  const centerCol = Math.floor(columns / 2);
+  const centerRow = Math.floor(rows / 2);
+  // Same k-range as grid lines: first cell starts at column 0, last ends at columns-1.
+  const kMinV = Math.ceil((0 - centerCol) / cellTiles);
+  const kMaxV = Math.floor((columns - 1 - centerCol) / cellTiles);
+  const nVertical = Math.max(0, kMaxV - kMinV + 1);
+  const kMinH = Math.ceil((0 - centerRow) / cellTiles);
+  const kMaxH = Math.floor((rows - 1 - centerRow) / cellTiles);
+  const nHorizontal = Math.max(0, kMaxH - kMinH + 1);
+  if (nVertical < 1 || nHorizontal < 1) return null;
+  const levelCols = nVertical;
+  const levelRows = nHorizontal;
+  const cells: LevelCellBounds[] = [];
+  for (let j = 0; j < levelRows; j += 1) {
+    const minRow = centerRow + (kMinH + j) * cellTiles;
+    const maxRow = minRow + cellTiles - 1;
+    for (let i = 0; i < levelCols; i += 1) {
+      const minCol = centerCol + (kMinV + i) * cellTiles;
+      const maxCol = minCol + cellTiles - 1;
+      cells.push({ minCol, maxCol, minRow, maxRow });
+    }
+  }
+  return { levelCols, levelRows, cells };
+}
+
+/**
+ * Converts a point (x, y) in level-1 pixel coordinates to the level-L cell index
+ * when (x,y) lies inside a complete level-L cell. Returns null if the point is
+ * in a partial cell or outside the grid. Used for hit-testing when editing a higher layer.
+ */
+export function getLevelCellIndexForPoint(
+  x: number,
+  y: number,
+  levelInfo: LevelGridInfo,
+  level1TileSize: number,
+  gridGap: number
+): number | null {
+  const stride = level1TileSize + gridGap;
+  for (let i = 0; i < levelInfo.cells.length; i += 1) {
+    const { minCol, maxCol, minRow, maxRow } = levelInfo.cells[i];
+    const left = minCol * stride;
+    const top = minRow * stride;
+    const w = (maxCol - minCol + 1) * level1TileSize + (maxCol - minCol) * gridGap;
+    const h = (maxRow - minRow + 1) * level1TileSize + (maxRow - minRow) * gridGap;
+    if (x >= left && x < left + w && y >= top && y < top + h) {
+      return i;
+    }
+  }
+  return null;
 }

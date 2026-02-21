@@ -100,7 +100,11 @@ import {
 } from '@/utils/tile-export';
 import { deserializeTileFile, serializeTileFile } from '@/utils/tile-format';
 import {
+  computeFixedGridLayout,
+  buildInitialTiles,
   getGridLevelLinePositions,
+  getLevelCellIndexForPoint,
+  getLevelGridInfo,
   getMaxGridResolutionLevel,
   hydrateTilesWithSourceNames,
   normalizeTiles,
@@ -110,6 +114,8 @@ import { deserializePattern, deserializeTileSet, serializePattern } from '@/util
 import JSZip from 'jszip';
 
 const GRID_GAP = 0;
+/** Max grid resolution level offered in the chooser and used for editing (level 3 = 4×4 cells per tile). */
+const MAX_EDITABLE_GRID_LEVEL = 3;
 const CONTENT_PADDING = 0;
 const HEADER_HEIGHT = 50;
 const TOOLBAR_BUTTON_SIZE = 40;
@@ -676,6 +682,7 @@ const TileCell = memo(
           },
         ]}
         resizeMode="cover"
+        displaySize={tileSize}
       />
     ) : null;
 
@@ -1002,6 +1009,7 @@ export default function TestScreen() {
     clearAllFiles,
     upsertActiveFile,
     updateActiveFileLockedCells,
+    updateActiveFileLayer,
     replaceTileSourceNames,
     replaceTileSourceNamesWithError,
     ready,
@@ -1461,6 +1469,86 @@ export default function TestScreen() {
   const activeLineColor = activeFile?.lineColor ?? '#ffffff';
   const [lineWidthDraft, setLineWidthDraft] = useState(activeLineWidth);
 
+  /** Current resolution layer being edited (1 = level 1; 2+ = higher layers). Capped at MAX_EDITABLE_GRID_LEVEL so chooser only offers clickable levels. */
+  const editingLevel = useMemo(() => {
+    const cols = activeFile?.grid.columns ?? 0;
+    const rows = activeFile?.grid.rows ?? 0;
+    const maxL = getMaxGridResolutionLevel(cols, rows);
+    return Math.min(
+      Math.max(1, settings.gridResolutionLevel ?? 1),
+      maxL,
+      MAX_EDITABLE_GRID_LEVEL
+    );
+  }, [activeFile?.grid?.columns, activeFile?.grid?.rows, settings.gridResolutionLevel]);
+
+  /** Max resolution level from file grid (level-1 dimensions only). Does not change when switching editing level. */
+  const maxResolutionLevelFromFile = useMemo(
+    () =>
+      getMaxGridResolutionLevel(
+        activeFile?.grid?.columns ?? 0,
+        activeFile?.grid?.rows ?? 0
+      ),
+    [activeFile?.grid?.columns, activeFile?.grid?.rows]
+  );
+
+  /** Level-1 layout (for persist when editing a higher layer). */
+  const level1LayoutForPersist = useMemo(() => {
+    const rows = activeFile?.grid.rows ?? 0;
+    const cols = activeFile?.grid.columns ?? 0;
+    if (rows <= 0 || cols <= 0) return null;
+    return computeFixedGridLayout(availableWidth, availableHeight, GRID_GAP, rows, cols);
+  }, [activeFile?.grid?.rows, activeFile?.grid?.columns, availableWidth, availableHeight]);
+
+  /** When editing level 2+, the grid of complete cells at that level (for hook params and loadTiles). */
+  const levelGridInfo = useMemo(() => {
+    if (editingLevel < 2) return null;
+    const cols = activeFile?.grid.columns ?? 0;
+    const rows = activeFile?.grid.rows ?? 0;
+    if (cols <= 0 || rows <= 0) return null;
+    return getLevelGridInfo(cols, rows, editingLevel);
+  }, [editingLevel, activeFile?.grid?.columns, activeFile?.grid?.rows]);
+
+  const isEditingHigherLayer = editingLevel >= 2 && levelGridInfo != null && level1LayoutForPersist != null;
+
+  /** Level-2 grid info for drawing the level-2 overlay (all layers composited). */
+  const level2GridInfo = useMemo(
+    () =>
+      getLevelGridInfo(
+        activeFile?.grid.columns ?? 0,
+        activeFile?.grid.rows ?? 0,
+        2
+      ),
+    [activeFile?.grid?.columns, activeFile?.grid?.rows]
+  );
+
+  /** Level-3 grid info for drawing the level-3 overlay (when grid supports it). */
+  const level3GridInfo = useMemo(
+    () =>
+      getLevelGridInfo(
+        activeFile?.grid.columns ?? 0,
+        activeFile?.grid.rows ?? 0,
+        3
+      ),
+    [activeFile?.grid?.columns, activeFile?.grid?.rows]
+  );
+
+  /** When editing level 2+, fixedTileSize so the level grid fills the full canvas (same total size as level-1). */
+  const layerFixedTileSize = useMemo(() => {
+    if (!isEditingHigherLayer || !level1LayoutForPersist || !levelGridInfo)
+      return undefined;
+    const tw =
+      level1LayoutForPersist.columns * level1LayoutForPersist.tileSize +
+      GRID_GAP * (level1LayoutForPersist.columns - 1);
+    const th =
+      level1LayoutForPersist.rows * level1LayoutForPersist.tileSize +
+      GRID_GAP * (level1LayoutForPersist.rows - 1);
+    const w =
+      (tw - (levelGridInfo.levelCols - 1) * GRID_GAP) / levelGridInfo.levelCols;
+    const h =
+      (th - (levelGridInfo.levelRows - 1) * GRID_GAP) / levelGridInfo.levelRows;
+    return Math.min(w, h);
+  }, [isEditingHigherLayer, level1LayoutForPersist, levelGridInfo]);
+
   /** True while a paint drag is in progress so the whole stroke is one undo step. */
   const isPartOfDragRef = useRef(false);
 
@@ -1505,8 +1593,13 @@ export default function TestScreen() {
     allowEdgeConnections: settings.allowEdgeConnections,
     suspendRemap: true,
     randomSourceIndices,
-    fixedRows: activeFile?.grid.rows ?? 0,
-    fixedColumns: activeFile?.grid.columns ?? 0,
+    fixedRows: isEditingHigherLayer ? levelGridInfo!.levelRows : (activeFile?.grid.rows ?? 0),
+    fixedColumns: isEditingHigherLayer ? levelGridInfo!.levelCols : (activeFile?.grid.columns ?? 0),
+    fixedTileSize: layerFixedTileSize,
+    onTilesChange:
+      editingLevel >= 2
+        ? (t: Tile[]) => updateActiveFileLayer(editingLevel, t)
+        : undefined,
     brush,
     mirrorHorizontal: settings.mirrorHorizontal,
     mirrorVertical: settings.mirrorVertical,
@@ -1525,10 +1618,47 @@ export default function TestScreen() {
     lockedCells:
       viewMode === 'modify' ? (activeFile?.lockedCells ?? null) : null,
     isPartOfDragRef: viewMode === 'modify' ? isPartOfDragRef : undefined,
-    zoomRegion: viewMode === 'modify' ? zoomRegionForGrid : null,
+    zoomRegion:
+      viewMode === 'modify' && !isEditingHigherLayer ? zoomRegionForGrid : null,
     fullGridColumns: viewMode === 'modify' && zoomRegion ? (activeFile?.grid.columns ?? undefined) : undefined,
     fullGridRows: viewMode === 'modify' && zoomRegion ? (activeFile?.grid.rows ?? undefined) : undefined,
   });
+  /** When switching resolution layer or file, load that layer’s tiles into the grid hook. */
+  const lastLayerLoadRef = useRef({ editingLevel: 0, fileId: '' });
+  useEffect(() => {
+    if (!activeFile || viewMode !== 'modify') return;
+    const key = { editingLevel, fileId: activeFile.id };
+    if (
+      lastLayerLoadRef.current.editingLevel === key.editingLevel &&
+      lastLayerLoadRef.current.fileId === key.fileId
+    )
+      return;
+    lastLayerLoadRef.current = key;
+    if (editingLevel >= 2 && levelGridInfo) {
+      loadTiles(
+        normalizeTiles(
+          activeFile.layers?.[editingLevel],
+          levelGridInfo.cells.length,
+          tileSources.length
+        )
+      );
+    } else {
+      const cols = activeFile.grid?.columns ?? 0;
+      const rows = activeFile.grid?.rows ?? 0;
+      const n = cols * rows;
+      if (n > 0)
+        loadTiles(normalizeTiles(activeFile.tiles, n, tileSources.length));
+    }
+  }, [
+    editingLevel,
+    activeFile?.id,
+    levelGridInfo,
+    activeFile,
+    viewMode,
+    loadTiles,
+    tileSources.length,
+  ]);
+
   const fullGridColumnsForMapping =
     zoomRegion && fullGridColumnsForZoom != null
       ? fullGridColumnsForZoom
@@ -1681,19 +1811,129 @@ export default function TestScreen() {
       setShowPatternChooser(false);
     }
   }, [tileSourcesKey, clearCloneSource, brush, tileSources]);
+  /** Tiles for the currently edited layer (hook). */
   const displayTiles = tiles;
-  const gridWidth =
-    gridLayout.columns * gridLayout.tileSize +
-    GRID_GAP * Math.max(0, gridLayout.columns - 1);
-  const gridHeight =
-    gridLayout.rows * gridLayout.tileSize +
-    GRID_GAP * Math.max(0, gridLayout.rows - 1);
+
+  /** Canvas size: always level-1 grid size when we have a file so switching resolution doesn't change what's displayed. */
+  const displayGridWidth =
+    level1LayoutForPersist != null
+      ? level1LayoutForPersist.columns * level1LayoutForPersist.tileSize +
+        GRID_GAP * Math.max(0, level1LayoutForPersist.columns - 1)
+      : gridLayout.columns * gridLayout.tileSize +
+          GRID_GAP * Math.max(0, gridLayout.columns - 1);
+  const displayGridHeight =
+    level1LayoutForPersist != null
+      ? level1LayoutForPersist.rows * level1LayoutForPersist.tileSize +
+        GRID_GAP * Math.max(0, level1LayoutForPersist.rows - 1)
+      : gridLayout.rows * gridLayout.tileSize +
+          GRID_GAP * Math.max(0, gridLayout.rows - 1);
+
+  /** Level-1 layout for drawing (stable so layer composite doesn't jump). When we have a file with grid, always use level-1 dimensions so level-1 is visible when editing L2. */
+  const level1DisplayLayout = useMemo(() => {
+    if (level1LayoutForPersist != null) return level1LayoutForPersist;
+    const rows = activeFile?.grid?.rows ?? 0;
+    const cols = activeFile?.grid?.columns ?? 0;
+    if (rows > 0 && cols > 0 && !zoomRegion) {
+      return computeFixedGridLayout(availableWidth, availableHeight, GRID_GAP, rows, cols);
+    }
+    return gridLayout;
+  }, [level1LayoutForPersist, activeFile?.grid?.rows, activeFile?.grid?.columns, zoomRegion, availableWidth, availableHeight, gridLayout]);
+
+  /** Level-1 tiles to show (current layer when editing L1; when editing L2+ use file from list so we never show overwritten data). */
+  const level1TilesForDisplay = useMemo(() => {
+    if (editingLevel === 1) return tiles;
+    const fromList = files.find((f) => f.id === activeFileId)?.tiles;
+    const fromActive = activeFile?.tiles ?? [];
+    return (fromList?.length ?? 0) >= (level1DisplayLayout.rows * level1DisplayLayout.columns)
+      ? (fromList ?? [])
+      : fromActive;
+  }, [editingLevel, tiles, files, activeFileId, activeFile?.tiles, level1DisplayLayout.rows, level1DisplayLayout.columns]);
+  /** Level-2 tiles to show (current layer when editing L2, file when not). */
+  const level2TilesForDisplay =
+    editingLevel === 2 ? tiles : (activeFile?.layers?.[2] ?? []);
+  /** Level-3 tiles to show (current layer when editing L3, file when not). */
+  const level3TilesForDisplay =
+    editingLevel === 3 ? tiles : (activeFile?.layers?.[3] ?? []);
+
+  /** For thumbnail/preview/save image: always use level-1 so we never overwrite level-1 with level-2 data. */
+  const tilesForSaveImage =
+    editingLevel === 1 ? fullTilesForSave : (activeFile?.tiles ?? fullTilesForSave);
+  const gridLayoutForSaveImage =
+    editingLevel === 1
+      ? fullGridLayoutForSave
+      : (level1LayoutForPersist ?? fullGridLayoutForSave);
+
+  const gridWidth = displayGridWidth;
+  const gridHeight = displayGridHeight;
+
+  /** When not zoomed we composite level-1 + level-2; use level-1 layout for the base grid. */
+  const effectiveRows = zoomRegion ? gridLayout.rows : level1DisplayLayout.rows;
+  const effectiveCols = zoomRegion ? gridLayout.columns : level1DisplayLayout.columns;
+  const effectiveTileSize = zoomRegion ? gridLayout.tileSize : level1DisplayLayout.tileSize;
+  const effectiveTiles = zoomRegion ? displayTiles : level1TilesForDisplay;
+
+  const effectiveRowIndices = useMemo(
+    () => Array.from({ length: effectiveRows }, (_, i) => i),
+    [effectiveRows]
+  );
+  const effectiveColumnIndices = useMemo(
+    () => Array.from({ length: effectiveCols }, (_, i) => i),
+    [effectiveCols]
+  );
+
+  /** Level-2 overlay: cell size in px. Baked image uses proportionally thinner stroke so it’s not just L1 scaled (same stroke/cell ratio as L1). */
+  const level2CellSize =
+    level1DisplayLayout.tileSize * 2 + GRID_GAP;
+  const TILE_VIEWBOX_SIZE = 256;
+  const level2StrokeWidth = useMemo(() => {
+    const base = level1DisplayLayout.tileSize;
+    if (base <= 0 || level2CellSize <= 0) return activeLineWidth;
+    return activeLineWidth * (base / level2CellSize);
+  }, [level1DisplayLayout.tileSize, level2CellSize, activeLineWidth]);
+  const level2StrokeScaleByName = useMemo(() => {
+    const map = new Map<string, number>();
+    strokeScaleByName.forEach((scale, name) => {
+      map.set(name, scale ?? 1);
+    });
+    return map;
+  }, [strokeScaleByName]);
+  const level2Atlas = useTileAtlas({
+    tileSources: renderTileSources,
+    tileSize: level2CellSize,
+    strokeColor: activeLineColor,
+    strokeWidth: level2StrokeWidth,
+    strokeScaleByName: level2StrokeScaleByName,
+  });
+
+  /** Level-3 overlay: 4×4 level-1 tiles per cell. Same viewBox stroke formula so rasterized stroke matches L1 ratio. */
+  const level3CellSize =
+    level1DisplayLayout.tileSize * 4 + GRID_GAP * 3;
+  const level3StrokeWidth = useMemo(() => {
+    const base = level1DisplayLayout.tileSize;
+    if (base <= 0 || level3CellSize <= 0) return activeLineWidth;
+    return activeLineWidth * (base / level3CellSize);
+  }, [level1DisplayLayout.tileSize, level3CellSize, activeLineWidth]);
+  const level3StrokeScaleByName = useMemo(() => {
+    const map = new Map<string, number>();
+    strokeScaleByName.forEach((scale, name) => {
+      map.set(name, scale ?? 1);
+    });
+    return map;
+  }, [strokeScaleByName]);
+  const level3Atlas = useTileAtlas({
+    tileSources: renderTileSources,
+    tileSize: level3CellSize,
+    strokeColor: activeLineColor,
+    strokeWidth: level3StrokeWidth,
+    strokeScaleByName: level3StrokeScaleByName,
+  });
+
   const brushPanelHeight = reservedBrushHeight;
   const brushRows = PALETTE_FIXED_ROWS;
   const brushItemSize = PALETTE_FIXED_TILE_SIZE;
   const gridAtlas = useTileAtlas({
     tileSources: renderTileSources,
-    tileSize: gridLayout.tileSize,
+    tileSize: effectiveTileSize,
     strokeColor: activeLineColor,
     strokeWidth: activeLineWidth,
     strokeScaleByName,
@@ -2488,8 +2728,12 @@ export default function TestScreen() {
       activeFileRef.current ??
       filesRef.current.find((entry) => entry.id === activeFileId) ??
       null;
-    const tilesSnapshot = fileSnapshot?.tiles ?? fullTilesForSave;
-    const gridSnapshot = fileSnapshot?.grid ?? fullGridLayoutForSave;
+    const tilesSnapshot =
+      fileSnapshot?.tiles ??
+      (editingLevel === 1 ? fullTilesForSave : (activeFile?.tiles ?? fullTilesForSave));
+    const gridSnapshot =
+      fileSnapshot?.grid ??
+      (editingLevel === 1 ? fullGridLayoutForSave : (level1LayoutForPersist ?? fullGridLayoutForSave));
     upsertActiveFile({
       tiles: tilesSnapshot,
       gridLayout: gridSnapshot,
@@ -2510,6 +2754,9 @@ export default function TestScreen() {
     ensureFileSourceNames,
     fullTilesForSave,
     fullGridLayoutForSave,
+    editingLevel,
+    activeFile?.tiles,
+    level1LayoutForPersist,
     primaryCategory,
     activeCategories,
     selectedTileSetIds,
@@ -2853,8 +3100,8 @@ export default function TestScreen() {
         const thumbnailUri =
           Platform.OS === 'web'
             ? await renderTileCanvasToDataUrl({
-                tiles: fullTilesForSave,
-                gridLayout: fullGridLayoutForSave,
+                tiles: tilesForSaveImage,
+                gridLayout: gridLayoutForSaveImage,
                 tileSources,
                 gridGap: GRID_GAP,
                 blankSource: null,
@@ -2875,8 +3122,8 @@ export default function TestScreen() {
           setFileSourceNames(resolvedSourceNames);
         }
         const payload: Parameters<typeof upsertActiveFile>[0] = {
-          tiles: fullTilesForSave,
-          gridLayout: fullGridLayoutForSave,
+          tiles: editingLevel === 1 ? fullTilesForSave : (activeFile?.tiles ?? fullTilesForSave),
+          gridLayout: editingLevel === 1 ? fullGridLayoutForSave : (level1LayoutForPersist ?? fullGridLayoutForSave),
           category: primaryCategory,
           categories: activeCategories,
           preferredTileSize: fileTileSize,
@@ -2905,8 +3152,8 @@ export default function TestScreen() {
             return;
           }
           const previewUri = await renderTileCanvasToDataUrl({
-            tiles: fullTilesForSave,
-            gridLayout: fullGridLayoutForSave,
+            tiles: tilesForSaveImage,
+            gridLayout: gridLayoutForSaveImage,
             tileSources,
             gridGap: GRID_GAP,
             blankSource: null,
@@ -2931,8 +3178,8 @@ export default function TestScreen() {
             setFileSourceNames(resolvedSourceNames);
           }
           const payload: Parameters<typeof upsertActiveFile>[0] = {
-            tiles: fullTilesForSave,
-            gridLayout: fullGridLayoutForSave,
+            tiles: editingLevel === 1 ? fullTilesForSave : (activeFile?.tiles ?? fullTilesForSave),
+            gridLayout: editingLevel === 1 ? fullGridLayoutForSave : (level1LayoutForPersist ?? fullGridLayoutForSave),
             category: primaryCategory,
             categories: activeCategories,
             preferredTileSize: fileTileSize,
@@ -2973,15 +3220,15 @@ export default function TestScreen() {
             const fullWidth = Math.max(
               1,
               Math.round(
-                fullGridLayoutForSave.columns * fullGridLayoutForSave.tileSize +
-                  GRID_GAP * Math.max(0, fullGridLayoutForSave.columns - 1)
+                gridLayoutForSaveImage.columns * gridLayoutForSaveImage.tileSize +
+                  GRID_GAP * Math.max(0, gridLayoutForSaveImage.columns - 1)
               )
             );
             const fullHeight = Math.max(
               1,
               Math.round(
-                fullGridLayoutForSave.rows * fullGridLayoutForSave.tileSize +
-                  GRID_GAP * Math.max(0, fullGridLayoutForSave.rows - 1)
+                gridLayoutForSaveImage.rows * gridLayoutForSaveImage.tileSize +
+                  GRID_GAP * Math.max(0, gridLayoutForSaveImage.rows - 1)
               )
             );
             const uri = await gridCaptureRef.current?.capture?.({
@@ -3042,8 +3289,8 @@ export default function TestScreen() {
             setFileSourceNames(resolvedSourceNames);
           }
           const payload: Parameters<typeof upsertActiveFile>[0] = {
-            tiles: fullTilesForSave,
-            gridLayout: fullGridLayoutForSave,
+            tiles: editingLevel === 1 ? fullTilesForSave : (activeFile?.tiles ?? fullTilesForSave),
+            gridLayout: editingLevel === 1 ? fullGridLayoutForSave : (level1LayoutForPersist ?? fullGridLayoutForSave),
             category: primaryCategory,
             categories: activeCategories,
             preferredTileSize: fileTileSize,
@@ -3070,6 +3317,11 @@ export default function TestScreen() {
   }, [
     fullTilesForSave,
     fullGridLayoutForSave,
+    tilesForSaveImage,
+    gridLayoutForSaveImage,
+    editingLevel,
+    level1LayoutForPersist,
+    activeFile?.tiles,
     primaryCategory,
     activeCategories,
     fileTileSize,
@@ -3194,6 +3446,15 @@ export default function TestScreen() {
   };
 
   const getCellIndexForPoint = (x: number, y: number) => {
+    if (isEditingHigherLayer && levelGridInfo && level1LayoutForPersist) {
+      return getLevelCellIndexForPoint(
+        x,
+        y,
+        levelGridInfo,
+        level1LayoutForPersist.tileSize,
+        GRID_GAP
+      );
+    }
     if (gridLayout.columns === 0 || gridLayout.rows === 0) {
       return null;
     }
@@ -3235,7 +3496,46 @@ export default function TestScreen() {
     const clearId = clearSequenceRef.current;
     suppressAutosaveRef.current = true;
     setIsClearing(true);
-    resetTiles();
+    // Clear all layers (L1 + L2 + L3); other tools apply only to current layer.
+    const rows = activeFile?.grid?.rows ?? 0;
+    const cols = activeFile?.grid?.columns ?? 0;
+    const totalL1 = rows * cols;
+    const emptyTile = { imageIndex: -1, rotation: 0, mirrorX: false, mirrorY: false };
+    const lockedSet = new Set(activeFile?.lockedCells ?? []);
+    const emptyL1 =
+      totalL1 <= 0
+        ? []
+        : (() => {
+            const next = buildInitialTiles(totalL1);
+            const current = activeFile?.tiles ?? [];
+            lockedSet.forEach((i) => {
+              if (i >= 0 && i < current.length && current[i]) next[i] = { ...current[i] };
+            });
+            return next;
+          })();
+    const l2Count = level2GridInfo?.cells.length ?? 0;
+    const emptyL2 = Array.from({ length: l2Count }, () => ({ ...emptyTile }));
+    const l3Count = level3GridInfo?.cells.length ?? 0;
+    const emptyL3 = Array.from({ length: l3Count }, () => ({ ...emptyTile }));
+    if (activeFile && totalL1 > 0) {
+      upsertActiveFile({
+        ...activeFile,
+        tiles: emptyL1,
+        gridLayout: {
+          rows,
+          columns: cols,
+          tileSize: activeFile.preferredTileSize,
+        },
+        category: activeFile.category,
+        categories: activeFile.categories,
+        preferredTileSize: activeFile.preferredTileSize,
+      });
+    }
+    if (l2Count > 0) updateActiveFileLayer(2, emptyL2);
+    if (l3Count > 0) updateActiveFileLayer(3, emptyL3);
+    const emptyForCurrentLayer =
+      editingLevel === 1 ? emptyL1 : editingLevel === 2 ? emptyL2 : emptyL3;
+    loadTiles(emptyForCurrentLayer);
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
         void (async () => {
@@ -3596,15 +3896,15 @@ export default function TestScreen() {
         const fullWidth = Math.max(
           1,
           Math.round(
-            fullGridLayoutForSave.columns * fullGridLayoutForSave.tileSize +
-              GRID_GAP * Math.max(0, fullGridLayoutForSave.columns - 1)
+            gridLayoutForSaveImage.columns * gridLayoutForSaveImage.tileSize +
+              GRID_GAP * Math.max(0, gridLayoutForSaveImage.columns - 1)
           )
         );
         const fullHeight = Math.max(
           1,
           Math.round(
-            fullGridLayoutForSave.rows * fullGridLayoutForSave.tileSize +
-              GRID_GAP * Math.max(0, fullGridLayoutForSave.rows - 1)
+            gridLayoutForSaveImage.rows * gridLayoutForSaveImage.tileSize +
+              GRID_GAP * Math.max(0, gridLayoutForSaveImage.rows - 1)
           )
         );
         const uri = await gridCaptureRef.current?.capture?.({
@@ -3653,8 +3953,8 @@ export default function TestScreen() {
         setIsCapturingPreview(false);
       }
       upsertActiveFile({
-        tiles: fullTilesForSave,
-        gridLayout: fullGridLayoutForSave,
+        tiles: tilesForSaveImage,
+        gridLayout: gridLayoutForSaveImage,
         category: primaryCategory,
         categories: activeCategories,
         preferredTileSize: fileTileSize,
@@ -3672,8 +3972,8 @@ export default function TestScreen() {
       return;
     }
     const previewUri = await renderTileCanvasToDataUrl({
-      tiles: fullTilesForSave,
-      gridLayout: fullGridLayoutForSave,
+      tiles: tilesForSaveImage,
+      gridLayout: gridLayoutForSaveImage,
       tileSources,
       gridGap: GRID_GAP,
       blankSource: null,
@@ -3686,8 +3986,8 @@ export default function TestScreen() {
       quality: 1,
     });
     const thumbnailUri = await renderTileCanvasToDataUrl({
-      tiles: fullTilesForSave,
-      gridLayout: fullGridLayoutForSave,
+      tiles: tilesForSaveImage,
+      gridLayout: gridLayoutForSaveImage,
       tileSources,
       gridGap: GRID_GAP,
       blankSource: null,
@@ -3698,8 +3998,8 @@ export default function TestScreen() {
       maxDimension: FILE_THUMB_SIZE,
     });
     upsertActiveFile({
-      tiles: fullTilesForSave,
-      gridLayout: fullGridLayoutForSave,
+      tiles: tilesForSaveImage,
+      gridLayout: gridLayoutForSaveImage,
       category: primaryCategory,
       categories: activeCategories,
       preferredTileSize: fileTileSize,
@@ -5982,12 +6282,13 @@ export default function TestScreen() {
               }}
             />
             {viewMode === 'modify' &&
-              gridLayout.rows > 0 &&
-              gridLayout.columns > 0 && (
+              (activeFile?.grid?.columns ?? 0) > 0 &&
+              (activeFile?.grid?.rows ?? 0) > 0 && (
                 <ToolbarButton
                   label={`Grid L${Math.min(
                     Math.max(1, settings.gridResolutionLevel ?? 1),
-                    getMaxGridResolutionLevel(gridLayout.columns, gridLayout.rows)
+                    maxResolutionLevelFromFile,
+                    MAX_EDITABLE_GRID_LEVEL
                   )}`}
                   icon="view-grid-outline"
                   onPress={() => {
@@ -6105,7 +6406,11 @@ export default function TestScreen() {
           ]}
         >
           <View
-            key={zoomRegion ? `zoomed-${gridLayout.rows}-${gridLayout.columns}` : `full-${gridLayout.rows}-${gridLayout.columns}`}
+            key={
+              zoomRegion
+                ? `zoomed-${gridLayout.rows}-${gridLayout.columns}`
+                : `full-${level1DisplayLayout.rows}-${level1DisplayLayout.columns}`
+            }
             style={[
               styles.gridWrapper,
               {
@@ -6115,9 +6420,9 @@ export default function TestScreen() {
             ]}
           >
           <GridBackground
-            rows={gridLayout.rows}
-            columns={gridLayout.columns}
-            tileSize={gridLayout.tileSize}
+            rows={effectiveRows}
+            columns={effectiveCols}
+            tileSize={effectiveTileSize}
             width={gridWidth}
             height={gridHeight}
             backgroundColor={settings.backgroundColor}
@@ -6126,7 +6431,8 @@ export default function TestScreen() {
             gridGap={GRID_GAP}
             gridResolutionLevel={Math.min(
               Math.max(1, settings.gridResolutionLevel ?? 1),
-              getMaxGridResolutionLevel(gridLayout.columns, gridLayout.rows)
+              maxResolutionLevelFromFile,
+              MAX_EDITABLE_GRID_LEVEL
             )}
           />
           {showPreview && (loadPreviewUri || clearPreviewUri) && (
@@ -6220,9 +6526,13 @@ export default function TestScreen() {
             />
           )}
           {Platform.OS === 'web' ? (
-            <ThemedView
+            <View
               ref={setGridNode}
               style={[styles.grid, { opacity: gridVisible ? 1 : 0 }]}
+              pointerEvents="box-none"
+            >
+            <ThemedView
+              style={styles.grid}
               accessibilityRole="grid"
               pointerEvents={gridVisible && !isClearing ? 'auto' : 'none'}
               onLayout={(event: any) => {
@@ -6615,17 +6925,24 @@ export default function TestScreen() {
                 lastPaintedRef.current = null;
               }}
             >
-              {rowIndices.map((rowIndex) => (
+              {effectiveRowIndices.map((rowIndex) => (
                 <ThemedView key={`row-${rowIndex}`} style={styles.row}>
-                  {columnIndices.map((columnIndex) => {
-                    const cellIndex = rowIndex * gridLayout.columns + columnIndex;
-                    const item = displayTiles[cellIndex];
+                  {effectiveColumnIndices.map((columnIndex) => {
+                    const cellIndex = rowIndex * effectiveCols + columnIndex;
+                    const item = effectiveTiles[cellIndex];
+                    const safeTile =
+                      item ?? {
+                        imageIndex: -1,
+                        rotation: 0,
+                        mirrorX: false,
+                        mirrorY: false,
+                      };
                     return (
                       <TileCell
                         key={`cell-${cellIndex}`}
                         cellIndex={cellIndex}
-                        tileSize={gridLayout.tileSize}
-                        tile={item}
+                        tileSize={effectiveTileSize}
+                        tile={safeTile}
                         tileSources={renderTileSources}
                         showDebug={settings.showDebug}
                         strokeColor={activeLineColor}
@@ -6636,16 +6953,16 @@ export default function TestScreen() {
                         resolveUgcSourceFromName={buildUserTileSourceFromName}
                         showOverlays={showOverlays}
                         isCloneSource={
-                          brush.mode === 'clone' && cloneSourceIndex === cellIndex
+                          editingLevel === 1 && brush.mode === 'clone' && cloneSourceIndex === cellIndex
                         }
                         isCloneSample={
-                          brush.mode === 'clone' && cloneSampleIndex === cellIndex
+                          editingLevel === 1 && brush.mode === 'clone' && cloneSampleIndex === cellIndex
                         }
                         isCloneTargetOrigin={
-                          brush.mode === 'clone' && cloneAnchorIndex === cellIndex
+                          editingLevel === 1 && brush.mode === 'clone' && cloneAnchorIndex === cellIndex
                         }
                         isCloneCursor={
-                          brush.mode === 'clone' && cloneCursorIndex === cellIndex
+                          editingLevel === 1 && brush.mode === 'clone' && cloneCursorIndex === cellIndex
                         }
                         isLocked={lockedCellIndicesSet?.has(getFullIndexForCanvas(cellIndex))}
                       />
@@ -6654,6 +6971,153 @@ export default function TestScreen() {
                 </ThemedView>
               ))}
             </ThemedView>
+            {!zoomRegion &&
+              level2GridInfo &&
+              level2GridInfo.cells.length > 0 && (
+                <View style={[StyleSheet.absoluteFill, { backgroundColor: 'transparent' }]} pointerEvents="none">
+                  {level2GridInfo.cells.map((cell, i) => {
+                    const tile = level2TilesForDisplay[i];
+                    if (!tile || tile.imageIndex < 0) return null;
+                    const resolvedByName =
+                      tile.name && resolveSourceForName
+                        ? resolveSourceForName(tile.name)
+                        : null;
+                    const resolvedByUgc =
+                      tile.name?.includes(':') && buildUserTileSourceFromName
+                        ? buildUserTileSourceFromName(tile.name)
+                        : null;
+                    const resolvedByIndex =
+                      tile.imageIndex >= 0
+                        ? renderTileSources[tile.imageIndex] ?? null
+                        : null;
+                    const resolved =
+                      tile.name != null && tile.name !== ''
+                        ? resolvedByName ?? resolvedByUgc ?? null
+                        : resolvedByIndex;
+                    const tileName =
+                      tile.name ?? resolvedByIndex?.name ?? '';
+                    const source = resolved?.source ?? null;
+                    if (!source) return null;
+                    const stride = level1DisplayLayout.tileSize + GRID_GAP;
+                    const left = cell.minCol * stride;
+                    const top = cell.minRow * stride;
+                    const w =
+                      (cell.maxCol - cell.minCol + 1) * level1DisplayLayout.tileSize +
+                      (cell.maxCol - cell.minCol) * GRID_GAP;
+                    const h =
+                      (cell.maxRow - cell.minRow + 1) * level1DisplayLayout.tileSize +
+                      (cell.maxRow - cell.minRow) * GRID_GAP;
+                    return (
+                      <View
+                        key={`l2-web-${i}`}
+                        style={{
+                          position: 'absolute',
+                          left,
+                          top,
+                          width: w,
+                          height: h,
+                          overflow: 'hidden',
+                        }}
+                      >
+                        <TileAtlasSprite
+                          atlas={level2Atlas}
+                          source={source}
+                          name={tileName}
+                          strokeColor={activeLineColor}
+                          strokeWidth={level2StrokeWidth}
+                          style={[
+                            styles.tileImage,
+                            {
+                              width: '100%',
+                              height: '100%',
+                              transform: [
+                                { scaleX: tile.mirrorX ? -1 : 1 },
+                                { scaleY: tile.mirrorY ? -1 : 1 },
+                                { rotate: `${tile.rotation}deg` },
+                              ],
+                            },
+                          ]}
+                          displaySize={w}
+                        />
+                      </View>
+                    );
+                  })}
+                </View>
+              )}
+            {!zoomRegion &&
+              level3GridInfo &&
+              level3GridInfo.cells.length > 0 && (
+                <View style={[StyleSheet.absoluteFill, { backgroundColor: 'transparent' }]} pointerEvents="none">
+                  {level3GridInfo.cells.map((cell, i) => {
+                    const tile = level3TilesForDisplay[i];
+                    if (!tile || tile.imageIndex < 0) return null;
+                    const resolvedByName =
+                      tile.name && resolveSourceForName
+                        ? resolveSourceForName(tile.name)
+                        : null;
+                    const resolvedByUgc =
+                      tile.name?.includes(':') && buildUserTileSourceFromName
+                        ? buildUserTileSourceFromName(tile.name)
+                        : null;
+                    const resolvedByIndex =
+                      tile.imageIndex >= 0
+                        ? renderTileSources[tile.imageIndex] ?? null
+                        : null;
+                    const resolved =
+                      tile.name != null && tile.name !== ''
+                        ? resolvedByName ?? resolvedByUgc ?? null
+                        : resolvedByIndex;
+                    const tileName =
+                      tile.name ?? resolvedByIndex?.name ?? '';
+                    const source = resolved?.source ?? null;
+                    if (!source) return null;
+                    const stride = level1DisplayLayout.tileSize + GRID_GAP;
+                    const left = cell.minCol * stride;
+                    const top = cell.minRow * stride;
+                    const w =
+                      (cell.maxCol - cell.minCol + 1) * level1DisplayLayout.tileSize +
+                      (cell.maxCol - cell.minCol) * GRID_GAP;
+                    const h =
+                      (cell.maxRow - cell.minRow + 1) * level1DisplayLayout.tileSize +
+                      (cell.maxRow - cell.minRow) * GRID_GAP;
+                    return (
+                      <View
+                        key={`l3-web-${i}`}
+                        style={{
+                          position: 'absolute',
+                          left,
+                          top,
+                          width: w,
+                          height: h,
+                          overflow: 'hidden',
+                        }}
+                      >
+                        <TileAtlasSprite
+                          atlas={level3Atlas}
+                          source={source}
+                          name={tileName}
+                          strokeColor={activeLineColor}
+                          strokeWidth={level3StrokeWidth}
+                          style={[
+                            styles.tileImage,
+                            {
+                              width: '100%',
+                              height: '100%',
+                              transform: [
+                                { scaleX: tile.mirrorX ? -1 : 1 },
+                                { scaleY: tile.mirrorY ? -1 : 1 },
+                                { rotate: `${tile.rotation}deg` },
+                              ],
+                            },
+                          ]}
+                          displaySize={w}
+                        />
+                      </View>
+                    );
+                  })}
+                </View>
+              )}
+            </View>
           ) : (
             <>
             <ViewShot
@@ -6672,10 +7136,10 @@ export default function TestScreen() {
                 <TileGridCanvas
                   width={gridWidth}
                   height={gridHeight}
-                  tileSize={gridLayout.tileSize}
-                  rows={gridLayout.rows}
-                  columns={gridLayout.columns}
-                  tiles={displayTiles}
+                  tileSize={effectiveTileSize}
+                  rows={effectiveRows}
+                  columns={effectiveCols}
+                  tiles={effectiveTiles}
                   tileSources={renderTileSources}
                   errorSource={ERROR_TILE}
                   strokeColor={activeLineColor}
@@ -6683,10 +7147,10 @@ export default function TestScreen() {
                   strokeScaleByName={strokeScaleByName}
                   showDebug={settings.showDebug}
                   showOverlays={showOverlays}
-                  cloneSourceIndex={brush.mode === 'clone' ? cloneSourceIndex : null}
-                  cloneSampleIndex={brush.mode === 'clone' ? cloneSampleIndex : null}
-                  cloneAnchorIndex={brush.mode === 'clone' ? cloneAnchorIndex : null}
-                  cloneCursorIndex={brush.mode === 'clone' ? cloneCursorIndex : null}
+                  cloneSourceIndex={editingLevel === 1 && brush.mode === 'clone' ? cloneSourceIndex : null}
+                  cloneSampleIndex={editingLevel === 1 && brush.mode === 'clone' ? cloneSampleIndex : null}
+                  cloneAnchorIndex={editingLevel === 1 && brush.mode === 'clone' ? cloneAnchorIndex : null}
+                  cloneCursorIndex={editingLevel === 1 && brush.mode === 'clone' ? cloneCursorIndex : null}
                   lockedCellIndices={lockedCellIndicesArray}
                   lockedBoundaryEdges={lockedBoundaryEdges}
                   onPaintReady={
@@ -6696,17 +7160,24 @@ export default function TestScreen() {
                   }
                 />
               ) : (
-                rowIndices.map((rowIndex) => (
+                effectiveRowIndices.map((rowIndex) => (
                   <ThemedView key={`row-${rowIndex}`} style={styles.row}>
-                    {columnIndices.map((columnIndex) => {
-                      const cellIndex = rowIndex * gridLayout.columns + columnIndex;
-                      const item = displayTiles[cellIndex];
+                    {effectiveColumnIndices.map((columnIndex) => {
+                      const cellIndex = rowIndex * effectiveCols + columnIndex;
+                      const item = effectiveTiles[cellIndex];
+                      const safeTile =
+                        item ?? {
+                          imageIndex: -1,
+                          rotation: 0,
+                          mirrorX: false,
+                          mirrorY: false,
+                        };
                       return (
                         <TileCell
                           key={`cell-${cellIndex}`}
                           cellIndex={cellIndex}
-                          tileSize={gridLayout.tileSize}
-                          tile={item}
+                          tileSize={effectiveTileSize}
+                          tile={safeTile}
                           tileSources={renderTileSources}
                           showDebug={settings.showDebug}
                           strokeColor={activeLineColor}
@@ -6717,16 +7188,16 @@ export default function TestScreen() {
                           resolveUgcSourceFromName={buildUserTileSourceFromName}
                           showOverlays={showOverlays}
                           isCloneSource={
-                            brush.mode === 'clone' && cloneSourceIndex === cellIndex
+                            editingLevel === 1 && brush.mode === 'clone' && cloneSourceIndex === cellIndex
                           }
                           isCloneSample={
-                            brush.mode === 'clone' && cloneSampleIndex === cellIndex
+                            editingLevel === 1 && brush.mode === 'clone' && cloneSampleIndex === cellIndex
                           }
                           isCloneTargetOrigin={
-                            brush.mode === 'clone' && cloneAnchorIndex === cellIndex
+                            editingLevel === 1 && brush.mode === 'clone' && cloneAnchorIndex === cellIndex
                           }
                           isCloneCursor={
-                            brush.mode === 'clone' && cloneCursorIndex === cellIndex
+                            editingLevel === 1 && brush.mode === 'clone' && cloneCursorIndex === cellIndex
                           }
                           isLocked={lockedCellIndicesSet?.has(getFullIndexForCanvas(cellIndex))}
                         />
@@ -6735,6 +7206,152 @@ export default function TestScreen() {
                   </ThemedView>
                 ))
               )}
+              {!zoomRegion &&
+                level2GridInfo &&
+                level2GridInfo.cells.length > 0 && (
+                  <View style={[StyleSheet.absoluteFill, { backgroundColor: 'transparent' }]} pointerEvents="none">
+                    {level2GridInfo.cells.map((cell, i) => {
+                      const tile = level2TilesForDisplay[i];
+                      if (!tile || tile.imageIndex < 0) return null;
+                      const resolvedByName =
+                        tile.name && resolveSourceForName
+                          ? resolveSourceForName(tile.name)
+                          : null;
+                      const resolvedByUgc =
+                        tile.name?.includes(':') && buildUserTileSourceFromName
+                          ? buildUserTileSourceFromName(tile.name)
+                          : null;
+                      const resolvedByIndex =
+                        tile.imageIndex >= 0
+                          ? renderTileSources[tile.imageIndex] ?? null
+                          : null;
+                      const resolved =
+                        tile.name != null && tile.name !== ''
+                          ? resolvedByName ?? resolvedByUgc ?? null
+                          : resolvedByIndex;
+                      const tileName =
+                        tile.name ?? resolvedByIndex?.name ?? '';
+                      const source = resolved?.source ?? null;
+                      if (!source) return null;
+                      const stride = level1DisplayLayout.tileSize + GRID_GAP;
+                      const left = cell.minCol * stride;
+                      const top = cell.minRow * stride;
+                      const w =
+                        (cell.maxCol - cell.minCol + 1) * level1DisplayLayout.tileSize +
+                        (cell.maxCol - cell.minCol) * GRID_GAP;
+                      const h =
+                        (cell.maxRow - cell.minRow + 1) * level1DisplayLayout.tileSize +
+                        (cell.maxRow - cell.minRow) * GRID_GAP;
+                      return (
+                        <View
+                          key={`l2-${i}`}
+                          style={{
+                            position: 'absolute',
+                            left,
+                            top,
+                            width: w,
+                            height: h,
+                            overflow: 'hidden',
+                          }}
+                        >
+                          <TileAtlasSprite
+                            atlas={level2Atlas}
+                            source={source}
+                            name={tileName}
+                            strokeColor={activeLineColor}
+                            strokeWidth={level2StrokeWidth}
+                            style={[
+                              styles.tileImage,
+                              {
+                                width: '100%',
+                                height: '100%',
+                                transform: [
+                                  { scaleX: tile.mirrorX ? -1 : 1 },
+                                  { scaleY: tile.mirrorY ? -1 : 1 },
+                                  { rotate: `${tile.rotation}deg` },
+                                ],
+                              },
+                            ]}
+                            displaySize={w}
+                          />
+                        </View>
+                      );
+                    })}
+                  </View>
+                )}
+              {!zoomRegion &&
+                level3GridInfo &&
+                level3GridInfo.cells.length > 0 && (
+                  <View style={[StyleSheet.absoluteFill, { backgroundColor: 'transparent' }]} pointerEvents="none">
+                    {level3GridInfo.cells.map((cell, i) => {
+                      const tile = level3TilesForDisplay[i];
+                      if (!tile || tile.imageIndex < 0) return null;
+                      const resolvedByName =
+                        tile.name && resolveSourceForName
+                          ? resolveSourceForName(tile.name)
+                          : null;
+                      const resolvedByUgc =
+                        tile.name?.includes(':') && buildUserTileSourceFromName
+                          ? buildUserTileSourceFromName(tile.name)
+                          : null;
+                      const resolvedByIndex =
+                        tile.imageIndex >= 0
+                          ? renderTileSources[tile.imageIndex] ?? null
+                          : null;
+                      const resolved =
+                        tile.name != null && tile.name !== ''
+                          ? resolvedByName ?? resolvedByUgc ?? null
+                          : resolvedByIndex;
+                      const tileName =
+                        tile.name ?? resolvedByIndex?.name ?? '';
+                      const source = resolved?.source ?? null;
+                      if (!source) return null;
+                      const stride = level1DisplayLayout.tileSize + GRID_GAP;
+                      const left = cell.minCol * stride;
+                      const top = cell.minRow * stride;
+                      const w =
+                        (cell.maxCol - cell.minCol + 1) * level1DisplayLayout.tileSize +
+                        (cell.maxCol - cell.minCol) * GRID_GAP;
+                      const h =
+                        (cell.maxRow - cell.minRow + 1) * level1DisplayLayout.tileSize +
+                        (cell.maxRow - cell.minRow) * GRID_GAP;
+                      return (
+                        <View
+                          key={`l3-${i}`}
+                          style={{
+                            position: 'absolute',
+                            left,
+                            top,
+                            width: w,
+                            height: h,
+                            overflow: 'hidden',
+                          }}
+                        >
+                          <TileAtlasSprite
+                            atlas={level3Atlas}
+                            source={source}
+                            name={tileName}
+                            strokeColor={activeLineColor}
+                            strokeWidth={level3StrokeWidth}
+                            style={[
+                              styles.tileImage,
+                              {
+                                width: '100%',
+                                height: '100%',
+                                transform: [
+                                  { scaleX: tile.mirrorX ? -1 : 1 },
+                                  { scaleY: tile.mirrorY ? -1 : 1 },
+                                  { rotate: `${tile.rotation}deg` },
+                                ],
+                              },
+                            ]}
+                            displaySize={w}
+                          />
+                        </View>
+                      );
+                    })}
+                  </View>
+                )}
             </ViewShot>
               <View
                 ref={gridTouchRef}
@@ -7067,8 +7684,8 @@ export default function TestScreen() {
                         }));
                         if (activeFileId) {
                           upsertActiveFile({
-                            tiles: fullTilesForSave,
-                            gridLayout: fullGridLayoutForSave,
+                            tiles: editingLevel === 1 ? fullTilesForSave : (activeFile?.tiles ?? fullTilesForSave),
+                            gridLayout: editingLevel === 1 ? fullGridLayoutForSave : (level1LayoutForPersist ?? fullGridLayoutForSave),
                             tileSetIds: selectedTileSetIds,
                             sourceNames: nextSourceNames,
                             preferredTileSize: fileTileSize,
@@ -7142,8 +7759,8 @@ export default function TestScreen() {
                           ensureFileSourceNames(nextPaletteSources);
                         if (activeFileId) {
                           upsertActiveFile({
-                            tiles: fullTilesForSave,
-                            gridLayout: fullGridLayoutForSave,
+                            tiles: editingLevel === 1 ? fullTilesForSave : (activeFile?.tiles ?? fullTilesForSave),
+                            gridLayout: editingLevel === 1 ? fullGridLayoutForSave : (level1LayoutForPersist ?? fullGridLayoutForSave),
                             tileSetIds: nextTileSetIds,
                             sourceNames: nextSourceNames,
                             preferredTileSize: fileTileSize,
@@ -8185,7 +8802,10 @@ export default function TestScreen() {
                 Level 1 = tile grid. Higher levels: grid from center out (mirror cross = grid lines); partial cells at edges; lines align with tile grid.
               </ThemedText>
               {(() => {
-                const maxLevel = getMaxGridResolutionLevel(gridLayout.columns, gridLayout.rows);
+                const maxLevel = Math.min(
+                  maxResolutionLevelFromFile,
+                  MAX_EDITABLE_GRID_LEVEL
+                );
                 const current = Math.min(
                   Math.max(1, settings.gridResolutionLevel ?? 1),
                   maxLevel
@@ -8285,8 +8905,8 @@ export default function TestScreen() {
                         }));
                         if (activeFileId) {
                           upsertActiveFile({
-                            tiles: fullTilesForSave,
-                            gridLayout: fullGridLayoutForSave,
+                            tiles: editingLevel === 1 ? fullTilesForSave : (activeFile?.tiles ?? fullTilesForSave),
+                            gridLayout: editingLevel === 1 ? fullGridLayoutForSave : (level1LayoutForPersist ?? fullGridLayoutForSave),
                             tileSetIds: selectedTileSetIds,
                             sourceNames: nextSourceNames,
                             preferredTileSize: fileTileSize,
@@ -8379,8 +8999,8 @@ export default function TestScreen() {
                           ensureFileSourceNames(nextPaletteSources);
                         if (activeFileId) {
                           upsertActiveFile({
-                            tiles: fullTilesForSave,
-                            gridLayout: fullGridLayoutForSave,
+                            tiles: editingLevel === 1 ? fullTilesForSave : (activeFile?.tiles ?? fullTilesForSave),
+                            gridLayout: editingLevel === 1 ? fullGridLayoutForSave : (level1LayoutForPersist ?? fullGridLayoutForSave),
                             tileSetIds: nextTileSetIds,
                             sourceNames: nextSourceNames,
                             preferredTileSize: fileTileSize,
@@ -9490,6 +10110,9 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     backgroundColor: '#111111',
+  },
+  gridCanvasAreaAlignCenter: {
+    alignItems: 'center',
   },
   grid: {
     alignContent: 'flex-start',

@@ -13,6 +13,8 @@ export type TileFilePayload = {
   name: string;
   grid: { rows: number; columns: number };
   tiles: Tile[];
+  /** Resolution layers 2, 3, … (level 1 = tiles). Key: level number as string. */
+  layers?: Record<string, Tile[]>;
   preferredTileSize: number;
   lineWidth: number;
   lineColor: string;
@@ -69,6 +71,7 @@ export function serializeTileFile(file: {
   name: string;
   grid: { rows: number; columns: number };
   tiles: Tile[];
+  layers?: Record<number, Tile[]>;
   preferredTileSize: number;
   lineWidth: number;
   lineColor: string;
@@ -78,11 +81,18 @@ export function serializeTileFile(file: {
   categories: TileCategory[];
   lockedCells?: number[];
 }): string {
+  const layersExport =
+    file.layers && Object.keys(file.layers).length > 0
+      ? Object.fromEntries(
+          Object.entries(file.layers).map(([k, v]) => [String(k), v])
+        )
+      : undefined;
   const payload: TileFileExport = {
     v: TILE_FORMAT_VERSION,
     name: file.name,
     grid: file.grid,
     tiles: file.tiles,
+    ...(layersExport && { layers: layersExport }),
     preferredTileSize: file.preferredTileSize,
     lineWidth: file.lineWidth,
     lineColor: file.lineColor,
@@ -187,11 +197,28 @@ export function deserializeTileFile(json: string): DeserializeResult {
       )
       .slice(0, totalCells);
   }
+  let layers: Record<number, Tile[]> | undefined;
+  if (o.layers != null && typeof o.layers === 'object' && !Array.isArray(o.layers)) {
+    const raw = o.layers as Record<string, unknown>;
+    layers = {};
+    for (const key of Object.keys(raw)) {
+      const level = parseInt(key, 10);
+      if (!Number.isInteger(level) || level < 2) continue;
+      const arr = raw[key];
+      if (!Array.isArray(arr)) continue;
+      const layerTiles = arr
+        .map((t) => normalizeTile(t))
+        .filter((t): t is Tile => t !== null);
+      if (layerTiles.length > 0) layers[level] = layerTiles;
+    }
+    if (Object.keys(layers).length === 0) layers = undefined;
+  }
   const payload: TileFilePayload = {
     v: TILE_FORMAT_VERSION,
     name,
     grid: { rows, columns },
     tiles,
+    ...(layers && { layers }),
     preferredTileSize,
     lineWidth,
     lineColor,

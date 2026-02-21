@@ -20,6 +20,8 @@ type Props = {
   resizeMode?: ImageProps['resizeMode'];
   onLoad?: () => void;
   preferAtlas?: boolean;
+  /** When set, scale the atlas so one tile (entry.size) fills this size in the view. Ensures correct size/alignment when cell size differs from atlas tile size. */
+  displaySize?: number;
 };
 
 export function TileAtlasSprite({
@@ -32,13 +34,18 @@ export function TileAtlasSprite({
   resizeMode,
   onLoad,
   preferAtlas = true,
+  displaySize,
 }: Props) {
   const entry = atlas?.entries.get(name);
   if (Platform.OS === 'web' && atlas && entry && preferAtlas) {
+    const scale =
+      displaySize != null && entry.size > 0 ? displaySize / entry.size : 1;
+    const posX = entry.x * scale;
+    const posY = entry.y * scale;
     const backgroundStyle = {
       backgroundImage: `url(${atlas.uri})`,
-      backgroundPosition: `-${entry.x}px -${entry.y}px`,
-      backgroundSize: `${atlas.width}px ${atlas.height}px`,
+      backgroundPosition: `-${posX}px -${posY}px`,
+      backgroundSize: `${atlas.width * scale}px ${atlas.height * scale}px`,
       backgroundRepeat: 'no-repeat',
     } as const;
     return <View style={[style as any, backgroundStyle]} />;

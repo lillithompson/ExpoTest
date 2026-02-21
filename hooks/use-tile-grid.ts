@@ -37,6 +37,10 @@ type Params = {
   randomSourceIndices?: number[];
   fixedRows?: number;
   fixedColumns?: number;
+  /** When set with fixedRows/fixedColumns, use this tile size (e.g. for resolution layers). */
+  fixedTileSize?: number;
+  /** Called when tiles are updated (e.g. for persisting a resolution layer). */
+  onTilesChange?: (tiles: Tile[]) => void;
   brush:
     | { mode: 'random' }
     | { mode: 'draw' }
@@ -137,6 +141,8 @@ export const useTileGrid = ({
   randomSourceIndices,
   fixedRows,
   fixedColumns,
+  fixedTileSize,
+  onTilesChange,
   brush,
   mirrorHorizontal,
   mirrorVertical,
@@ -168,6 +174,16 @@ export const useTileGrid = ({
 
   const fullGridLayout = useMemo(() => {
     if (fixedRows && fixedColumns) {
+      if (
+        typeof fixedTileSize === 'number' &&
+        fixedTileSize > 0
+      ) {
+        return {
+          columns: fixedColumns,
+          rows: fixedRows,
+          tileSize: fixedTileSize,
+        };
+      }
       return computeFixedGridLayout(
         availableWidth,
         availableHeight,
@@ -184,6 +200,7 @@ export const useTileGrid = ({
     preferredTileSize,
     fixedRows,
     fixedColumns,
+    fixedTileSize,
   ]);
   const isZoomed = !!(
     zoomRegion &&
@@ -393,6 +410,11 @@ export const useTileGrid = ({
   const patternAnchorRef = useRef<number | null>(null);
   const drawStrokeRef = useRef<number[]>([]);
   const placementOrderRef = useRef(0);
+  const onTilesChangeRef = useRef(onTilesChange);
+  onTilesChangeRef.current = onTilesChange;
+  useEffect(() => {
+    onTilesChangeRef.current?.(tiles);
+  }, [tiles]);
 
   const getNextPlacementOrder = () => {
     placementOrderRef.current += 1;

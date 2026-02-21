@@ -64,6 +64,18 @@ const loadImage = (uri: string) =>
 const stripOuterBorder = (xml: string) =>
   xml.replace(/<rect\b[^>]*(x=["']0\.5["']|y=["']0\.5["'])[^>]*\/?>/gi, '');
 
+/** Set SVG root width/height so the image rasterizes at this size. */
+const setSvgRenderSize = (xml: string, size: number): string => {
+  const sizeStr = String(Math.round(size));
+  let next = xml
+    .replace(/\bwidth\s*=\s*["'][^"']*["']/gi, '')
+    .replace(/\bheight\s*=\s*["'][^"']*["']/gi, '');
+  return next.replace(
+    /<svg\b([^>]*)>/i,
+    `<svg$1 width="${sizeStr}" height="${sizeStr}">`
+  );
+};
+
 const applySvgOverrides = (xml: string, strokeColor?: string, strokeWidth?: number) => {
   let next = xml;
   const applyInlineOverrides = (input: string) => {
@@ -125,7 +137,7 @@ const applySvgOverrides = (xml: string, strokeColor?: string, strokeWidth?: numb
     const overrideRules = [
       strokeColor ? `stroke: ${strokeColor} !important;` : '',
       strokeWidth !== undefined
-        ? `stroke-width: ${strokeWidth} !important; vector-effect: non-scaling-stroke;`
+        ? `stroke-width: ${strokeWidth} !important;`
         : '',
     ]
       .filter(Boolean)
@@ -198,19 +210,28 @@ export const buildTileAtlas = async ({
 
   const getImage = async (
     source: unknown,
-    overrides?: { strokeColor?: string; strokeWidth?: number }
+    overrides?: { strokeColor?: string; strokeWidth?: number },
+    renderSize?: number
   ) => {
     const uri = resolveSourceUri(source);
     if (!uri) {
       return null;
     }
-    const cacheKey = overrides
-      ? `${uri}|${overrides.strokeColor ?? ''}|${overrides.strokeWidth ?? ''}`
-      : uri;
+    const cacheKey =
+      (overrides
+        ? `${uri}|${overrides.strokeColor ?? ''}|${overrides.strokeWidth ?? ''}`
+        : uri) + (renderSize != null ? `|${renderSize}` : '');
     const cached = imageCache.get(cacheKey);
     if (cached) {
       return cached;
     }
+    const finishSvg = (nextXml: string) => {
+      let out = nextXml;
+      if (renderSize != null && renderSize > 0) {
+        out = setSvgRenderSize(out, renderSize);
+      }
+      return out;
+    };
     if (uri.startsWith('data:')) {
       const lower = uri.toLowerCase();
       if (!lower.includes('image/svg+xml')) {
@@ -226,6 +247,7 @@ export const buildTileAtlas = async ({
       if (overrides) {
         nextXml = applySvgOverrides(nextXml, overrides.strokeColor, overrides.strokeWidth);
       }
+      nextXml = finishSvg(nextXml);
       const blob = new Blob([nextXml], { type: 'image/svg+xml' });
       const blobUrl = URL.createObjectURL(blob);
       const img = await loadImage(blobUrl);
@@ -246,6 +268,7 @@ export const buildTileAtlas = async ({
       if (overrides) {
         nextXml = applySvgOverrides(nextXml, overrides.strokeColor, overrides.strokeWidth);
       }
+      nextXml = finishSvg(nextXml);
       const blob = new Blob([nextXml], { type: 'image/svg+xml' });
       const blobUrl = URL.createObjectURL(blob);
       const img = await loadImage(blobUrl);
@@ -270,7 +293,7 @@ export const buildTileAtlas = async ({
             }
           : undefined;
       try {
-        const img = await getImage(source.source, overrides);
+        const img = await getImage(source.source, overrides, tileSize);
         return img ? { index, img, name: source.name } : null;
       } catch {
         return null;

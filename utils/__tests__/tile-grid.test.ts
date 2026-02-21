@@ -7,6 +7,8 @@ import type { Tile } from '../tile-grid';
 import {
     buildInitialTiles,
     getGridLevelLinePositions,
+    getLevelCellIndexForPoint,
+    getLevelGridInfo,
     getMaxGridResolutionLevel,
     getSpiralCellOrder,
     getSpiralCellOrderInRect,
@@ -332,5 +334,40 @@ describe('grid resolution level', () => {
     // cellTiles=8; center ± 8 is out of range. Only center 5 and 4.
     expect(verticalPx).toEqual([5 * 50]);
     expect(horizontalPx).toEqual([4 * 50]);
+  });
+
+  it('getLevelGridInfo level 2 for 10×8: 4×2 grid of complete 2×2 cells (row boundaries 2,4,6)', () => {
+    const info = getLevelGridInfo(10, 8, 2);
+    expect(info).not.toBeNull();
+    expect(info!.levelCols).toBe(4);
+    expect(info!.levelRows).toBe(2);
+    expect(info!.cells).toHaveLength(8);
+    expect(info!.cells[0]).toEqual({ minCol: 1, maxCol: 2, minRow: 2, maxRow: 3 });
+    expect(info!.cells[5]).toEqual({ minCol: 3, maxCol: 4, minRow: 4, maxRow: 5 });
+  });
+
+  it('getLevelGridInfo level 4 for 10×8: null (no complete 8×8 cell)', () => {
+    expect(getLevelGridInfo(10, 8, 4)).toBeNull();
+  });
+});
+
+describe('getLevelCellIndexForPoint', () => {
+  const tileSize = 10;
+  const gridGap = 2;
+
+  it('returns level-2 cell index when point is inside a complete cell', () => {
+    const info = getLevelGridInfo(10, 8, 2)!;
+    expect(info.cells[0]).toEqual({ minCol: 1, maxCol: 2, minRow: 2, maxRow: 3 });
+    const stride = tileSize + gridGap;
+    const left0 = 1 * stride;
+    const top0 = 2 * stride;
+    expect(getLevelCellIndexForPoint(left0, top0, info, tileSize, gridGap)).toBe(0);
+    expect(getLevelCellIndexForPoint(left0 + 5, top0 + 5, info, tileSize, gridGap)).toBe(0);
+  });
+
+  it('returns null when point is in partial cell or outside', () => {
+    const info = getLevelGridInfo(10, 8, 2)!;
+    expect(getLevelCellIndexForPoint(0, 0, info, tileSize, gridGap)).toBeNull();
+    expect(getLevelCellIndexForPoint(1, 1, info, tileSize, gridGap)).toBeNull();
   });
 });

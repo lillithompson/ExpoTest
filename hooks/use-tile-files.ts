@@ -20,6 +20,8 @@ export type TileFile = {
   name: string;
   tiles: Tile[];
   grid: { rows: number; columns: number };
+  /** Resolution layers 2, 3, … (level 1 = tiles). Each key is grid level; value is tiles for that level's complete cells. */
+  layers?: Record<number, Tile[]>;
   category: TileCategory;
   categories: TileCategory[];
   tileSetIds: string[];
@@ -281,6 +283,31 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
     [activeFileId, persistFiles]
   );
 
+  const updateActiveFileLayer = useCallback(
+    (level: number, tiles: Tile[]) => {
+      if (!activeFileId || level < 2) {
+        return;
+      }
+      setFiles((prev) => {
+        const next = prev.map((file) =>
+          file.id === activeFileId
+            ? {
+                ...file,
+                layers: {
+                  ...(file.layers ?? {}),
+                  [level]: tiles,
+                },
+                updatedAt: Date.now(),
+              }
+            : file
+        );
+        void persistFiles(next, activeFileId);
+        return next;
+      });
+    },
+    [activeFileId, persistFiles]
+  );
+
   const setActive = useCallback(
     (id: string) => {
       const now = Date.now();
@@ -354,6 +381,14 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
           id: createId(),
           name: `${source.name} Copy`,
           tiles: source.tiles.map((tile) => ({ ...tile })),
+          layers: source.layers
+            ? Object.fromEntries(
+                Object.entries(source.layers).map(([k, v]) => [
+                  parseInt(k, 10),
+                  v.map((t) => ({ ...t })),
+                ])
+              )
+            : undefined,
           updatedAt: Date.now(),
           lockedCells: Array.isArray(source.lockedCells)
             ? [...source.lockedCells]
@@ -372,11 +407,26 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
 
   const createFileFromTileData = useCallback(
     (payload: TileFilePayload, options?: { isSample?: boolean }): string => {
+      const layersPayload = payload.layers;
+      let layers: Record<number, Tile[]> | undefined;
+      if (layersPayload && typeof layersPayload === 'object' && !Array.isArray(layersPayload)) {
+        layers = {};
+        for (const [k, v] of Object.entries(layersPayload)) {
+          const level = parseInt(k, 10);
+          if (Number.isInteger(level) && level >= 2 && Array.isArray(v)) {
+            layers[level] = v;
+          }
+        }
+        if (Object.keys(layers).length === 0) layers = undefined;
+      } else {
+        layers = undefined;
+      }
       const nextFile: TileFile = {
         id: createId(),
         name: payload.name,
         tiles: payload.tiles,
         grid: payload.grid,
+        ...(layers && Object.keys(layers).length > 0 && { layers }),
         category: payload.category,
         categories: payload.categories,
         tileSetIds: payload.tileSetIds,
@@ -619,6 +669,7 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
     clearAllFiles,
     upsertActiveFile,
     updateActiveFileLockedCells,
+    updateActiveFileLayer,
     replaceTileSourceNames,
     replaceTileSourceNamesWithError,
     ready,
