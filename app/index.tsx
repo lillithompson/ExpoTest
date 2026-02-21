@@ -5967,6 +5967,58 @@ export default function TestScreen() {
             </ThemedView>
           </ThemedView>
         </ThemedView>
+        {(undoRedoBanner !== null || zoomRegion !== null) && (
+          <View style={styles.toolbarBannersOverlay} pointerEvents="box-none">
+            {undoRedoBanner !== null && (
+              <View style={styles.toolbarBannerRow} overflow="hidden">
+                <Animated.View
+                  pointerEvents="none"
+                  style={[
+                    styles.undoRedoBanner,
+                    styles.toolbarBannerBar,
+                    {
+                      transform: [{ translateY: undoRedoBannerTranslateY }],
+                    },
+                  ]}
+                >
+                  <Text
+                    style={styles.undoRedoBannerText}
+                    numberOfLines={1}
+                    adjustsFontSizeToFit
+                  >
+                    {undoRedoBanner === 'undoing' ? 'Undoing' : 'Redoing'}
+                  </Text>
+                </Animated.View>
+              </View>
+            )}
+            {zoomRegion !== null && (
+              <View pointerEvents="box-none" style={[styles.toolbarBannerRow, styles.zoomedBannerRow]}>
+                <Text
+                  style={styles.undoRedoBannerText}
+                  numberOfLines={1}
+                  adjustsFontSizeToFit
+                >
+                  Zoomed in
+                </Text>
+                <Pressable
+                  onPress={() => {
+                    if (settings.mirrorHorizontal || settings.mirrorVertical) {
+                      setShowZoomOutMirrorConfirm(true);
+                    } else {
+                      setZoomRegion(null);
+                    }
+                  }}
+                  hitSlop={8}
+                  style={({ pressed }) => [styles.zoomedBannerBackLink, pressed && { opacity: 0.7 }]}
+                  accessibilityRole="button"
+                  accessibilityLabel="Zoom out to full canvas"
+                >
+                  <Text style={styles.zoomedBannerBackLinkText}>Back</Text>
+                </Pressable>
+              </View>
+            )}
+          </View>
+        )}
         <View
           style={[
             Platform.OS === 'web' && styles.gridCanvasWebCenter,
@@ -6767,51 +6819,6 @@ export default function TestScreen() {
                 }}
               />
             </>
-          )}
-          {undoRedoBanner !== null && (
-            <Animated.View
-              pointerEvents="none"
-              style={[
-                styles.undoRedoBanner,
-                {
-                  transform: [{ translateY: undoRedoBannerTranslateY }],
-                },
-              ]}
-            >
-              <Text
-                style={styles.undoRedoBannerText}
-                numberOfLines={1}
-                adjustsFontSizeToFit
-              >
-                {undoRedoBanner === 'undoing' ? 'Undoing' : 'Redoing'}
-              </Text>
-            </Animated.View>
-          )}
-          {zoomRegion !== null && (
-            <View pointerEvents="box-none" style={[styles.undoRedoBanner, styles.zoomedBannerRow]}>
-              <Text
-                style={styles.undoRedoBannerText}
-                numberOfLines={1}
-                adjustsFontSizeToFit
-              >
-                Zoomed in
-              </Text>
-              <Pressable
-                onPress={() => {
-                  if (settings.mirrorHorizontal || settings.mirrorVertical) {
-                    setShowZoomOutMirrorConfirm(true);
-                  } else {
-                    setZoomRegion(null);
-                  }
-                }}
-                hitSlop={8}
-                style={({ pressed }) => [styles.zoomedBannerBackLink, pressed && { opacity: 0.7 }]}
-                accessibilityRole="button"
-                accessibilityLabel="Zoom out to full canvas"
-              >
-                <Text style={styles.zoomedBannerBackLinkText}>Back</Text>
-              </Pressable>
-            </View>
           )}
           </View>
           {showZoomOutMirrorConfirm && zoomRegion && (
@@ -8271,6 +8278,27 @@ const styles = StyleSheet.create({
     width: '100%',
     paddingHorizontal: 6,
     backgroundColor: '#e5e5e5',
+  },
+  /** Overlay pinned to bottom of toolbar; overlays canvas area (unused top margin when grid is centered, else top of grid). */
+  toolbarBannersOverlay: {
+    position: 'absolute',
+    top: HEADER_HEIGHT,
+    left: 0,
+    right: 0,
+    zIndex: 9,
+  },
+  toolbarBannerRow: {
+    width: '100%',
+    height: UNDO_REDO_BANNER_HEIGHT,
+    backgroundColor: '#2a2a2a',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  toolbarBannerBar: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 0,
   },
   controls: {
     flexDirection: 'row',
