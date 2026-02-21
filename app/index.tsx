@@ -2551,7 +2551,6 @@ export default function TestScreen() {
     setCanvasSelection(null);
     setZoomRegion(null);
     hasZoomedInThisSessionRef.current = false;
-    updateActiveFileLockedCells([]);
     if (brush.mode === 'clone' || brush.mode === 'pattern') {
       setBrush({ mode: 'random' });
     }
@@ -2570,7 +2569,7 @@ export default function TestScreen() {
       preview: Boolean(previewUri),
       sourceNames: fileSourceNames.length > 0 ? fileSourceNames : undefined,
     };
-  }, [activeFileId, loadRequestId, ready, viewMode, clearCloneSource, updateActiveFileLockedCells]);
+  }, [activeFileId, loadRequestId, ready, viewMode, clearCloneSource]);
 
   useEffect(() => {
     setGridStabilized(false);
