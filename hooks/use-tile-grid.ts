@@ -623,6 +623,16 @@ export const useTileGrid = ({
   );
   const connectionsByIndex = compatTables.connectionsByIndex;
 
+  /** Resolve tile to index in current tileSources for connection lookup. Pattern-placed tiles may have imageIndex from pattern context; name is authoritative for display and must be used so connection logic matches the visible tile. */
+  const getEffectiveConnectionIndex = (tile: Tile): number => {
+    if (!tile || tile.imageIndex < 0) return -1;
+    if (tile.name != null && tile.name !== '') {
+      const byName = getTileSourceIndexByName(tileSources, tile.name);
+      if (byName >= 0) return byName;
+    }
+    return tile.imageIndex;
+  };
+
   const getPairsForDirection = (index: number) => {
     switch (index) {
       case 0: // N
@@ -674,7 +684,7 @@ export const useTileGrid = ({
     validateDrawStroke(
       strokeOrder,
       tilesState,
-      gridLayout.columns,
+      placementCols,
       (index, rotation, mirrorX, mirrorY) =>
         compatTables.getConnectionsForPlacement(index, rotation, mirrorX, mirrorY)
     );
@@ -760,6 +770,10 @@ export const useTileGrid = ({
     return candidates;
   };
 
+  /** Layout for placement math: cellIndex and tilesState use full-grid coordinates, so we use full grid dimensions. */
+  const placementCols = fullGridLayout.columns;
+  const placementRows = fullGridLayout.rows;
+
   const buildCompatibleCandidates = (
     cellIndex: number,
     tilesState: Tile[],
@@ -771,8 +785,8 @@ export const useTileGrid = ({
       return [] as Tile[];
     }
 
-    const row = Math.floor(cellIndex / gridLayout.columns);
-    const col = cellIndex % gridLayout.columns;
+    const row = Math.floor(cellIndex / placementCols);
+    const col = cellIndex % placementCols;
     const directions = [
       { dr: -1, dc: 0 },
       { dr: -1, dc: 1 },
@@ -788,13 +802,13 @@ export const useTileGrid = ({
       .map((dir, index) => {
         const r = row + dir.dr;
         const c = col + dir.dc;
-        if (r < 0 || c < 0 || r >= gridLayout.rows || c >= gridLayout.columns) {
+        if (r < 0 || c < 0 || r >= placementRows || c >= placementCols) {
           if (!allowEdgeConnections) {
             return { pairs: getPairsForDirection(index), connections: new Array(8).fill(false) };
           }
           return null;
         }
-        const neighborIndex = r * gridLayout.columns + c;
+        const neighborIndex = r * placementCols + c;
         if (
           selectionSet &&
           !allowEdgeConnections &&
@@ -809,8 +823,15 @@ export const useTileGrid = ({
           }
           return null;
         }
+        const effectiveIndex = getEffectiveConnectionIndex(neighborTile);
+        if (effectiveIndex < 0) {
+          if (treatUninitializedAsNoConnection) {
+            return { pairs: getPairsForDirection(index), connections: new Array(8).fill(false) };
+          }
+          return null;
+        }
         const neighborConnections = compatTables.getConnectionsForPlacement(
-          neighborTile.imageIndex,
+          effectiveIndex,
           neighborTile.rotation,
           neighborTile.mirrorX,
           neighborTile.mirrorY
@@ -886,8 +907,8 @@ export const useTileGrid = ({
   };
 
   const getInitializedNeighborCount = (cellIndex: number, tilesState: Tile[]) => {
-    const row = Math.floor(cellIndex / gridLayout.columns);
-    const col = cellIndex % gridLayout.columns;
+    const row = Math.floor(cellIndex / placementCols);
+    const col = cellIndex % placementCols;
     const directions = [
       { dr: -1, dc: 0 },
       { dr: -1, dc: 1 },
@@ -902,10 +923,10 @@ export const useTileGrid = ({
     for (const dir of directions) {
       const r = row + dir.dr;
       const c = col + dir.dc;
-      if (r < 0 || c < 0 || r >= gridLayout.rows || c >= gridLayout.columns) {
+      if (r < 0 || c < 0 || r >= placementRows || c >= placementCols) {
         continue;
       }
-      const neighborIndex = r * gridLayout.columns + c;
+      const neighborIndex = r * placementCols + c;
       const neighborTile = tilesState[neighborIndex];
       if (neighborTile && neighborTile.imageIndex >= 0) {
         count += 1;
@@ -961,8 +982,8 @@ export const useTileGrid = ({
       return true;
     }
 
-    const row = Math.floor(cellIndex / gridLayout.columns);
-    const col = cellIndex % gridLayout.columns;
+    const row = Math.floor(cellIndex / placementCols);
+    const col = cellIndex % placementCols;
     const directions = [
       { dr: -1, dc: 0 },
       { dr: -1, dc: 1 },
@@ -977,7 +998,7 @@ export const useTileGrid = ({
     return directions.every((dir, index) => {
       const r = row + dir.dr;
       const c = col + dir.dc;
-      if (r < 0 || c < 0 || r >= gridLayout.rows || c >= gridLayout.columns) {
+      if (r < 0 || c < 0 || r >= placementRows || c >= placementCols) {
         if (!allowEdgeConnections) {
           return getPairsForDirection(index).every(
             ([candidateIndex]) => transformed[candidateIndex] === false
@@ -985,7 +1006,7 @@ export const useTileGrid = ({
         }
         return true;
       }
-      const neighborIndex = r * gridLayout.columns + c;
+      const neighborIndex = r * placementCols + c;
       if (
         selectionSet &&
         !allowEdgeConnections &&
@@ -1004,8 +1025,17 @@ export const useTileGrid = ({
         }
         return true;
       }
+      const effectiveIndex = getEffectiveConnectionIndex(neighborTile);
+      if (effectiveIndex < 0) {
+        if (treatUninitializedAsNoConnection) {
+          return getPairsForDirection(index).every(
+            ([candidateIndex]) => transformed[candidateIndex] === false
+          );
+        }
+        return true;
+      }
       const neighborTransformed = compatTables.getConnectionsForPlacement(
-        neighborTile.imageIndex,
+        effectiveIndex,
         neighborTile.rotation,
         neighborTile.mirrorX,
         neighborTile.mirrorY
