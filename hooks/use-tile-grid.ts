@@ -359,13 +359,12 @@ export const useTileGrid = ({
   /** Allow set for writing draw/placement results: full grid when mirror on (so mirror targets get written), else modifiable only. */
   const drawPlacementAllowSet = useMemo(
     () =>
-      (mirrorHorizontal || mirrorVertical) && !selectionBounds
+      mirrorHorizontal || mirrorVertical
         ? (lockedCellIndices ? allNonLockedIndicesSet : undefined)
         : modifiableIndicesSet,
     [
       mirrorHorizontal,
       mirrorVertical,
-      selectionBounds,
       lockedCellIndices,
       allNonLockedIndicesSet,
       modifiableIndicesSet,
@@ -1765,12 +1764,12 @@ export const useTileGrid = ({
         if (current[i]) nextTiles[i] = { ...current[i] };
       });
     }
-    const mirrorNoSelection = (mirrorHorizontal || mirrorVertical) && !selectionBounds;
-    const allowSet = mirrorNoSelection
+    const mirrorOn = mirrorHorizontal || mirrorVertical;
+    const allowSet = mirrorOn
       ? (lockedCellIndices ? allNonLockedIndicesSet : undefined)
       : (lockedCellIndices ? modifiableIndicesSet : null);
     getNextPlacementOrder();
-    if (mirrorNoSelection) {
+    if (mirrorOn) {
       const driven = modifiableIndicesArray;
       const start = Math.floor(Math.random() * Math.max(1, driven.length));
       for (let o = 0; o < driven.length; o += 1) {
@@ -1809,14 +1808,24 @@ export const useTileGrid = ({
     if (brush.mode === 'clone') {
       return;
     }
+    const mirrorOnFlood = mirrorHorizontal || mirrorVertical;
     const floodAllowSet =
-      (mirrorHorizontal || mirrorVertical) && !selectionBounds
+      mirrorOnFlood
         ? (lockedCellIndices ? allNonLockedIndicesSet : undefined)
         : modifiableIndicesSet;
-    const floodClearSet =
-      (mirrorHorizontal || mirrorVertical) && !selectionBounds
+    let floodClearSet: Set<number> =
+      mirrorOnFlood && !selectionBounds
         ? allNonLockedIndicesSet
         : modifiableIndicesSet;
+    if (mirrorOnFlood && selectionBounds) {
+      floodClearSet = new Set(modifiableIndicesSet);
+      modifiableIndicesSet.forEach((i) => {
+        getMirrorTargets(i).forEach((t) => floodClearSet.add(t));
+      });
+      if (lockedCellIndices) {
+        floodClearSet = new Set([...floodClearSet].filter((i) => !lockedCellIndices.has(i)));
+      }
+    }
     if (brush.mode === 'erase') {
       if (floodClearSet.size > 0) {
         const empty = { imageIndex: -1, rotation: 0, mirrorX: false, mirrorY: false };
@@ -2136,7 +2145,7 @@ export const useTileGrid = ({
           applyPlacementsToArrayOverride(
             nextTiles,
             getMirroredPlacements(cellIndex, placement),
-            lockedCellIndices ? modifiableIndicesSet : undefined
+            mirrorOnFlood ? floodAllowSet : (lockedCellIndices ? modifiableIndicesSet : undefined)
           );
         }
         withBulkUpdate(() => {
@@ -2242,14 +2251,24 @@ export const useTileGrid = ({
     if (brush.mode === 'clone') {
       return;
     }
+    const mirrorOnComplete = mirrorHorizontal || mirrorVertical;
     const floodAllowSetComplete =
-      (mirrorHorizontal || mirrorVertical) && !selectionBounds
+      mirrorOnComplete
         ? (lockedCellIndices ? allNonLockedIndicesSet : undefined)
         : modifiableIndicesSet;
-    const floodClearSetComplete =
-      (mirrorHorizontal || mirrorVertical) && !selectionBounds
+    let floodClearSetComplete: Set<number> =
+      mirrorOnComplete && !selectionBounds
         ? allNonLockedIndicesSet
         : modifiableIndicesSet;
+    if (mirrorOnComplete && selectionBounds) {
+      floodClearSetComplete = new Set(modifiableIndicesSet);
+      modifiableIndicesSet.forEach((i) => {
+        getMirrorTargets(i).forEach((t) => floodClearSetComplete.add(t));
+      });
+      if (lockedCellIndices) {
+        floodClearSetComplete = new Set([...floodClearSetComplete].filter((i) => !lockedCellIndices.has(i)));
+      }
+    }
     if (brush.mode === 'erase') {
       if (floodClearSetComplete.size > 0) {
         const empty = { imageIndex: -1, rotation: 0, mirrorX: false, mirrorY: false };
@@ -2286,6 +2305,12 @@ export const useTileGrid = ({
           if (targets.some((target) => nextTiles[target]?.imageIndex >= 0)) {
             drivenSet.add(index);
           }
+        }
+      } else if ((mirrorHorizontal || mirrorVertical) && selectionBounds) {
+        for (const index of modifiableIndicesSet) {
+          if (nextTiles[index].imageIndex >= 0) continue;
+          const targets = getMirrorTargets(index);
+          if (targets.some((t) => nextTiles[t]?.imageIndex >= 0)) drivenSet.add(index);
         }
       }
       if (mirrorHorizontal || mirrorVertical) {
@@ -2343,6 +2368,12 @@ export const useTileGrid = ({
             drivenSet.add(index);
           }
         }
+      } else if ((mirrorHorizontal || mirrorVertical) && selectionBounds) {
+        for (const index of modifiableIndicesSet) {
+          if (nextTiles[index].imageIndex >= 0) continue;
+          const targets = getMirrorTargets(index);
+          if (targets.some((t) => nextTiles[t]?.imageIndex >= 0)) drivenSet.add(index);
+        }
       }
       for (const index of drivenSet) {
         if (nextTiles[index].imageIndex >= 0) {
@@ -2386,6 +2417,12 @@ export const useTileGrid = ({
             drivenSet.add(index);
           }
         }
+      } else if ((mirrorHorizontal || mirrorVertical) && selectionBounds) {
+        for (const index of modifiableIndicesSet) {
+          if (nextTiles[index].imageIndex >= 0) continue;
+          const targets = getMirrorTargets(index);
+          if (targets.some((t) => nextTiles[t]?.imageIndex >= 0)) drivenSet.add(index);
+        }
       }
       for (const index of drivenSet) {
         if (nextTiles[index].imageIndex >= 0) {
@@ -2418,7 +2455,7 @@ export const useTileGrid = ({
     const nextTiles = [...snapshot];
     const allowedSet = randomSourceSet ?? null;
     const reconcileAllowSet =
-      (mirrorHorizontal || mirrorVertical) && !selectionBounds
+      mirrorHorizontal || mirrorVertical
         ? (lockedCellIndices ? allNonLockedIndicesSet : undefined)
         : modifiableIndicesSet;
     const maxPasses = Math.min(50, Math.max(8, gridLayout.rows + gridLayout.columns));
@@ -2500,6 +2537,10 @@ export const useTileGrid = ({
         })()
       : compatTables.variantsByKey;
 
+    const controlledRandomizeAllowSet =
+      mirrorHorizontal || mirrorVertical
+        ? (lockedCellIndices ? allNonLockedIndicesSet : undefined)
+        : modifiableIndicesSet;
     const nextTiles = [...normalizeTiles(tiles, internalTotalCells, tileSourcesLength)];
     for (const index of modifiableIndicesArray) {
       const current = nextTiles[index];
@@ -2533,7 +2574,7 @@ export const useTileGrid = ({
           mirrorY: pick.mirrorY,
           name: tileSources[pick.index]?.name,
         }),
-        modifiableIndicesSet
+        controlledRandomizeAllowSet ?? modifiableIndicesSet
       );
     }
 
@@ -2545,7 +2586,12 @@ export const useTileGrid = ({
   const resetTiles = () => {
     markClear();
     if (selectionBounds) {
-      const indices = modifiableIndicesArray;
+      let indices: number[] = modifiableIndicesArray;
+      if (mirrorHorizontal || mirrorVertical) {
+        const clearSet = new Set(modifiableIndicesSet);
+        modifiableIndicesSet.forEach((i) => getMirrorTargets(i).forEach((t) => clearSet.add(t)));
+        indices = [...clearSet].filter((i) => !lockedCellIndices?.has(i));
+      }
       if (indices.length === 0) {
         requestAnimationFrame(() => clearLogDone());
         return;
