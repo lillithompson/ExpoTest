@@ -100,12 +100,15 @@ type Props = {
 type FavoritesState = {
   favorites: Record<string, string>;
   lastColor: string;
+  /** Last color to pre-select when opening Tile Properties for an unfavorited tile. */
+  lastUnfavoritedColor: string;
 };
 
 const FAVORITES_STORAGE_KEY = 'tile-brush-favorites-v1';
 const defaultFavoritesState: FavoritesState = {
   favorites: {},
   lastColor: '#f59e0b',
+  lastUnfavoritedColor: '#f59e0b',
 };
 
 /** Draft value meaning "remove from favorites". */
@@ -167,6 +170,8 @@ const favoritesStore = (() => {
           state = {
             favorites: parsed?.favorites ?? {},
             lastColor: parsed?.lastColor ?? defaultFavoritesState.lastColor,
+            lastUnfavoritedColor:
+              parsed?.lastUnfavoritedColor ?? defaultFavoritesState.lastUnfavoritedColor,
           };
         }
       } catch {
@@ -463,7 +468,7 @@ export function TileBrushPanel({
       setFavoriteDialog({ name: entry.tile.name, index: entry.index, mode: 'remove' });
       return;
     }
-    setFavoriteColorDraft(lastFavoriteColorRef.current);
+    setFavoriteColorDraft(UNFAVORITE_SENTINEL);
     setFavoriteDialog({ name: entry.tile.name, index: entry.index, mode: 'add' });
   };
 
@@ -475,16 +480,23 @@ export function TileBrushPanel({
     favoritesStore.setState({
       favorites: { ...current.favorites, [favoriteDialog.name]: trimmed },
       lastColor: trimmed,
+      lastUnfavoritedColor: trimmed,
     });
   };
 
   const removeFromFavorites = () => {
     if (!favoriteDialog) return;
+    const removedColor = favorites[favoriteDialog.name];
     const nextFavorites = { ...favorites };
     delete nextFavorites[favoriteDialog.name];
+    const current = favoritesStore.getState();
     favoritesStore.setState({
       favorites: nextFavorites,
       lastColor: lastFavoriteColorRef.current,
+      lastUnfavoritedColor:
+        removedColor && favoriteColorOptions.includes(removedColor)
+          ? removedColor
+          : current.lastUnfavoritedColor,
     });
     setFavoriteColorDraft(UNFAVORITE_SENTINEL);
   };
@@ -498,11 +510,17 @@ export function TileBrushPanel({
       return;
     }
     if (favoriteColorDraft === UNFAVORITE_SENTINEL) {
+      const removedColor = favorites[favoriteDialog.name];
       const nextFavorites = { ...favorites };
       delete nextFavorites[favoriteDialog.name];
+      const current = favoritesStore.getState();
       favoritesStore.setState({
         favorites: nextFavorites,
         lastColor: lastFavoriteColorRef.current,
+        lastUnfavoritedColor:
+          removedColor && favoriteColorOptions.includes(removedColor)
+            ? removedColor
+            : current.lastUnfavoritedColor,
       });
       closeFavoriteDialog();
       return;
@@ -518,6 +536,7 @@ export function TileBrushPanel({
         [favoriteDialog.name]: nextColor,
       },
       lastColor: nextColor,
+      lastUnfavoritedColor: nextColor,
     });
     lastFavoriteColorRef.current = nextColor;
     closeFavoriteDialog();
