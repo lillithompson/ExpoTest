@@ -384,7 +384,6 @@ export function TileBrushPanel({
   const [collapsedFolders, setCollapsedFolders] = useState<Set<number>>(() => new Set());
   type PatternSectionEntry =
     | { type: 'separator'; connectionCount: number }
-    | { type: 'pattern' }
     | {
         type: 'pattern-thumb';
         id: string;
@@ -401,7 +400,6 @@ export function TileBrushPanel({
       type: 'separator',
       connectionCount: PATTERNS_SECTION_KEY,
     };
-    const patternBtn: PatternSectionEntry = { type: 'pattern' };
     const thumbs: PatternSectionEntry[] = (patternList ?? []).map((p) => ({
       type: 'pattern-thumb' as const,
       id: p.id,
@@ -410,7 +408,7 @@ export function TileBrushPanel({
       mirrorX: p.mirrorX,
       tileSetIds: p.tileSetIds,
     }));
-    return [sep, patternBtn, ...thumbs, ...orderedTileEntries];
+    return [sep, ...thumbs, ...orderedTileEntries];
   }, [orderedTileEntries, patternList, showPattern]);
   const displayOrderedEntries = useMemo(
     (): (PaletteEntry | PatternSectionEntry)[] =>
@@ -427,10 +425,7 @@ export function TileBrushPanel({
               e.connectionCount === PATTERNS_SECTION_KEY &&
               collapsedFolders.has(PATTERNS_SECTION_KEY)
             ) {
-              while (
-                i < list.length &&
-                (list[i].type === 'pattern' || list[i].type === 'pattern-thumb')
-              ) {
+              while (i < list.length && list[i].type === 'pattern-thumb') {
                 i++;
               }
             } else if (
@@ -603,21 +598,19 @@ export function TileBrushPanel({
                 >
                   {isPatternsSection ? (
                     <>
-                      {isCollapsed && (
-                        <Pressable
-                          style={styles.separatorBarIconWrapTop}
-                          onPress={() => onPatternSeparatorIconPress?.()}
-                          accessibilityRole="button"
-                          accessibilityLabel="Open pattern management"
-                        >
-                          <MaterialCommunityIcons
-                            name="view-grid-outline"
-                            size={SEPARATOR_BAR_WIDTH * 0.75}
-                            color="#374151"
-                            style={styles.separatorBarIcon}
-                          />
-                        </Pressable>
-                      )}
+                      <Pressable
+                        style={styles.separatorBarIconWrapTop}
+                        onPress={() => onPatternSeparatorIconPress?.()}
+                        accessibilityRole="button"
+                        accessibilityLabel="Open pattern management"
+                      >
+                        <MaterialCommunityIcons
+                          name="view-grid-outline"
+                          size={SEPARATOR_BAR_WIDTH * 0.75}
+                          color="#374151"
+                          style={styles.separatorBarIcon}
+                        />
+                      </Pressable>
                       {isCollapsed && (
                         <View style={styles.separatorBarIconWrap} pointerEvents="none">
                           <MaterialCommunityIcons
@@ -672,7 +665,6 @@ export function TileBrushPanel({
             const isDraw = entry.type === 'draw';
             const isErase = entry.type === 'erase';
             const isClone = entry.type === 'clone';
-            const isPattern = entry.type === 'pattern';
             const isPatternThumb = entry.type === 'pattern-thumb';
             const isTile = entry.type === 'fixed';
             const isSelected = isRandom
@@ -683,12 +675,10 @@ export function TileBrushPanel({
                   ? selected.mode === 'erase'
                   : isClone
                     ? selected.mode === 'clone'
-                    : isPattern
-                      ? false
-                      : isPatternThumb
-                        ? selected.mode === 'pattern' && selectedPatternId === entry.id
-                        : isTile && selected.mode === 'fixed' && selected.index === entry.index;
-            const isLabelMode = isRandom || isDraw || isErase || isClone || isPattern;
+                    : isPatternThumb
+                      ? selected.mode === 'pattern' && selectedPatternId === entry.id
+                      : isTile && selected.mode === 'fixed' && selected.index === entry.index;
+            const isLabelMode = isRandom || isDraw || isErase || isClone;
             const rotation =
               isTile ? getRotation(entry.index) : 0;
             const mirrorX =
@@ -710,13 +700,11 @@ export function TileBrushPanel({
                         ? 'erase'
                         : isClone
                           ? 'clone'
-                            : isPattern
-                            ? 'pattern'
-                            : isPatternThumb
-                              ? `pattern-thumb-${entry.id}`
-                              : isTile
-                                ? `palette-${idx}`
-                                : 'tile'
+                          : isPatternThumb
+                            ? `pattern-thumb-${entry.id}`
+                            : isTile
+                              ? `palette-${idx}`
+                              : 'tile'
                 }
                 onPressIn={() => {
                   if (isPatternThumb) {
@@ -733,9 +721,7 @@ export function TileBrushPanel({
                           ? { mode: 'erase' }
                           : isClone
                             ? { mode: 'clone' }
-                            : isPattern
-                              ? { mode: 'pattern' }
-                              : { mode: 'fixed', index: entry.index, rotation, mirrorX, mirrorY }
+                            : { mode: 'fixed', index: entry.index, rotation, mirrorX, mirrorY }
                   );
                 }}
                 onPress={() => {
@@ -770,20 +756,6 @@ export function TileBrushPanel({
                     }
                     return;
                   }
-                  if (isPattern) {
-                    if (
-                      lastTap &&
-                      lastTap.index === idx &&
-                      now - lastTap.time < 260
-                    ) {
-                      onPatternDoubleTap?.();
-                      lastTapRef.current = null;
-                    } else {
-                      onPatternPress?.();
-                      lastTapRef.current = { time: now, index: idx };
-                    }
-                    return;
-                  }
                   if (isTile && lastTap && lastTap.index === idx && now - lastTap.time < 260) {
                     const name = entry.tile.name;
                     const current = cycleRef.current[name] ?? 0;
@@ -804,10 +776,6 @@ export function TileBrushPanel({
                 onLongPress={() => {
                   if (isRandom) {
                     onRandomLongPress?.();
-                    return;
-                  }
-                  if (isPattern) {
-                    onPatternLongPress?.();
                     return;
                   }
                   if (isPatternThumb) {
@@ -835,13 +803,11 @@ export function TileBrushPanel({
                         ? 'Erase brush'
                         : isClone
                           ? 'Clone brush'
-                            : isPattern
-                            ? 'Pattern brush'
-                            : isPatternThumb
-                              ? `Pattern ${entry.id}`
-                              : isTile
-                                ? `Brush ${entry.tile.name}`
-                                : 'Brush'
+                          : isPatternThumb
+                            ? `Pattern ${entry.id}`
+                            : isTile
+                              ? `Brush ${entry.tile.name}`
+                              : 'Brush'
                 }
               >
                 <View
@@ -899,18 +865,6 @@ export function TileBrushPanel({
                     />
                     <ThemedText type="default" style={styles.labelTextSmall}>
                       Clone
-                    </ThemedText>
-                  </View>
-                ) : isPattern ? (
-                  <View style={styles.labelButton}>
-                    <MaterialCommunityIcons
-                      name="view-grid-outline"
-                      size={itemSize * 0.4}
-                      color="#fff"
-                      style={styles.labelIcon}
-                    />
-                    <ThemedText type="default" style={styles.labelTextSmall}>
-                      Pattern
                     </ThemedText>
                   </View>
                 ) : isPatternThumb && resolveTileForPatternList ? (
