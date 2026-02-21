@@ -1,9 +1,11 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { LinearGradient } from 'expo-linear-gradient';
 import type { ReactNode } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
     Modal,
+    PixelRatio,
     Platform,
     Pressable,
     ScrollView,
@@ -84,6 +86,8 @@ type Props = {
   onSelectPattern?: (patternId: string) => void;
   /** When user taps the pattern icon on the separator bar, open the pattern management modal. */
   onPatternSeparatorIconPress?: () => void;
+  /** When user has 0 patterns and taps the New tile in the patterns section, start create pattern flow. */
+  onPatternCreatePress?: () => void;
   /** When user long-presses a pattern thumb, open Pattern Properties for that pattern. */
   onPatternThumbLongPress?: (patternId: string) => void;
   /** When user double-taps a pattern thumb, rotate the pattern (like double-tap on a tile). */
@@ -231,6 +235,7 @@ export function TileBrushPanel({
   resolveTileForPatternList,
   onSelectPattern,
   onPatternSeparatorIconPress,
+  onPatternCreatePress,
   onPatternThumbLongPress,
   onPatternThumbDoubleTap,
   selectedPatternId,
@@ -391,6 +396,7 @@ export function TileBrushPanel({
   );
   type PatternSectionEntry =
     | { type: 'separator'; connectionCount: number }
+    | { type: 'pattern-new' }
     | {
         type: 'pattern-thumb';
         id: string;
@@ -407,14 +413,17 @@ export function TileBrushPanel({
       type: 'separator',
       connectionCount: PATTERNS_SECTION_KEY,
     };
-    const thumbs: PatternSectionEntry[] = (patternList ?? []).map((p) => ({
-      type: 'pattern-thumb' as const,
-      id: p.id,
-      pattern: p.pattern,
-      rotation: p.rotation,
-      mirrorX: p.mirrorX,
-      tileSetIds: p.tileSetIds,
-    }));
+    const hasNoPatterns = (patternList ?? []).length === 0;
+    const thumbs: PatternSectionEntry[] = hasNoPatterns
+      ? [{ type: 'pattern-new' }]
+      : (patternList ?? []).map((p) => ({
+          type: 'pattern-thumb' as const,
+          id: p.id,
+          pattern: p.pattern,
+          rotation: p.rotation,
+          mirrorX: p.mirrorX,
+          tileSetIds: p.tileSetIds,
+        }));
     return [sep, ...thumbs, ...orderedTileEntries];
   }, [orderedTileEntries, patternList, showPattern]);
   const displayOrderedEntries = useMemo(
@@ -432,7 +441,10 @@ export function TileBrushPanel({
               e.connectionCount === PATTERNS_SECTION_KEY &&
               collapsedFolders.has(PATTERNS_SECTION_KEY)
             ) {
-              while (i < list.length && list[i].type === 'pattern-thumb') {
+              while (
+                i < list.length &&
+                (list[i].type === 'pattern-thumb' || list[i].type === 'pattern-new')
+              ) {
                 i++;
               }
             } else if (
@@ -673,6 +685,7 @@ export function TileBrushPanel({
             const isErase = entry.type === 'erase';
             const isClone = entry.type === 'clone';
             const isPatternThumb = entry.type === 'pattern-thumb';
+            const isPatternNew = entry.type === 'pattern-new';
             const isTile = entry.type === 'fixed';
             const isSelected = isRandom
               ? selected.mode === 'random'
@@ -684,7 +697,9 @@ export function TileBrushPanel({
                     ? selected.mode === 'clone'
                     : isPatternThumb
                       ? selected.mode === 'pattern' && selectedPatternId === entry.id
-                      : isTile && selected.mode === 'fixed' && selected.index === entry.index;
+                      : isPatternNew
+                        ? false
+                        : isTile && selected.mode === 'fixed' && selected.index === entry.index;
             const isLabelMode = isRandom || isDraw || isErase || isClone;
             const rotation =
               isTile ? getRotation(entry.index) : 0;
@@ -707,13 +722,19 @@ export function TileBrushPanel({
                         ? 'erase'
                         : isClone
                           ? 'clone'
-                          : isPatternThumb
-                            ? `pattern-thumb-${entry.id}`
-                            : isTile
-                              ? `palette-${idx}`
-                              : 'tile'
+                          : isPatternNew
+                            ? 'pattern-new'
+                            : isPatternThumb
+                              ? `pattern-thumb-${entry.id}`
+                              : isTile
+                                ? `palette-${idx}`
+                                : 'tile'
                 }
                 onPressIn={() => {
+                  if (isPatternNew) {
+                    onPatternCreatePress?.();
+                    return;
+                  }
                   if (isPatternThumb) {
                     onSelectPattern?.(entry.id);
                     onSelect({ mode: 'pattern' });
@@ -797,6 +818,7 @@ export function TileBrushPanel({
                   styles.item,
                   { width: itemSize, height: itemSize },
                   isLabelMode && styles.itemLabelMode,
+                  isPatternNew && styles.patternNewItemBg,
                   isSelected ? styles.itemSelected : styles.itemDimmed,
                   !isLastRow ? { marginBottom: rowGap } : styles.itemBottom,
                 ]}
@@ -810,11 +832,13 @@ export function TileBrushPanel({
                         ? 'Erase brush'
                         : isClone
                           ? 'Clone brush'
-                          : isPatternThumb
-                            ? `Pattern ${entry.id}`
-                            : isTile
-                              ? `Brush ${entry.tile.name}`
-                              : 'Brush'
+                          : isPatternNew
+                            ? 'Create new pattern'
+                            : isPatternThumb
+                              ? `Pattern ${entry.id}`
+                              : isTile
+                                ? `Brush ${entry.tile.name}`
+                                : 'Brush'
                 }
               >
                 <View
@@ -873,6 +897,50 @@ export function TileBrushPanel({
                     <ThemedText type="default" style={styles.labelTextSmall}>
                       Clone
                     </ThemedText>
+                  </View>
+                ) : isPatternNew ? (
+                  <View style={styles.patternNewWrap}>
+                    <LinearGradient
+                      colors={['#172554', '#010409', '#000000']}
+                      locations={[0, 0.6, 0.95]}
+                      start={{ x: 0, y: 0 }}
+                      end={{ x: 1, y: 1 }}
+                      style={[
+                        styles.patternNewThumb,
+                        {
+                          width: itemSize - 16,
+                          height: itemSize - 16,
+                        },
+                      ]}
+                    >
+                      <View
+                        style={[
+                          styles.patternNewIconCenter,
+                          (() => {
+                            const iconSize =
+                              Platform.OS === 'web'
+                                ? (itemSize * 0.62) / PixelRatio.get()
+                                : itemSize * 0.62;
+                            return {
+                              transform: [
+                                { translateX: -iconSize / 2 },
+                                { translateY: -iconSize / 2 },
+                              ],
+                            };
+                          })(),
+                        ]}
+                      >
+                        <MaterialCommunityIcons
+                          name="plus"
+                          size={
+                            Platform.OS === 'web'
+                              ? (itemSize * 0.62) / PixelRatio.get()
+                              : itemSize * 0.62
+                          }
+                          color="#9ca3af"
+                        />
+                      </View>
+                    </LinearGradient>
                   </View>
                 ) : isPatternThumb && resolveTileForPatternList ? (
                   <View
@@ -1186,6 +1254,25 @@ const styles = StyleSheet.create({
   },
   itemBottom: {
     marginTop: 0,
+  },
+  patternNewItemBg: {
+    backgroundColor: 'transparent',
+  },
+  patternNewWrap: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    margin: 8,
+  },
+  patternNewThumb: {
+    padding: 10,
+    borderRadius: 10,
+    backgroundColor: 'transparent',
+  },
+  patternNewIconCenter: {
+    position: 'absolute',
+    left: '50%',
+    top: '50%',
   },
   tileContentWrapper: {
     alignItems: 'center',

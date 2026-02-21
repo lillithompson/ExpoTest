@@ -5,6 +5,7 @@ import Constants from 'expo-constants';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
 import { Image as ExpoImage } from 'expo-image';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import * as Sharing from 'expo-sharing';
 import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, startTransition } from 'react';
@@ -13,6 +14,7 @@ import {
     Animated,
     Image,
     Modal,
+    PixelRatio,
     Platform,
     Pressable,
     ScrollView,
@@ -4840,6 +4842,50 @@ export default function TestScreen() {
           ]}
           showsVerticalScrollIndicator
         >
+          {userFiles.length === 0 && (
+            <Pressable
+              style={[styles.fileCard, { width: fileCardWidth }]}
+              onPress={() => setShowNewFileModal(true)}
+              accessibilityRole="button"
+              accessibilityLabel="Create new file"
+            >
+              <LinearGradient
+                colors={['#172554', '#010409', '#000000']}
+                locations={[0, 0.6, 0.95]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={[
+                  styles.fileThumb,
+                  styles.newFileEmptyThumb,
+                  {
+                    width: fileCardWidth,
+                    height: fileCardWidth,
+                  },
+                ]}
+              >
+                <View
+                  style={[
+                    styles.newFileEmptyIconCenter,
+                    {
+                      transform: [
+                        { translateX: -((Platform.OS === 'web' ? 96 / PixelRatio.get() : 96) / 2) },
+                        { translateY: -((Platform.OS === 'web' ? 96 / PixelRatio.get() : 96) / 2) },
+                      ],
+                    },
+                  ]}
+                >
+                  <MaterialCommunityIcons
+                    name="plus"
+                    size={Platform.OS === 'web' ? 96 / PixelRatio.get() : 96}
+                    color="#9ca3af"
+                  />
+                </View>
+                <ThemedText type="defaultSemiBold" style={styles.newFileEmptyLabel}>
+                  New
+                </ThemedText>
+              </LinearGradient>
+            </Pressable>
+          )}
           {userFiles.map((file) => {
             const sources = getSourcesForFile(file);
             const thumbAspect =
@@ -7186,6 +7232,13 @@ export default function TestScreen() {
             setIsPatternCreationMode(false);
             setShowPatternChooser(true);
           }}
+          onPatternCreatePress={() => {
+            dismissModifyBanner();
+            setBrush({ mode: 'pattern' });
+            setIsPatternCreationMode(true);
+            setPatternSelection(null);
+            setShowPatternChooser(false);
+          }}
           selectedPatternId={selectedPatternId}
           onSelect={(next) => {
             dismissModifyBanner();
@@ -7391,12 +7444,12 @@ export default function TestScreen() {
                 clearPatternSelection();
               }}
               accessibilityRole="button"
-              accessibilityLabel="Close Manage Patterns"
+              accessibilityLabel="Close Patterns"
             />
             <ThemedView style={styles.patternModalPanel}>
               <ThemedView style={styles.patternModalHeader}>
                 <ThemedText type="title" style={styles.patternModalTitle}>
-                  Manage Patterns
+                  Patterns
                 </ThemedText>
                 <View style={styles.patternModalActions}>
                   <Pressable
@@ -7522,11 +7575,46 @@ export default function TestScreen() {
                 showsVerticalScrollIndicator
               >
                 {activePatterns.length === 0 ? (
-                  <View style={styles.patternModalEmpty}>
-                    <ThemedText style={styles.patternModalEmptyText}>
-                      No patterns yet
-                    </ThemedText>
-                  </View>
+                  <Pressable
+                    style={[styles.patternNewCard, { width: 70, height: 70 }]}
+                    onPress={() => {
+                      setBrush({ mode: 'pattern' });
+                      setIsPatternCreationMode(true);
+                      setPatternSelection(null);
+                      setShowPatternChooser(false);
+                    }}
+                    accessibilityRole="button"
+                    accessibilityLabel="Create new pattern"
+                  >
+                    <LinearGradient
+                      colors={['#172554', '#010409', '#000000']}
+                      locations={[0, 0.6, 0.95]}
+                      start={{ x: 0, y: 0 }}
+                      end={{ x: 1, y: 1 }}
+                      style={[
+                        styles.patternNewThumb,
+                        { width: 70, height: 70 },
+                      ]}
+                    >
+                      <View
+                        style={[
+                          styles.newFileEmptyIconCenter,
+                          {
+                            transform: [
+                              { translateX: -16 },
+                              { translateY: -16 },
+                            ],
+                          },
+                        ]}
+                      >
+                        <MaterialCommunityIcons
+                          name="plus"
+                          size={32}
+                          color="#9ca3af"
+                        />
+                      </View>
+                    </LinearGradient>
+                  </Pressable>
                 ) : (
                 <>
                 {activePatterns.map((pattern) => {
@@ -8743,7 +8831,7 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-start',
     gap: FILE_GRID_GAP,
     paddingHorizontal: FILE_GRID_SIDE_PADDING,
-    paddingTop: 8,
+    paddingTop: FILE_GRID_GAP + 8,
     paddingBottom: 12,
   },
   fileGridSectionDivider: {
@@ -8783,6 +8871,25 @@ const styles = StyleSheet.create({
     borderColor: '#1f1f1f',
     backgroundColor: '#111',
     padding: 4,
+  },
+  newFileEmptyThumb: {
+    padding: 10,
+    borderRadius: 10,
+    backgroundColor: 'transparent',
+  },
+  newFileEmptyIconCenter: {
+    position: 'absolute',
+    left: '50%',
+    top: '50%',
+  },
+  newFileEmptyLabel: {
+    position: 'absolute',
+    bottom: 10,
+    left: 0,
+    right: 0,
+    color: '#9ca3af',
+    fontSize: 14,
+    textAlign: 'center',
   },
   fileThumbSelected: {
     borderColor: '#22c55e',
@@ -8995,6 +9102,15 @@ const styles = StyleSheet.create({
   patternModalEmptyText: {
     color: '#9ca3af',
     fontSize: 16,
+  },
+  patternNewCard: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  patternNewThumb: {
+    padding: 10,
+    borderRadius: 10,
+    backgroundColor: 'transparent',
   },
   patternThumb: {
     borderWidth: 1,
