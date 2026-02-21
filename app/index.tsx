@@ -869,6 +869,7 @@ export default function TestScreen() {
   const [isMoveMode, setIsMoveMode] = useState(false);
   const [moveDragOffset, setMoveDragOffset] = useState<{ dRow: number; dCol: number } | null>(null);
   const [showMoveConfirmDialog, setShowMoveConfirmDialog] = useState(false);
+  const [showZoomOutMirrorConfirm, setShowZoomOutMirrorConfirm] = useState(false);
   const [pendingMoveOffset, setPendingMoveOffset] = useState<{ dRow: number; dCol: number } | null>(null);
   const moveDragStartRef = useRef<{ x: number; y: number } | null>(null);
   const [patternAnchorIndex, setPatternAnchorIndex] = useState<number | null>(null);
@@ -1475,6 +1476,7 @@ export default function TestScreen() {
     rotateRegion,
     fullTilesForSave,
     fullGridLayoutForSave,
+    mirrorZoomRegionToRestOfGrid,
   } = useTileGrid({
     tileSources,
     availableWidth,
@@ -5643,7 +5645,11 @@ export default function TestScreen() {
             <Pressable
               onPress={() => {
                 if (zoomRegion) {
-                  setZoomRegion(null);
+                  if (settings.mirrorHorizontal || settings.mirrorVertical) {
+                    setShowZoomOutMirrorConfirm(true);
+                  } else {
+                    setZoomRegion(null);
+                  }
                 } else {
                   persistActiveFileNow();
                   setViewMode('file');
@@ -6791,7 +6797,13 @@ export default function TestScreen() {
                 Zoomed in
               </Text>
               <Pressable
-                onPress={() => setZoomRegion(null)}
+                onPress={() => {
+                  if (settings.mirrorHorizontal || settings.mirrorVertical) {
+                    setShowZoomOutMirrorConfirm(true);
+                  } else {
+                    setZoomRegion(null);
+                  }
+                }}
                 hitSlop={8}
                 style={({ pressed }) => [styles.zoomedBannerBackLink, pressed && { opacity: 0.7 }]}
                 accessibilityRole="button"
@@ -6802,6 +6814,50 @@ export default function TestScreen() {
             </View>
           )}
           </View>
+          {showZoomOutMirrorConfirm && zoomRegion && (
+            <>
+              <Pressable
+                style={StyleSheet.absoluteFill}
+                onPress={() => setShowZoomOutMirrorConfirm(false)}
+                accessibilityRole="button"
+                accessibilityLabel="Cancel"
+              />
+              <View style={styles.moveConfirmPanelWrap} pointerEvents="box-none">
+                <ThemedView style={styles.moveConfirmPanel}>
+                  <ThemedText type="defaultSemiBold" style={styles.moveConfirmTitle}>
+                    Mirror changes?
+                  </ThemedText>
+                  <View style={styles.moveConfirmButtons}>
+                    <Pressable
+                      onPress={() => {
+                        setShowZoomOutMirrorConfirm(false);
+                        setZoomRegion(null);
+                      }}
+                      style={styles.moveConfirmButton}
+                      accessibilityRole="button"
+                      accessibilityLabel="Don't mirror"
+                    >
+                      <ThemedText type="defaultSemiBold">Don't mirror</ThemedText>
+                    </Pressable>
+                    <Pressable
+                      onPress={() => {
+                        mirrorZoomRegionToRestOfGrid();
+                        setShowZoomOutMirrorConfirm(false);
+                        setZoomRegion(null);
+                      }}
+                      style={[styles.moveConfirmButton, styles.moveConfirmButtonPrimary]}
+                      accessibilityRole="button"
+                      accessibilityLabel="Mirror"
+                    >
+                      <ThemedText type="defaultSemiBold" style={styles.moveConfirmButtonPrimaryText}>
+                        Mirror
+                      </ThemedText>
+                    </Pressable>
+                  </View>
+                </ThemedView>
+              </View>
+            </>
+          )}
           {showMoveConfirmDialog && pendingMoveOffset && canvasSelection && selectionBoundsFullGrid && (
             <>
               <Pressable

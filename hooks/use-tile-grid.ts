@@ -118,6 +118,8 @@ type Result = {
   fullTilesForSave: Tile[];
   /** Full-grid layout for persisting; use this (not gridLayout) when saving so zoomed view never overwrites file. */
   fullGridLayoutForSave: GridLayout;
+  /** When zoomed and mirror is on: copy zoom region to mirror targets on the full grid (one undo step). No-op if not zoomed or no mirror. */
+  mirrorZoomRegionToRestOfGrid: () => void;
 };
 
 const toConnectionKey = (connections: boolean[] | null) =>
@@ -2764,6 +2766,67 @@ export const useTileGrid = ({
     setCloneCursorIndex(null);
   }, [isZoomed, visibleToFull]);
 
+  const mirrorZoomRegionToRestOfGrid = useCallback(() => {
+    if (!isZoomed || !zoomBounds || (!mirrorHorizontal && !mirrorVertical)) {
+      return;
+    }
+    const rows = fullGridLayout.rows;
+    const cols = fullGridLayout.columns;
+    if (rows <= 0 || cols <= 0) return;
+    pushUndo();
+    setTiles((prev) => {
+      const current = normalizeTiles(prev, internalTotalCells, tileSourcesLength);
+      const next = [...current];
+      for (let r = zoomBounds!.minRow; r <= zoomBounds!.maxRow; r += 1) {
+        for (let c = zoomBounds!.minCol; c <= zoomBounds!.maxCol; c += 1) {
+          const fullIndex = r * cols + c;
+          const tile = current[fullIndex];
+          if (!tile) continue;
+          if (lockedCellIndices?.has(fullIndex)) continue;
+          if (mirrorHorizontal) {
+            const mc = cols - 1 - c;
+            const targetIndex = r * cols + mc;
+            if (targetIndex >= 0 && targetIndex < next.length && !lockedCellIndices?.has(targetIndex)) {
+              next[targetIndex] = { ...tile, mirrorX: !tile.mirrorX };
+            }
+          }
+          if (mirrorVertical) {
+            const mr = rows - 1 - r;
+            const targetIndex = mr * cols + c;
+            if (targetIndex >= 0 && targetIndex < next.length && !lockedCellIndices?.has(targetIndex)) {
+              next[targetIndex] = { ...tile, mirrorY: !tile.mirrorY };
+            }
+          }
+          if (mirrorHorizontal && mirrorVertical) {
+            const mr = rows - 1 - r;
+            const mc = cols - 1 - c;
+            const targetIndex = mr * cols + mc;
+            if (targetIndex >= 0 && targetIndex < next.length && !lockedCellIndices?.has(targetIndex)) {
+              next[targetIndex] = {
+                ...tile,
+                rotation: (tile.rotation + 180) % 360,
+                mirrorX: tile.mirrorX,
+                mirrorY: tile.mirrorY,
+              };
+            }
+          }
+        }
+      }
+      return next;
+    });
+  }, [
+    isZoomed,
+    zoomBounds,
+    mirrorHorizontal,
+    mirrorVertical,
+    fullGridLayout.rows,
+    fullGridLayout.columns,
+    internalTotalCells,
+    tileSourcesLength,
+    lockedCellIndices,
+    pushUndo,
+  ]);
+
   const emptyTile: Tile = useMemo(
     () => ({ imageIndex: -1, rotation: 0, mirrorX: false, mirrorY: false }),
     []
@@ -2809,5 +2872,6 @@ export const useTileGrid = ({
     rotateRegion,
     fullTilesForSave: renderTiles,
     fullGridLayoutForSave: fullGridLayout,
+    mirrorZoomRegionToRestOfGrid,
   };
 };
