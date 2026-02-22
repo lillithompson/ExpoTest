@@ -1,18 +1,17 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
-import { Platform } from 'react-native';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Platform } from 'react-native';
 
 import { TILE_CATEGORIES, type TileCategory } from '@/assets/images/tiles/manifest';
 import { getCellIndicesInRegion } from '@/utils/locked-regions';
-import {
-  type TileFilePayload,
-  deserializeTileFile,
-  serializeTileFile,
-} from '@/utils/tile-format';
 import { renderTileCanvasToDataUrl, type OverlayLayerParams } from '@/utils/tile-export';
 import { applyRemovedSourcesToFile } from '@/utils/tile-file-sync';
+import {
+    serializeTileFile,
+    type TileFilePayload
+} from '@/utils/tile-format';
 import { type GridLayout, type Tile } from '@/utils/tile-grid';
 
 export type TileFile = {
@@ -38,6 +37,8 @@ export type TileFile = {
   layerVisibility?: Record<number, boolean>;
   /** Per-layer lock. If true, layer cannot be edited. Default false. */
   layerLocked?: Record<number, boolean>;
+  /** Per-layer emphasize. If true, layer tiles are shown with a blue tint on the canvas. Default false. */
+  layerEmphasized?: Record<number, boolean>;
   /** True when the file was added from the bundled samples (file view shows these in a separate section). */
   isSample?: boolean;
 };
@@ -178,6 +179,18 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
                 }
                 if (Object.keys(layerLocked).length === 0) layerLocked = undefined;
               }
+              let layerEmphasized: Record<number, boolean> | undefined;
+              const rawEmph = (file as { layerEmphasized?: Record<string, unknown> }).layerEmphasized;
+              if (rawEmph != null && typeof rawEmph === 'object' && !Array.isArray(rawEmph)) {
+                layerEmphasized = {};
+                for (const key of Object.keys(rawEmph)) {
+                  const level = parseInt(key, 10);
+                  if (Number.isInteger(level) && level >= 1 && rawEmph[key] === true) {
+                    layerEmphasized[level] = true;
+                  }
+                }
+                if (Object.keys(layerEmphasized).length === 0) layerEmphasized = undefined;
+              }
               return {
                 id: file.id ?? createId(),
                 name: file.name ?? 'Canvas',
@@ -201,6 +214,7 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
                 lockedCells,
                 ...(layerVisibility && { layerVisibility }),
                 ...(layerLocked && { layerLocked }),
+                ...(layerEmphasized && { layerEmphasized }),
                 isSample: file.isSample === true,
               };
             })
@@ -399,6 +413,29 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
     [activeFileId, persistFiles]
   );
 
+  const updateActiveFileLayerEmphasized = useCallback(
+    (level: number, emphasized: boolean) => {
+      if (!activeFileId || level < 1) return;
+      setFiles((prev) => {
+        const next = prev.map((file) =>
+          file.id === activeFileId
+            ? {
+                ...file,
+                layerEmphasized: {
+                  ...(file.layerEmphasized ?? {}),
+                  [level]: emphasized,
+                },
+                updatedAt: Date.now(),
+              }
+            : file
+        );
+        void persistFiles(next, activeFileId);
+        return next;
+      });
+    },
+    [activeFileId, persistFiles]
+  );
+
   const setActive = useCallback(
     (id: string) => {
       const now = Date.now();
@@ -488,6 +525,7 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
             ? { ...source.layerVisibility }
             : undefined,
           layerLocked: source.layerLocked ? { ...source.layerLocked } : undefined,
+          layerEmphasized: source.layerEmphasized ? { ...source.layerEmphasized } : undefined,
           isSample: false,
         };
         setActiveFileId(nextFile.id);
@@ -543,6 +581,10 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
         ...(payload.layerLocked &&
           Object.keys(payload.layerLocked).length > 0 && {
             layerLocked: payload.layerLocked,
+          }),
+        ...(payload.layerEmphasized &&
+          Object.keys(payload.layerEmphasized).length > 0 && {
+            layerEmphasized: payload.layerEmphasized,
           }),
         isSample: options?.isSample === true,
       };
@@ -777,6 +819,7 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
     updateActiveFileLayer,
     updateActiveFileLayerVisibility,
     updateActiveFileLayerLocked,
+    updateActiveFileLayerEmphasized,
     replaceTileSourceNames,
     replaceTileSourceNamesWithError,
     ready,

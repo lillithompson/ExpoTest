@@ -115,6 +115,8 @@ import { deserializePattern, deserializeTileSet, serializePattern } from '@/util
 import JSZip from 'jszip';
 
 const GRID_GAP = 0;
+/** Stroke color for tiles on an emphasized layer (lines drawn in blue). */
+const EMPHASIZE_STROKE_COLOR = '#3b82f6';
 /** Max internal grid level (3 = 4×4 cells per tile). Display: L1 = coarsest, Lmax = finest. */
 const MAX_EDITABLE_GRID_LEVEL = 3;
 const CONTENT_PADDING = 0;
@@ -1013,6 +1015,7 @@ export default function TestScreen() {
     updateActiveFileLayer,
     updateActiveFileLayerVisibility,
     updateActiveFileLayerLocked,
+    updateActiveFileLayerEmphasized,
     replaceTileSourceNames,
     replaceTileSourceNamesWithError,
     ready,
@@ -1510,6 +1513,12 @@ export default function TestScreen() {
   const isLayerLocked = useCallback(
     (file: { layerLocked?: Record<number, boolean> } | null, level: number) =>
       file?.layerLocked?.[level] === true,
+    []
+  );
+  /** Layer is emphasized (default false). Emphasized layers show tiles with a blue tint. */
+  const isLayerEmphasized = useCallback(
+    (file: { layerEmphasized?: Record<number, boolean> } | null, level: number) =>
+      file?.layerEmphasized?.[level] === true,
     []
   );
 
@@ -7156,7 +7165,7 @@ export default function TestScreen() {
                         tile={safeTile}
                         tileSources={renderTileSources}
                         showDebug={settings.showDebug}
-                        strokeColor={activeLineColor}
+                        strokeColor={isLayerEmphasized(activeFile, 1) ? EMPHASIZE_STROKE_COLOR : activeLineColor}
                         strokeWidth={activeLineWidth}
                         strokeScaleByName={strokeScaleByName}
                         atlas={gridAtlas}
@@ -7235,7 +7244,7 @@ export default function TestScreen() {
                           atlas={level2Atlas}
                           source={source}
                           name={tileName}
-                          strokeColor={activeLineColor}
+                          strokeColor={isLayerEmphasized(activeFile, 2) ? EMPHASIZE_STROKE_COLOR : activeLineColor}
                           strokeWidth={level2StrokeWidth}
                           style={[
                             styles.tileImage,
@@ -7309,7 +7318,7 @@ export default function TestScreen() {
                           atlas={level3Atlas}
                           source={source}
                           name={tileName}
-                          strokeColor={activeLineColor}
+                          strokeColor={isLayerEmphasized(activeFile, 3) ? EMPHASIZE_STROKE_COLOR : activeLineColor}
                           strokeWidth={level3StrokeWidth}
                           style={[
                             styles.tileImage,
@@ -7355,7 +7364,7 @@ export default function TestScreen() {
                   tiles={effectiveTiles}
                   tileSources={renderTileSources}
                   errorSource={ERROR_TILE}
-                  strokeColor={activeLineColor}
+                  strokeColor={isLayerEmphasized(activeFile, 1) ? EMPHASIZE_STROKE_COLOR : activeLineColor}
                   strokeWidth={activeLineWidth}
                   strokeScaleByName={strokeScaleByName}
                   showDebug={settings.showDebug}
@@ -7393,7 +7402,7 @@ export default function TestScreen() {
                           tile={safeTile}
                           tileSources={renderTileSources}
                           showDebug={settings.showDebug}
-                          strokeColor={activeLineColor}
+                          strokeColor={isLayerEmphasized(activeFile, 1) ? EMPHASIZE_STROKE_COLOR : activeLineColor}
                           strokeWidth={activeLineWidth}
                           strokeScaleByName={strokeScaleByName}
                           atlas={gridAtlas}
@@ -7419,6 +7428,7 @@ export default function TestScreen() {
                   </ThemedView>
                 ))
               )}
+            </ViewShot>
               {!zoomRegion &&
                 activeFile?.layerVisibility?.[2] !== false &&
                 level2GridInfo &&
@@ -7472,7 +7482,7 @@ export default function TestScreen() {
                             atlas={level2Atlas}
                             source={source}
                             name={tileName}
-                            strokeColor={activeLineColor}
+                            strokeColor={isLayerEmphasized(activeFile, 2) ? EMPHASIZE_STROKE_COLOR : activeLineColor}
                             strokeWidth={level2StrokeWidth}
                             style={[
                               styles.tileImage,
@@ -7546,7 +7556,7 @@ export default function TestScreen() {
                             atlas={level3Atlas}
                             source={source}
                             name={tileName}
-                            strokeColor={activeLineColor}
+                            strokeColor={isLayerEmphasized(activeFile, 3) ? EMPHASIZE_STROKE_COLOR : activeLineColor}
                             strokeWidth={level3StrokeWidth}
                             style={[
                               styles.tileImage,
@@ -7567,7 +7577,6 @@ export default function TestScreen() {
                     })}
                   </View>
                 )}
-            </ViewShot>
               <View
                 ref={gridTouchRef}
                 style={StyleSheet.absoluteFillObject}
@@ -9027,6 +9036,7 @@ export default function TestScreen() {
                   const internalLevel = maxDisplayLevel - level + 1;
                   const visible = isLayerVisible(activeFile, internalLevel);
                   const locked = isLayerLocked(activeFile, internalLevel);
+                  const emphasized = isLayerEmphasized(activeFile, internalLevel);
                   return (
                     <View
                       key={level}
@@ -9076,6 +9086,18 @@ export default function TestScreen() {
                           name={locked ? 'lock' : 'lock-open-outline'}
                           size={22}
                           color={locked ? '#dc2626' : '#9ca3af'}
+                        />
+                      </Pressable>
+                      <Pressable
+                        onPress={() => updateActiveFileLayerEmphasized(internalLevel, !emphasized)}
+                        style={styles.gridResolutionIconButton}
+                        accessibilityRole="button"
+                        accessibilityLabel={emphasized ? 'Remove emphasize' : 'Emphasize layer'}
+                      >
+                        <MaterialCommunityIcons
+                          name="format-color-highlight"
+                          size={22}
+                          color={emphasized ? '#3b82f6' : '#9ca3af'}
                         />
                       </Pressable>
                     </View>

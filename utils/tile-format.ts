@@ -27,6 +27,8 @@ export type TileFilePayload = {
   layerVisibility?: Record<number, boolean>;
   /** Per-layer lock. Omitted = unlocked. */
   layerLocked?: Record<number, boolean>;
+  /** Per-layer emphasize. Omitted = not emphasized. */
+  layerEmphasized?: Record<number, boolean>;
 };
 
 type TileFileExport = {
@@ -86,6 +88,7 @@ export function serializeTileFile(file: {
   lockedCells?: number[];
   layerVisibility?: Record<number, boolean>;
   layerLocked?: Record<number, boolean>;
+  layerEmphasized?: Record<number, boolean>;
 }): string {
   const layersExport =
     file.layers && Object.keys(file.layers).length > 0
@@ -118,6 +121,12 @@ export function serializeTileFile(file: {
       Object.keys(file.layerLocked).length > 0 && {
         layerLocked: Object.fromEntries(
           Object.entries(file.layerLocked).map(([k, v]) => [String(k), v])
+        ),
+      }),
+    ...(file.layerEmphasized &&
+      Object.keys(file.layerEmphasized).length > 0 && {
+        layerEmphasized: Object.fromEntries(
+          Object.entries(file.layerEmphasized).map(([k, v]) => [String(k), v])
         ),
       }),
   };
@@ -255,6 +264,18 @@ export function deserializeTileFile(json: string): DeserializeResult {
     }
     if (Object.keys(layerLocked).length === 0) layerLocked = undefined;
   }
+  let layerEmphasized: Record<number, boolean> | undefined;
+  if (o.layerEmphasized != null && typeof o.layerEmphasized === 'object' && !Array.isArray(o.layerEmphasized)) {
+    const raw = o.layerEmphasized as Record<string, unknown>;
+    layerEmphasized = {};
+    for (const key of Object.keys(raw)) {
+      const level = parseInt(key, 10);
+      if (!Number.isInteger(level) || level < 1) continue;
+      if (raw[key] === true) layerEmphasized[level] = true;
+      else if (raw[key] === false) layerEmphasized[level] = false;
+    }
+    if (Object.keys(layerEmphasized).length === 0) layerEmphasized = undefined;
+  }
   const payload: TileFilePayload = {
     v: TILE_FORMAT_VERSION,
     name,
@@ -271,6 +292,7 @@ export function deserializeTileFile(json: string): DeserializeResult {
     ...(lockedCells.length > 0 && { lockedCells }),
     ...(layerVisibility && Object.keys(layerVisibility).length > 0 && { layerVisibility }),
     ...(layerLocked && Object.keys(layerLocked).length > 0 && { layerLocked }),
+    ...(layerEmphasized && Object.keys(layerEmphasized).length > 0 && { layerEmphasized }),
   };
   return { ok: true, payload };
 }
