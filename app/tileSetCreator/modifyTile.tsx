@@ -19,11 +19,11 @@ import {
     TILE_MANIFEST,
     type TileCategory,
 } from '@/assets/images/tiles/manifest';
+import { ModifyPalette } from '@/components/modify-palette';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { TileAsset } from '@/components/tile-asset';
 import { TileAtlasSprite } from '@/components/tile-atlas-sprite';
-import { TileBrushPanel } from '@/components/tile-brush-panel';
 import { TileDebugOverlay } from '@/components/tile-debug-overlay';
 import { usePersistedSettings } from '@/hooks/use-persisted-settings';
 import { useTileAtlas } from '@/hooks/use-tile-atlas';
@@ -40,12 +40,16 @@ const CONTENT_PADDING = 0;
 const HEADER_HEIGHT = 50;
 const TOOLBAR_BUTTON_SIZE = 40;
 const TITLE_SPACING = 0;
-const BRUSH_PANEL_HEIGHT = 160;
-const BRUSH_PANEL_ROW_GAP = 1;
+/** Match File Modify palette: 2 rows, 75px per tile, same row gap. */
+const PALETTE_FIXED_TILE_SIZE = 75;
+const PALETTE_FIXED_ROWS = 2;
+const BRUSH_PANEL_ROW_GAP = 2;
 /** Reserve space for horizontal scrollbar so the bottom row is not cut off on desktop web. */
 const WEB_SCROLLBAR_HEIGHT = 17;
 /** Min viewport width to treat as desktop web (scrollbar takes layout space). */
 const DESKTOP_WEB_BREAKPOINT = 768;
+/** Used by local styles that reference pattern thumb (e.g. patternThumb); match ModifyPalette. */
+const PATTERN_THUMB_PADDING = 4;
 const ERROR_TILE = require('@/assets/images/tiles/tile_error.svg');
 
 type ToolbarButtonProps = {
@@ -306,6 +310,8 @@ function GridLinesOverlay({
   );
 }
 
+const MODIFY_TILE_FLICKER_DEBUG = typeof __DEV__ !== 'undefined' && __DEV__;
+
 export default function ModifyTileScreen() {
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
@@ -313,6 +319,16 @@ export default function ModifyTileScreen() {
   const params = useLocalSearchParams<{ setId?: string; tileId?: string }>();
   const setId = params.setId ?? '';
   const tileId = params.tileId ?? '';
+  const modifyTileRenderCountRef = useRef(0);
+  const lastModifyTileLogRef = useRef(0);
+  modifyTileRenderCountRef.current += 1;
+  if (MODIFY_TILE_FLICKER_DEBUG) {
+    const now = Date.now();
+    if (now - lastModifyTileLogRef.current > 2000) {
+      lastModifyTileLogRef.current = now;
+      console.warn('[ModifyTileScreen] render', { renderCount: modifyTileRenderCountRef.current });
+    }
+  }
   const { settings, setSettings } = usePersistedSettings();
   const { replaceTileSourceNames, replaceTileSourceNamesWithError } = useTileFiles(
     TILE_CATEGORIES[0] as TileCategory
@@ -321,8 +337,11 @@ export default function ModifyTileScreen() {
     onBakedNamesReplaced: replaceTileSourceNames,
     onTileSourceNamesRemoved: replaceTileSourceNamesWithError,
   });
-  const { patternsByCategory } = useTilePatterns();
+  const { patternsByCategory, createPattern, deletePatterns } = useTilePatterns();
   const [showTileSetChooser, setShowTileSetChooser] = useState(false);
+  const [selectedPatternId, setSelectedPatternId] = useState<string | null>(null);
+  const [patternRotations, setPatternRotations] = useState<Record<string, number>>({});
+  const [patternMirrors, setPatternMirrors] = useState<Record<string, boolean>>({});
   const [showModifyTileSetBanner, setShowModifyTileSetBanner] = useState(false);
   const MODIFY_BANNER_HEIGHT = 52;
   const modifyBannerTranslateY = useRef(new Animated.Value(-MODIFY_BANNER_HEIGHT)).current;
@@ -410,8 +429,44 @@ export default function ModifyTileScreen() {
   const activePatterns = primaryCategory
     ? patternsByCategory.get(primaryCategory) ?? []
     : [];
-  const selectedPattern = activePatterns[0] ?? null;
-
+  const selectedPattern = useMemo(() => {
+    if (!selectedPatternId) return activePatterns[0] ?? null;
+    return activePatterns.find((p) => p.id === selectedPatternId) ?? activePatterns[0] ?? null;
+  }, [activePatterns, selectedPatternId]);
+  /** Resolve pattern tile to source/name using current palette and pattern's tile set context. Same idea as File modify resolvePatternTile. */
+  const resolvePatternTile = useCallback(
+    (tile: Tile): { source: unknown | null; name: string } => {
+      if (!tile) return { source: null, name: '' };
+      if (tile.imageIndex === -2) return { source: ERROR_TILE, name: 'tile_error.svg' };
+      if (tile.imageIndex < 0) return { source: null, name: '' };
+      const setIds =
+        selectedPattern?.tileSetIds && selectedPattern.tileSetIds.length > 0
+          ? selectedPattern.tileSetIds
+          : tileSet?.id
+            ? [tileSet.id]
+            : [];
+      if (tile.name) {
+        if (tile.name.includes(':')) {
+          for (const sid of setIds) {
+            const baked = bakedSourcesBySetId[sid] ?? [];
+            const found = baked.find((s) => s.name === tile.name);
+            if (found) return { source: found.source, name: found.name };
+          }
+        }
+        const byName = tileSources.find((s) => s.name === tile.name);
+        if (byName) return { source: byName.source, name: byName.name };
+      }
+      const fallback = tileSources[tile.imageIndex];
+      if (fallback) return { source: fallback.source, name: fallback.name };
+      return { source: ERROR_TILE, name: tile.name ?? 'tile_error.svg' };
+    },
+    [
+      selectedPattern?.tileSetIds,
+      tileSet?.id,
+      bakedSourcesBySetId,
+      tileSources,
+    ]
+  );
   const [brush, setBrush] = useState<
     | { mode: 'random' }
     | { mode: 'draw' }
@@ -436,16 +491,30 @@ export default function ModifyTileScreen() {
   const contentWidth = safeWidth;
   const contentHeight = safeHeight;
   const availableWidth = contentWidth - CONTENT_PADDING * 2;
-  const reservedForBrushPanel =
-    Platform.OS === 'web'
-      ? Math.max(BRUSH_PANEL_HEIGHT, Math.floor(contentHeight * 0.32))
-      : BRUSH_PANEL_HEIGHT;
+  /** Same as File Modify: fixed 2 rows, 75px per tile, reserve height so layout matches. */
+  const fixedPaletteHeight =
+    PALETTE_FIXED_ROWS * PALETTE_FIXED_TILE_SIZE +
+    BRUSH_PANEL_ROW_GAP * (PALETTE_FIXED_ROWS - 1);
+  const isDesktopWeb =
+    Platform.OS === 'web' && width >= DESKTOP_WEB_BREAKPOINT;
+  const paletteReservedHeight =
+    fixedPaletteHeight + (isDesktopWeb ? WEB_SCROLLBAR_HEIGHT : 0);
+  const reservedBrushHeight = Math.max(
+    Math.min(
+      paletteReservedHeight,
+      Math.max(
+        0,
+        contentHeight - HEADER_HEIGHT - CONTENT_PADDING * 2 - TITLE_SPACING
+      )
+    ),
+    fixedPaletteHeight
+  );
   const availableHeight = Math.max(
     contentHeight -
       HEADER_HEIGHT -
       CONTENT_PADDING * 2 -
       TITLE_SPACING -
-      reservedForBrushPanel,
+      reservedBrushHeight,
     0
   );
 
@@ -489,8 +558,8 @@ export default function ModifyTileScreen() {
           tiles: selectedPattern.tiles,
           width: selectedPattern.width,
           height: selectedPattern.height,
-          rotation: 0,
-          mirrorX: false,
+          rotation: patternRotations[selectedPattern.id] ?? 0,
+          mirrorX: patternMirrors[selectedPattern.id] ?? false,
         }
       : null,
     patternAnchorKey: selectedPattern?.id ?? null,
@@ -503,56 +572,41 @@ export default function ModifyTileScreen() {
     }
   }, [showTileSetChooser, tileSetSelectionError]);
 
+
   const gridWidth =
     gridLayout.columns * gridLayout.tileSize +
     GRID_GAP * Math.max(0, gridLayout.columns - 1);
   const gridHeight =
     gridLayout.rows * gridLayout.tileSize +
     GRID_GAP * Math.max(0, gridLayout.rows - 1);
-  const brushPanelHeight = Math.max(
-    0,
-    contentHeight - HEADER_HEIGHT - CONTENT_PADDING * 2 - TITLE_SPACING - gridHeight
-  );
-  const isDesktopWeb =
-    Platform.OS === 'web' && width >= DESKTOP_WEB_BREAKPOINT;
-  const brushContentHeight =
-    isDesktopWeb
-      ? Math.max(0, brushPanelHeight - WEB_SCROLLBAR_HEIGHT)
-      : brushPanelHeight;
-  /** If row height would exceed this (px), use more rows so each row stays at or below it. */
-  const MAX_BRUSH_ROW_HEIGHT = 80;
-  const minRowsForHeight = Math.ceil(
-    (brushContentHeight + BRUSH_PANEL_ROW_GAP) /
-      (MAX_BRUSH_ROW_HEIGHT + BRUSH_PANEL_ROW_GAP)
-  );
-  const brushRows = Math.max(2, Math.min(minRowsForHeight, 5));
-  const brushItemSize = Math.max(
-    0,
-    Math.floor(
-      (brushContentHeight - BRUSH_PANEL_ROW_GAP * Math.max(0, brushRows - 1)) /
-        brushRows
-    )
-  );
+  /** Same as File Modify: fixed height, 2 rows, 75px per tile. */
+  const brushPanelHeight = reservedBrushHeight;
+  const brushRows = PALETTE_FIXED_ROWS;
+  const brushItemSize = PALETTE_FIXED_TILE_SIZE;
   const gridAtlas = useTileAtlas({
     tileSources,
     tileSize: gridLayout.tileSize,
     strokeColor: tileSet?.lineColor,
     strokeWidth: tileSet?.lineWidth,
   });
+  /** Same as File Modify: only scale stroke for UGC (baked) sources from the current set; built-in tiles get scale 1. Stable deps (serialized names) to avoid atlas key churn and flicker. */
+  const bakedNamesKey = tileSet?.id
+    ? (bakedSourcesBySetId[tileSet.id] ?? []).map((s) => s.name).join(',')
+    : '';
+  const strokeScaleByName = useMemo(() => {
+    const map = new Map<string, number>();
+    if (!tileSet?.id) return map;
+    const scale = Math.max(1, tileSet.resolution ?? 1);
+    (bakedSourcesBySetId[tileSet.id] ?? []).forEach((source) => map.set(source.name, scale));
+    return map;
+  }, [tileSet?.id, tileSet?.resolution, bakedNamesKey]);
   const brushAtlas = useTileAtlas({
     tileSources,
     tileSize: brushItemSize,
     strokeColor: tileSet?.lineColor,
     strokeWidth: tileSet?.lineWidth,
+    strokeScaleByName,
   });
-  const strokeScaleByName = useMemo(() => {
-    const map = new Map<string, number>();
-    if (!tileSet) return map;
-    const scale = Math.max(1, tileSet.resolution ?? 1);
-    tileSources.forEach((source) => map.set(source.name, scale));
-    return map;
-  }, [tileSet?.resolution, tileSources]);
-
   const gridOffsetRef = useRef({ x: 0, y: 0 });
   const lastPaintedRef = useRef<number | null>(null);
   const longPressTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -560,6 +614,15 @@ export default function ModifyTileScreen() {
   const thumbnailShotRef = useRef<ViewShot>(null);
   const thumbnailSaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const gridMeasureRef = useRef<View | null>(null);
+  /** Refs so palette callbacks can read current values without causing palette re-renders when tiles/canvas update. */
+  const tilesRef = useRef(tiles);
+  const tileSetRef = useRef(tileSet);
+  const tileSourcesRef = useRef(tileSources);
+  const bakedSourcesBySetIdRef = useRef(bakedSourcesBySetId);
+  tilesRef.current = tiles;
+  tileSetRef.current = tileSet;
+  tileSourcesRef.current = tileSources;
+  bakedSourcesBySetIdRef.current = bakedSourcesBySetId;
 
   useEffect(() => {
     if (!tileEntry) {
@@ -780,6 +843,232 @@ export default function ModifyTileScreen() {
   const tileCanvasBackground = '#0F1430';
   const tileCanvasLineColor = 'rgba(203, 213, 245, 0.25)';
   const tileCanvasLineWidth = 0.5;
+
+  const resolveTileForPatternListPalette = useCallback(
+    (tile: Tile, tileSetIds: string[] | undefined) => {
+      const set = tileSetRef.current;
+      const setIds =
+        tileSetIds && tileSetIds.length > 0 ? tileSetIds : set?.id ? [set.id] : [];
+      const sources = tileSourcesRef.current;
+      const baked = bakedSourcesBySetIdRef.current;
+      if (!tile) return { source: null, name: '' };
+      if (tile.name?.includes(':')) {
+        for (const sid of setIds) {
+          const bakedList = baked[sid] ?? [];
+          const found = bakedList.find((s: { name: string }) => s.name === tile.name);
+          if (found) return { source: found.source, name: found.name };
+        }
+      }
+      const byName = sources.find((s) => s.name === tile.name);
+      if (byName) return { source: byName.source, name: byName.name };
+      const fallback = sources[tile.imageIndex];
+      if (fallback) return { source: fallback.source, name: fallback.name };
+      return { source: ERROR_TILE, name: tile.name ?? 'tile_error.svg' };
+    },
+    []
+  );
+
+  const onCreatePatternPressPalette = useCallback(
+    (closeChooser: () => void) => {
+      const currentTile = tilesRef.current[0];
+      const set = tileSetRef.current;
+      if (set && currentTile != null) {
+        const newId = createPattern({
+          category: primaryCategory,
+          width: 1,
+          height: 1,
+          tiles: [{ ...currentTile }],
+          ...(set.id && { tileSetIds: [set.id] }),
+        });
+        closeChooser();
+        return newId;
+      }
+    },
+    [createPattern, primaryCategory]
+  );
+
+  const onPatternChangePalette = useCallback(
+    (data: {
+      selectedPatternId: string | null;
+      patternRotations: Record<string, number>;
+      patternMirrors: Record<string, boolean>;
+    }) => {
+      setSelectedPatternId(data.selectedPatternId);
+      setPatternRotations(data.patternRotations);
+      setPatternMirrors(data.patternMirrors);
+    },
+    []
+  );
+
+  const onSelectPalette = useCallback(
+    (next: Parameters<typeof ModifyPalette>[0]['selected']) => {
+      dismissModifyBanner();
+      if (next.mode === 'clone') {
+        clearCloneSource();
+      }
+      if (next.mode === 'pattern') {
+        setBrush(next);
+        return;
+      }
+      if (next.mode === 'fixed') {
+        const rotation = paletteRotations[next.index] ?? next.rotation ?? 0;
+        const mirrorX = paletteMirrors[next.index] ?? next.mirrorX ?? false;
+        const mirrorY = paletteMirrorsY[next.index] ?? next.mirrorY ?? false;
+        const source = tileSourcesRef.current[next.index];
+        setBrush({
+          mode: 'fixed',
+          index: next.index,
+          sourceName: source?.name,
+          rotation,
+          mirrorX,
+          mirrorY,
+        });
+      } else {
+        setBrush(next);
+      }
+    },
+    [
+      dismissModifyBanner,
+      clearCloneSource,
+      paletteRotations,
+      paletteMirrors,
+      paletteMirrorsY,
+    ]
+  );
+
+  const getRotationPalette = useCallback(
+    (index: number) => paletteRotations[index] ?? 0,
+    [paletteRotations]
+  );
+  const getMirrorPalette = useCallback(
+    (index: number) => paletteMirrors[index] ?? false,
+    [paletteMirrors]
+  );
+  const getMirrorVerticalPalette = useCallback(
+    (index: number) => paletteMirrorsY[index] ?? false,
+    [paletteMirrorsY]
+  );
+
+  const onRotatePalette = useCallback(
+    (index: number) => {
+      dismissModifyBanner();
+      setPaletteRotations((prev) => {
+        const nextRotation = ((prev[index] ?? 0) + 90) % 360;
+        if (brush.mode === 'fixed' && brush.index === index) {
+          const src = tileSourcesRef.current[index];
+          setBrush({
+            mode: 'fixed',
+            index,
+            sourceName: src?.name,
+            rotation: nextRotation,
+            mirrorX: brush.mirrorX,
+            mirrorY: brush.mirrorY,
+          });
+        }
+        return { ...prev, [index]: nextRotation };
+      });
+    },
+    [dismissModifyBanner, brush]
+  );
+
+  const onMirrorPalette = useCallback(
+    (index: number) => {
+      dismissModifyBanner();
+      const rotation = paletteRotations[index] ?? 0;
+      const curX = paletteMirrors[index] ?? false;
+      const curY = paletteMirrorsY[index] ?? false;
+      const horizontalInR0 = rotation === 0 || rotation === 180 ? curX : curY;
+      const verticalInR0 = rotation === 0 || rotation === 180 ? curY : curX;
+      const newH = !horizontalInR0;
+      const newMirrorX = rotation === 0 || rotation === 180 ? newH : verticalInR0;
+      const newMirrorY = rotation === 0 || rotation === 180 ? verticalInR0 : newH;
+      setPaletteMirrors((prev) => ({ ...prev, [index]: newMirrorX }));
+      setPaletteMirrorsY((prev) => ({ ...prev, [index]: newMirrorY }));
+      if (brush.mode === 'fixed' && brush.index === index) {
+        const src = tileSourcesRef.current[index];
+        setBrush({
+          mode: 'fixed',
+          index,
+          sourceName: src?.name,
+          rotation: brush.rotation,
+          mirrorX: newMirrorX,
+          mirrorY: newMirrorY,
+        });
+      }
+    },
+    [
+      dismissModifyBanner,
+      paletteRotations,
+      paletteMirrors,
+      paletteMirrorsY,
+      brush,
+    ]
+  );
+
+  const onMirrorVerticalPalette = useCallback(
+    (index: number) => {
+      dismissModifyBanner();
+      const rotation = paletteRotations[index] ?? 0;
+      const curX = paletteMirrors[index] ?? false;
+      const curY = paletteMirrorsY[index] ?? false;
+      const horizontalInR0 = rotation === 0 || rotation === 180 ? curX : curY;
+      const verticalInR0 = rotation === 0 || rotation === 180 ? curY : curX;
+      const newV = !verticalInR0;
+      const newMirrorX = rotation === 0 || rotation === 180 ? horizontalInR0 : newV;
+      const newMirrorY = rotation === 0 || rotation === 180 ? newV : horizontalInR0;
+      setPaletteMirrors((prev) => ({ ...prev, [index]: newMirrorX }));
+      setPaletteMirrorsY((prev) => ({ ...prev, [index]: newMirrorY }));
+      if (brush.mode === 'fixed' && brush.index === index) {
+        const src = tileSourcesRef.current[index];
+        setBrush({
+          mode: 'fixed',
+          index,
+          sourceName: src?.name,
+          rotation: brush.rotation,
+          mirrorX: newMirrorX,
+          mirrorY: newMirrorY,
+        });
+      }
+    },
+    [
+      dismissModifyBanner,
+      paletteRotations,
+      paletteMirrors,
+      paletteMirrorsY,
+      brush,
+    ]
+  );
+
+  const onSetOrientationPalette = useCallback(
+    (index: number, orientation: { rotation: number; mirrorX: boolean; mirrorY: boolean }) => {
+      dismissModifyBanner();
+      setPaletteRotations((prev) => ({ ...prev, [index]: orientation.rotation }));
+      setPaletteMirrors((prev) => ({ ...prev, [index]: orientation.mirrorX }));
+      setPaletteMirrorsY((prev) => ({ ...prev, [index]: orientation.mirrorY }));
+      if (brush.mode === 'fixed' && brush.index === index) {
+        const src = tileSourcesRef.current[index];
+        setBrush({
+          mode: 'fixed',
+          index,
+          sourceName: src?.name,
+          rotation: orientation.rotation,
+          mirrorX: orientation.mirrorX,
+          mirrorY: orientation.mirrorY,
+        });
+      }
+    },
+    [dismissModifyBanner, brush]
+  );
+
+  const onRandomLongPressPalette = useCallback(() => {
+    dismissModifyBanner();
+    setShowTileSetChooser(true);
+  }, [dismissModifyBanner]);
+
+  const onRandomDoubleTapPalette = useCallback(() => {
+    dismissModifyBanner();
+    setShowTileSetChooser(true);
+  }, [dismissModifyBanner]);
 
   if (!tileSet || !tileEntry) {
     return (
@@ -1235,148 +1524,35 @@ export default function ModifyTileScreen() {
         )}
       </View>
       <View style={styles.brushPanelWrap}>
-        <TileBrushPanel
+        <ModifyPalette
           tileSources={tileSources}
           selected={brush}
           strokeColor={tileSet.lineColor}
           strokeWidth={tileSet.lineWidth}
+          strokeScaleByName={strokeScaleByName}
           atlas={brushAtlas}
-          showPattern={false}
-          rows={brushRows}
-          selectedPattern={
-            selectedPattern
-              ? {
-                  tiles: selectedPattern.tiles,
-                  width: selectedPattern.width,
-                  height: selectedPattern.height,
-                  rotation: 0,
-                  mirrorX: false,
-                }
-              : null
-          }
-          onSelect={(next) => {
-            dismissModifyBanner();
-            if (next.mode === 'clone') {
-              clearCloneSource();
-            }
-            if (next.mode === 'fixed') {
-              const rotation = paletteRotations[next.index] ?? next.rotation ?? 0;
-              const mirrorX = paletteMirrors[next.index] ?? next.mirrorX ?? false;
-              const mirrorY = paletteMirrorsY[next.index] ?? next.mirrorY ?? false;
-              const source = tileSources[next.index];
-              setBrush({
-                mode: 'fixed',
-                index: next.index,
-                sourceName: source?.name,
-                rotation,
-                mirrorX,
-                mirrorY,
-              });
-            } else {
-              setBrush(next);
-            }
-          }}
-          onRotate={(index) => {
-            dismissModifyBanner();
-            setPaletteRotations((prev) => {
-              const nextRotation = ((prev[index] ?? 0) + 90) % 360;
-              if (brush.mode === 'fixed' && brush.index === index) {
-                const src = tileSources[index];
-                setBrush({
-                  mode: 'fixed',
-                  index,
-                  sourceName: src?.name,
-                  rotation: nextRotation,
-                  mirrorX: brush.mirrorX,
-                  mirrorY: brush.mirrorY,
-                });
-              }
-              return {
-                ...prev,
-                [index]: nextRotation,
-              };
-            });
-          }}
-          onMirror={(index) => {
-            dismissModifyBanner();
-            const rotation = paletteRotations[index] ?? 0;
-            const curX = paletteMirrors[index] ?? false;
-            const curY = paletteMirrorsY[index] ?? false;
-            const horizontalInR0 = rotation === 0 || rotation === 180 ? curX : curY;
-            const verticalInR0 = rotation === 0 || rotation === 180 ? curY : curX;
-            const newH = !horizontalInR0;
-            const newMirrorX = rotation === 0 || rotation === 180 ? newH : verticalInR0;
-            const newMirrorY = rotation === 0 || rotation === 180 ? verticalInR0 : newH;
-            setPaletteMirrors((prev) => ({ ...prev, [index]: newMirrorX }));
-            setPaletteMirrorsY((prev) => ({ ...prev, [index]: newMirrorY }));
-            if (brush.mode === 'fixed' && brush.index === index) {
-              const src = tileSources[index];
-              setBrush({
-                mode: 'fixed',
-                index,
-                sourceName: src?.name,
-                rotation: brush.rotation,
-                mirrorX: newMirrorX,
-                mirrorY: newMirrorY,
-              });
-            }
-          }}
-          onMirrorVertical={(index) => {
-            dismissModifyBanner();
-            const rotation = paletteRotations[index] ?? 0;
-            const curX = paletteMirrors[index] ?? false;
-            const curY = paletteMirrorsY[index] ?? false;
-            const horizontalInR0 = rotation === 0 || rotation === 180 ? curX : curY;
-            const verticalInR0 = rotation === 0 || rotation === 180 ? curY : curX;
-            const newV = !verticalInR0;
-            const newMirrorX = rotation === 0 || rotation === 180 ? horizontalInR0 : newV;
-            const newMirrorY = rotation === 0 || rotation === 180 ? newV : horizontalInR0;
-            setPaletteMirrors((prev) => ({ ...prev, [index]: newMirrorX }));
-            setPaletteMirrorsY((prev) => ({ ...prev, [index]: newMirrorY }));
-            if (brush.mode === 'fixed' && brush.index === index) {
-              const src = tileSources[index];
-              setBrush({
-                mode: 'fixed',
-                index,
-                sourceName: src?.name,
-                rotation: brush.rotation,
-                mirrorX: newMirrorX,
-                mirrorY: newMirrorY,
-              });
-            }
-          }}
-          getRotation={(index) => paletteRotations[index] ?? 0}
-          getMirror={(index) => paletteMirrors[index] ?? false}
-          getMirrorVertical={(index) => paletteMirrorsY[index] ?? false}
-          onSetOrientation={(index, orientation) => {
-            dismissModifyBanner();
-            setPaletteRotations((prev) => ({ ...prev, [index]: orientation.rotation }));
-            setPaletteMirrors((prev) => ({ ...prev, [index]: orientation.mirrorX }));
-            setPaletteMirrorsY((prev) => ({ ...prev, [index]: orientation.mirrorY }));
-            if (brush.mode === 'fixed' && brush.index === index) {
-              const src = tileSources[index];
-              setBrush({
-                mode: 'fixed',
-                index,
-                sourceName: src?.name,
-                rotation: orientation.rotation,
-                mirrorX: orientation.mirrorX,
-                mirrorY: orientation.mirrorY,
-              });
-            }
-          }}
-          onRandomLongPress={() => {
-            dismissModifyBanner();
-            setShowTileSetChooser(true);
-          }}
-          onRandomDoubleTap={() => {
-            dismissModifyBanner();
-            setShowTileSetChooser(true);
-          }}
           height={brushPanelHeight}
           itemSize={brushItemSize}
           rowGap={BRUSH_PANEL_ROW_GAP}
           rows={brushRows}
+          activePatterns={activePatterns}
+          createPattern={createPattern}
+          deletePatterns={deletePatterns}
+          resolvePatternTile={resolvePatternTile}
+          resolveTileForPatternList={resolveTileForPatternListPalette}
+          onCreatePatternPress={onCreatePatternPressPalette}
+          dismissModifyBanner={dismissModifyBanner}
+          onPatternChange={onPatternChangePalette}
+          onSelect={onSelectPalette}
+          onRotate={onRotatePalette}
+          onMirror={onMirrorPalette}
+          onMirrorVertical={onMirrorVerticalPalette}
+          getRotation={getRotationPalette}
+          getMirror={getMirrorPalette}
+          getMirrorVertical={getMirrorVerticalPalette}
+          onSetOrientation={onSetOrientationPalette}
+          onRandomLongPress={onRandomLongPressPalette}
+          onRandomDoubleTap={onRandomDoubleTapPalette}
         />
       </View>
       {showTileSetChooser && (
@@ -1794,5 +1970,207 @@ const styles = StyleSheet.create({
   emptyText: {
     color: '#fff',
     padding: 16,
+  },
+  // Pattern chooser & properties (same as File modify)
+  patternModal: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 30,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'transparent',
+  },
+  patternModalBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+  },
+  patternModalPanel: {
+    width: '90%',
+    maxHeight: '80%',
+    borderRadius: 12,
+    backgroundColor: '#3f3f3f',
+    borderWidth: 1,
+    borderColor: '#1f1f1f',
+    padding: 0,
+    overflow: 'hidden',
+  },
+  patternModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 0,
+    backgroundColor: '#2a2a2a',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 0,
+  },
+  patternModalTitle: {
+    color: '#fff',
+  },
+  patternModalActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'transparent',
+  },
+  patternHeaderIcon: {
+    width: 32,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'transparent',
+  },
+  patternSelectBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 12,
+    backgroundColor: '#1f1f1f',
+    overflow: 'hidden',
+    marginBottom: 10,
+    borderRadius: 0,
+  },
+  patternSelectButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 8,
+  },
+  patternSelectDelete: {
+    paddingVertical: 8,
+    paddingHorizontal: 8,
+  },
+  patternSelectDeleteText: {
+    color: '#dc2626',
+  },
+  patternSelectDeleteDisabled: {
+    opacity: 0.5,
+  },
+  patternSelectDeleteTextDisabled: {
+    color: '#b91c1c',
+  },
+  patternSelectDeleteExportRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  patternSelectCount: {
+    color: '#9ca3af',
+  },
+  patternSelectExitText: {
+    color: '#fff',
+  },
+  patternModalScroll: {
+    flexGrow: 0,
+    paddingHorizontal: 12,
+    paddingTop: 12,
+  },
+  patternModalContent: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+    justifyContent: 'flex-start',
+    paddingBottom: 8,
+  },
+  patternNewCard: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  patternNewThumb: {
+    padding: 10,
+    borderRadius: 10,
+    backgroundColor: 'transparent',
+  },
+  patternNewIconCenter: {
+    position: 'absolute',
+    left: '50%',
+    top: '50%',
+  },
+  patternThumb: {
+    borderWidth: 1,
+    borderColor: '#1f1f1f',
+    backgroundColor: '#000',
+    borderRadius: 6,
+    padding: PATTERN_THUMB_PADDING,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  patternThumbSelected: {
+    borderColor: '#22c55e',
+    borderWidth: 2,
+  },
+  patternPropertiesModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 20,
+  },
+  patternPropertiesModalPanel: {
+    alignSelf: 'center',
+    maxWidth: 300,
+    maxHeight: '80%',
+    backgroundColor: '#fff',
+    borderRadius: 10,
+    padding: 16,
+  },
+  patternPropertiesModalScroll: {
+    maxHeight: 380,
+  },
+  patternPropertiesModalScrollContent: {
+    paddingBottom: 8,
+    gap: 12,
+  },
+  patternPropertiesModalTitle: {
+    color: '#111',
+  },
+  patternPropertiesModalSection: {
+    gap: 10,
+  },
+  patternPropertiesSectionLabel: {
+    color: '#111',
+    marginBottom: 6,
+  },
+  patternPropertiesOrientationGrid: {
+    gap: 6,
+  },
+  patternPropertiesOrientationRow: {
+    flexDirection: 'row',
+    gap: 6,
+  },
+  patternPropertiesOrientationThumb: {
+    borderRadius: 4,
+    borderWidth: 1,
+    borderColor: '#d1d5db',
+    overflow: 'hidden',
+    backgroundColor: '#000',
+  },
+  patternPropertiesOrientationThumbSelected: {
+    borderColor: '#22c55e',
+    borderWidth: 2,
+  },
+  patternPropertiesOrientationThumbWrap: {
+    width: '100%',
+    height: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  patternPropertiesModalActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 8,
+  },
+  patternPropertiesModalButton: {
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 6,
+    borderWidth: 1,
+  },
+  patternPropertiesModalButtonGhost: {
+    borderColor: '#d1d5db',
+    backgroundColor: 'transparent',
+  },
+  patternPropertiesModalButtonPrimary: {
+    borderColor: '#22c55e',
+    backgroundColor: '#22c55e',
+  },
+  patternPropertiesModalButtonText: {
+    color: '#fff',
   },
 });

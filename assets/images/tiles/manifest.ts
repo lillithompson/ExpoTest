@@ -1,5 +1,12 @@
 export const TILE_MANIFEST = {
   "angular": [
+    { name: "squareConnector_10000010.svg", source: require('@/assets/images/tiles/angular/squareConnector_10000010.svg') },
+    { name: "squareConnector_10001000.svg", source: require('@/assets/images/tiles/angular/squareConnector_10001000.svg') },
+    { name: "squareConnector_10001010.svg", source: require('@/assets/images/tiles/angular/squareConnector_10001010.svg') },
+    { name: "squareConnector_10101010.svg", source: require('@/assets/images/tiles/angular/squareConnector_10101010.svg') },
+    { name: "tileAA_00000001.svg", source: require('@/assets/images/tiles/angular/tileAA_00000001.svg') },
+    { name: "tileAA_10000000.svg", source: require('@/assets/images/tiles/angular/tileAA_10000000.svg') },
+    { name: "tileAA_10100000.svg", source: require('@/assets/images/tiles/angular/tileAA_10100000.svg') },
     { name: "tileA_00000000.svg", source: require('@/assets/images/tiles/angular/tileA_00000000.svg') },
     { name: "tileA_00000001.svg", source: require('@/assets/images/tiles/angular/tileA_00000001.svg') },
     { name: "tileA_10000000.svg", source: require('@/assets/images/tiles/angular/tileA_10000000.svg') },
@@ -121,7 +128,12 @@ export const TILE_MANIFEST = {
     { name: "curve_11101110.svg", source: require('@/assets/images/tiles/curved/curve_11101110.svg') },
     { name: "curve_11110001.svg", source: require('@/assets/images/tiles/curved/curve_11110001.svg') },
     { name: "curve_11110110.svg", source: require('@/assets/images/tiles/curved/curve_11110110.svg') },
-    { name: "curve_11111111.svg", source: require('@/assets/images/tiles/curved/curve_11111111.svg') }
+    { name: "curve_11111111.svg", source: require('@/assets/images/tiles/curved/curve_11111111.svg') },
+    { name: "petal_00000001.svg", source: require('@/assets/images/tiles/curved/petal_00000001.svg') },
+    { name: "petal_010000001.svg", source: require('@/assets/images/tiles/curved/petal_010000001.svg') },
+    { name: "petal_01001001.svg", source: require('@/assets/images/tiles/curved/petal_01001001.svg') },
+    { name: "petal_10000000.svg", source: require('@/assets/images/tiles/curved/petal_10000000.svg') },
+    { name: "petal_10001000.svg", source: require('@/assets/images/tiles/curved/petal_10001000.svg') }
   ]
 } as const;
 

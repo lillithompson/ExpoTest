@@ -109,6 +109,8 @@ type FavoritesState = {
 };
 
 const FAVORITES_STORAGE_KEY = 'tile-brush-favorites-v1';
+/** Persist which palette sections are collapsed so File and Tile Modify share the same state. */
+const COLLAPSED_STORAGE_KEY = 'tile-brush-panel-collapsed-v1';
 const defaultFavoritesState: FavoritesState = {
   favorites: {},
   lastColor: '#f59e0b',
@@ -123,6 +125,12 @@ const SEPARATOR_BAR_WIDTH = 18;
 const PATTERNS_SECTION_KEY = -1;
 /** Section key for the collapsible favorites section. */
 const FAVORITES_SECTION_KEY = -2;
+
+const defaultCollapsed = new Set<number>([
+  FAVORITES_SECTION_KEY,
+  PATTERNS_SECTION_KEY,
+  0, 1, 2, 3, 4, 5, 6, 7, 8,
+]);
 
 const connectionCountCache = new Map<string, number>();
 
@@ -248,6 +256,16 @@ export function TileBrushPanel({
   const [containerWidth, setContainerWidth] = useState(0);
   const [contentWidth, setContentWidth] = useState(0);
   const showIndicator = contentWidth > containerWidth;
+  const renderCountRef = useRef(0);
+  const lastLayoutLogRef = useRef(0);
+  renderCountRef.current += 1;
+  if (typeof __DEV__ !== 'undefined' && __DEV__) {
+    const now = Date.now();
+    if (now - lastLayoutLogRef.current > 2000) {
+      lastLayoutLogRef.current = now;
+      console.warn('[TileBrushPanel] render', { renderCount: renderCountRef.current, containerWidth, contentWidth });
+    }
+  }
   const rowCount = Math.max(1, rows);
   const columnHeight = itemSize * rowCount + rowGap * Math.max(0, rowCount - 1);
   const lastTapRef = useRef<{ time: number; index: number } | null>(null);
@@ -296,11 +314,11 @@ export function TileBrushPanel({
   renderIdRef.current += 1;
   const renderId = renderIdRef.current;
   paletteProfileStartRender(tileSources.length, useFullOrder, renderId);
+  /** Defer full order (connection grouping) to after first paint, once per mount only. Do not re-run when tileSources/favorites change or we get a visible flicker (simple vs full layout) on every canvas update. */
   useEffect(() => {
-    setUseFullOrder(false);
     const id = requestAnimationFrame(() => setUseFullOrder(true));
     return () => cancelAnimationFrame(id);
-  }, [tileSources, favorites]);
+  }, []);
   /** Connection counts deferred until after first paint to keep initial load fast. */
   const connectionCountByIndex = useMemo(
     () =>
@@ -386,14 +404,21 @@ export function TileBrushPanel({
     [tileEntries, favorites, colorRank]
   );
   const orderedTileEntries = useFullOrder ? fullOrderedEntries : simpleOrderedEntries;
-  const [collapsedFolders, setCollapsedFolders] = useState<Set<number>>(
-    () =>
-      new Set([
-        FAVORITES_SECTION_KEY,
-        PATTERNS_SECTION_KEY,
-        0, 1, 2, 3, 4, 5, 6, 7, 8,
-      ])
-  );
+  const [collapsedFolders, setCollapsedFolders] = useState<Set<number>>(defaultCollapsed);
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const raw = await AsyncStorage.getItem(COLLAPSED_STORAGE_KEY);
+        if (!mounted || raw == null) return;
+        const arr = JSON.parse(raw) as number[];
+        if (Array.isArray(arr)) setCollapsedFolders(new Set(arr));
+      } catch {
+        // keep default
+      }
+    })();
+    return () => { mounted = false; };
+  }, []);
   type PatternSectionEntry =
     | { type: 'separator'; connectionCount: number }
     | { type: 'pattern-new' }
@@ -465,14 +490,15 @@ export function TileBrushPanel({
   useEffect(() => {
     paletteProfileLog();
   });
-  const toggleFolder = (connectionCount: number) => {
+  const toggleFolder = useCallback((connectionCount: number) => {
     setCollapsedFolders((prev) => {
       const next = new Set(prev);
       if (next.has(connectionCount)) next.delete(connectionCount);
       else next.add(connectionCount);
+      void AsyncStorage.setItem(COLLAPSED_STORAGE_KEY, JSON.stringify([...next]));
       return next;
     });
-  };
+  }, []);
   const cycleRef = useRef<Record<string, number>>({});
 
   const openFavoriteDialog = (entry: { tile: TileSource; index: number }) => {
@@ -563,12 +589,29 @@ export function TileBrushPanel({
         { height },
         Platform.OS === 'web' && styles.containerWeb,
       ]}
-      onLayout={(event) => setContainerWidth(event.nativeEvent.layout.width)}
+      onLayout={(event) => {
+        const w = event.nativeEvent.layout.width;
+        setContainerWidth((prev) => {
+          if (prev === w) return prev;
+          if (typeof __DEV__ !== 'undefined' && __DEV__) {
+            console.warn('[TileBrushPanel] onLayout', { width: w, prev });
+          }
+          return w;
+        });
+      }}
     >
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={showIndicator}
-        onContentSizeChange={(width) => setContentWidth(width)}
+        onContentSizeChange={(width) => {
+          setContentWidth((prev) => {
+            if (prev === width) return prev;
+            if (typeof __DEV__ !== 'undefined' && __DEV__) {
+              console.warn('[TileBrushPanel] onContentSizeChange', { width, prev });
+            }
+            return width;
+          });
+        }}
         style={[styles.scroll, Platform.OS === 'web' && styles.scrollWeb]}
         contentContainerStyle={styles.content}
         contentInset={{ top: 0, left: 0, bottom: 0, right: 0 }}
