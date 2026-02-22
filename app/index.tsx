@@ -115,8 +115,15 @@ import { deserializePattern, deserializeTileSet, serializePattern } from '@/util
 import JSZip from 'jszip';
 
 const GRID_GAP = 0;
-/** Stroke color for tiles on an emphasized layer (lines drawn in blue). */
-const EMPHASIZE_STROKE_COLOR = '#3b82f6';
+/** Stroke colors for emphasized layers by resolution: highest (L1) = cyan, then yellow, red, violet for coarser. */
+const EMPHASIZE_STROKE_COLORS: Record<number, string> = {
+  1: '#00ffff', // cyan – highest resolution (finest)
+  2: '#eab308', // yellow – mid
+  3: '#dc2626', // red – lower
+  4: '#8b5cf6', // violet – coarsest
+};
+const getEmphasizeStrokeColor = (internalLevel: number) =>
+  EMPHASIZE_STROKE_COLORS[internalLevel] ?? EMPHASIZE_STROKE_COLORS[4];
 /** Max internal grid level (3 = 4×4 cells per tile). Display: L1 = coarsest, Lmax = finest. */
 const MAX_EDITABLE_GRID_LEVEL = 3;
 const CONTENT_PADDING = 0;
@@ -7173,7 +7180,7 @@ export default function TestScreen() {
                         tile={safeTile}
                         tileSources={renderTileSources}
                         showDebug={settings.showDebug}
-                        strokeColor={isLayerEmphasized(activeFile, 1) ? EMPHASIZE_STROKE_COLOR : activeLineColor}
+                        strokeColor={isLayerEmphasized(activeFile, 1) ? getEmphasizeStrokeColor(1) : activeLineColor}
                         strokeWidth={activeLineWidth}
                         strokeScaleByName={strokeScaleByName}
                         atlas={gridAtlas}
@@ -7265,7 +7272,7 @@ export default function TestScreen() {
                           atlas={level2Atlas}
                           source={source}
                           name={tileName}
-                          strokeColor={isLayerEmphasized(activeFile, 2) ? EMPHASIZE_STROKE_COLOR : activeLineColor}
+                          strokeColor={isLayerEmphasized(activeFile, 2) ? getEmphasizeStrokeColor(2) : activeLineColor}
                           strokeWidth={level2StrokeWidth}
                           style={[
                             styles.tileImage,
@@ -7352,7 +7359,7 @@ export default function TestScreen() {
                           atlas={level3Atlas}
                           source={source}
                           name={tileName}
-                          strokeColor={isLayerEmphasized(activeFile, 3) ? EMPHASIZE_STROKE_COLOR : activeLineColor}
+                          strokeColor={isLayerEmphasized(activeFile, 3) ? getEmphasizeStrokeColor(3) : activeLineColor}
                           strokeWidth={level3StrokeWidth}
                           style={[
                             styles.tileImage,
@@ -7398,7 +7405,7 @@ export default function TestScreen() {
                   tiles={effectiveTiles}
                   tileSources={renderTileSources}
                   errorSource={ERROR_TILE}
-                  strokeColor={isLayerEmphasized(activeFile, 1) ? EMPHASIZE_STROKE_COLOR : activeLineColor}
+                  strokeColor={isLayerEmphasized(activeFile, 1) ? getEmphasizeStrokeColor(1) : activeLineColor}
                   strokeWidth={activeLineWidth}
                   strokeScaleByName={strokeScaleByName}
                   showDebug={settings.showDebug}
@@ -7436,7 +7443,7 @@ export default function TestScreen() {
                           tile={safeTile}
                           tileSources={renderTileSources}
                           showDebug={settings.showDebug}
-                          strokeColor={isLayerEmphasized(activeFile, 1) ? EMPHASIZE_STROKE_COLOR : activeLineColor}
+                          strokeColor={isLayerEmphasized(activeFile, 1) ? getEmphasizeStrokeColor(1) : activeLineColor}
                           strokeWidth={activeLineWidth}
                           strokeScaleByName={strokeScaleByName}
                           atlas={gridAtlas}
@@ -7529,7 +7536,7 @@ export default function TestScreen() {
                             atlas={level2Atlas}
                             source={source}
                             name={tileName}
-                            strokeColor={isLayerEmphasized(activeFile, 2) ? EMPHASIZE_STROKE_COLOR : activeLineColor}
+                            strokeColor={isLayerEmphasized(activeFile, 2) ? getEmphasizeStrokeColor(2) : activeLineColor}
                             strokeWidth={level2StrokeWidth}
                             style={[
                               styles.tileImage,
@@ -7616,7 +7623,7 @@ export default function TestScreen() {
                             atlas={level3Atlas}
                             source={source}
                             name={tileName}
-                            strokeColor={isLayerEmphasized(activeFile, 3) ? EMPHASIZE_STROKE_COLOR : activeLineColor}
+                            strokeColor={isLayerEmphasized(activeFile, 3) ? getEmphasizeStrokeColor(3) : activeLineColor}
                             strokeWidth={level3StrokeWidth}
                             style={[
                               styles.tileImage,
@@ -9157,7 +9164,7 @@ export default function TestScreen() {
                         <MaterialCommunityIcons
                           name="format-color-highlight"
                           size={22}
-                          color={emphasized ? '#3b82f6' : '#9ca3af'}
+                          color={emphasized ? getEmphasizeStrokeColor(internalLevel) : '#9ca3af'}
                         />
                       </Pressable>
                     </View>
