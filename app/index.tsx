@@ -3083,15 +3083,19 @@ export default function TestScreen() {
         setSuspendTiles(false);
         return;
       }
-      const nameSource =
-        pending.sourceNames && pending.sourceNames.length > 0
-          ? pending.sourceNames
-          : activeFileSourceNames;
-      const hydrated =
-        nameSource.length > 0
-          ? hydrateTilesWithSourceNames(pending.tiles, nameSource)
-          : pending.tiles;
-      loadTiles(hydrated);
+      const gridMatchesPending =
+        pending.rows === gridLayout.rows && pending.columns === gridLayout.columns;
+      if (gridMatchesPending) {
+        const nameSource =
+          pending.sourceNames && pending.sourceNames.length > 0
+            ? pending.sourceNames
+            : activeFileSourceNames;
+        const hydrated =
+          nameSource.length > 0
+            ? hydrateTilesWithSourceNames(pending.tiles, nameSource)
+            : pending.tiles;
+        loadTiles(hydrated);
+      }
       pendingRestoreRef.current = null;
       setHydrating(false);
       setSuspendTiles(false);
