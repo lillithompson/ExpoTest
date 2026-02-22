@@ -3242,11 +3242,40 @@ export default function TestScreen() {
           pending.sourceNames && pending.sourceNames.length > 0
             ? pending.sourceNames
             : activeFileSourceNames;
-        const hydrated =
-          nameSource.length > 0
-            ? hydrateTilesWithSourceNames(pending.tiles, nameSource)
-            : pending.tiles;
-        loadTiles(hydrated);
+        // Load the current editing layer's data so we don't overwrite L2/L3 with L1 (race with layer-sync effect).
+        let tilesToLoad: Tile[];
+        if (editingLevel >= 2 && activeFile?.layers?.[editingLevel] != null) {
+          const levelInfo = getLevelGridInfo(
+            pending.rows,
+            pending.columns,
+            editingLevel
+          );
+          if (levelInfo && levelInfo.cells.length > 0) {
+            const layerTiles = activeFile.layers[editingLevel] ?? [];
+            const hydratedLayer =
+              nameSource.length > 0
+                ? hydrateTilesWithSourceNames(layerTiles, nameSource)
+                : layerTiles;
+            tilesToLoad = normalizeTiles(
+              hydratedLayer,
+              levelInfo.cells.length,
+              tileSources.length
+            );
+          } else {
+            const hydrated =
+              nameSource.length > 0
+                ? hydrateTilesWithSourceNames(pending.tiles, nameSource)
+                : pending.tiles;
+            tilesToLoad = hydrated;
+          }
+        } else {
+          const hydrated =
+            nameSource.length > 0
+              ? hydrateTilesWithSourceNames(pending.tiles, nameSource)
+              : pending.tiles;
+          tilesToLoad = hydrated;
+        }
+        loadTiles(tilesToLoad);
       }
       pendingRestoreRef.current = null;
       setHydrating(false);
@@ -3278,6 +3307,8 @@ export default function TestScreen() {
     }
   }, [
     activeFileId,
+    activeFile,
+    editingLevel,
     gridLayout.tileSize,
     gridLayout.columns,
     gridLayout.rows,
@@ -3285,6 +3316,7 @@ export default function TestScreen() {
     setHydrating,
     loadToken,
     activeFileSourceNames,
+    tileSources.length,
     zoomRegion,
   ]);
 

@@ -145,6 +145,7 @@ Autosave and Preview Pipeline
 Hydration and Rendering
 - File changes run through a hydrate pipeline that suspends rendering and uses `loadToken`/`loadedToken` gating.
 - During hydration, preview images are shown and can overlay the grid until tiles are applied, referenced user tile sets are baked, tile/source updates have been stable briefly, and the grid has stabilized (double RAF), preventing interim `tile_error` flashes.
+- The apply effect (pending restore) loads the **current editing layer’s** tiles (level 1 = `file.tiles`, level 2+ = `file.layers[editingLevel]`) so that when the user has a coarser resolution selected (e.g. Grid L2/L3), opening a file does not overwrite that layer with level-1 data. This avoids an intermittent race where the layer-sync effect would load the correct layer, then the apply effect would run and replace it with level-1 tiles, clearing the visible layer data (thumbnail/preview still showed the composite).
 
 Tile Source Mapping
 - Active palette sources are built from selected categories plus baked user tile sets.
