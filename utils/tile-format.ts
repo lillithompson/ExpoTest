@@ -23,6 +23,10 @@ export type TileFilePayload = {
   category: TileCategory;
   categories: TileCategory[];
   lockedCells?: number[];
+  /** Per-layer visibility (level 1 = base). Omitted = visible. */
+  layerVisibility?: Record<number, boolean>;
+  /** Per-layer lock. Omitted = unlocked. */
+  layerLocked?: Record<number, boolean>;
 };
 
 type TileFileExport = {
@@ -80,6 +84,8 @@ export function serializeTileFile(file: {
   category: TileCategory;
   categories: TileCategory[];
   lockedCells?: number[];
+  layerVisibility?: Record<number, boolean>;
+  layerLocked?: Record<number, boolean>;
 }): string {
   const layersExport =
     file.layers && Object.keys(file.layers).length > 0
@@ -102,6 +108,18 @@ export function serializeTileFile(file: {
     categories: file.categories ?? [file.category],
     ...(Array.isArray(file.lockedCells) &&
       file.lockedCells.length > 0 && { lockedCells: file.lockedCells }),
+    ...(file.layerVisibility &&
+      Object.keys(file.layerVisibility).length > 0 && {
+        layerVisibility: Object.fromEntries(
+          Object.entries(file.layerVisibility).map(([k, v]) => [String(k), v])
+        ),
+      }),
+    ...(file.layerLocked &&
+      Object.keys(file.layerLocked).length > 0 && {
+        layerLocked: Object.fromEntries(
+          Object.entries(file.layerLocked).map(([k, v]) => [String(k), v])
+        ),
+      }),
   };
   return JSON.stringify(payload, null, 0);
 }
@@ -213,6 +231,30 @@ export function deserializeTileFile(json: string): DeserializeResult {
     }
     if (Object.keys(layers).length === 0) layers = undefined;
   }
+  let layerVisibility: Record<number, boolean> | undefined;
+  if (o.layerVisibility != null && typeof o.layerVisibility === 'object' && !Array.isArray(o.layerVisibility)) {
+    const raw = o.layerVisibility as Record<string, unknown>;
+    layerVisibility = {};
+    for (const key of Object.keys(raw)) {
+      const level = parseInt(key, 10);
+      if (!Number.isInteger(level) || level < 1) continue;
+      if (raw[key] === false) layerVisibility[level] = false;
+      else if (raw[key] === true) layerVisibility[level] = true;
+    }
+    if (Object.keys(layerVisibility).length === 0) layerVisibility = undefined;
+  }
+  let layerLocked: Record<number, boolean> | undefined;
+  if (o.layerLocked != null && typeof o.layerLocked === 'object' && !Array.isArray(o.layerLocked)) {
+    const raw = o.layerLocked as Record<string, unknown>;
+    layerLocked = {};
+    for (const key of Object.keys(raw)) {
+      const level = parseInt(key, 10);
+      if (!Number.isInteger(level) || level < 1) continue;
+      if (raw[key] === true) layerLocked[level] = true;
+      else if (raw[key] === false) layerLocked[level] = false;
+    }
+    if (Object.keys(layerLocked).length === 0) layerLocked = undefined;
+  }
   const payload: TileFilePayload = {
     v: TILE_FORMAT_VERSION,
     name,
@@ -227,6 +269,8 @@ export function deserializeTileFile(json: string): DeserializeResult {
     category: finalCategories[0] ?? fallbackCategory,
     categories: finalCategories,
     ...(lockedCells.length > 0 && { lockedCells }),
+    ...(layerVisibility && Object.keys(layerVisibility).length > 0 && { layerVisibility }),
+    ...(layerLocked && Object.keys(layerLocked).length > 0 && { layerLocked }),
   };
   return { ok: true, payload };
 }

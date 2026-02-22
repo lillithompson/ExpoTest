@@ -8,7 +8,7 @@ import { Image as ExpoImage } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import * as Sharing from 'expo-sharing';
-import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, startTransition } from 'react';
+import { memo, startTransition, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import {
     Alert,
     Animated,
@@ -68,6 +68,7 @@ import {
     getCellIndicesInRegion,
     getLockedBoundaryEdges,
 } from '@/utils/locked-regions';
+import { paletteProfileLogParent } from '@/utils/palette-profile';
 import {
     buildPreviewPath,
     getFilePreviewUri,
@@ -89,27 +90,26 @@ import {
     serializeFileBundle,
     serializePatternBundle,
 } from '@/utils/tile-bundle-format';
-import { paletteProfileLogParent } from '@/utils/palette-profile';
 import { getTransformedConnectionsForName, parseTileConnections, transformConnections } from '@/utils/tile-compat';
 import {
     buildSourceXmlCache,
     exportTileCanvasAsSvg,
     getSourceUri,
     renderTileCanvasToDataUrl,
-    renderTileCanvasToSvg,
+    renderTileCanvasToSvg
 } from '@/utils/tile-export';
 import { deserializeTileFile, serializeTileFile } from '@/utils/tile-format';
 import {
-  computeFixedGridLayout,
-  buildInitialTiles,
-  getGridLevelLinePositions,
-  getLevelCellIndexForPoint,
-  getLevelGridInfo,
-  getMaxGridResolutionLevel,
-  hydrateTilesWithSourceNames,
-  normalizeTiles,
-  type LevelGridInfo,
-  type Tile,
+    buildInitialTiles,
+    computeFixedGridLayout,
+    getGridLevelLinePositions,
+    getLevelCellIndexForPoint,
+    getLevelGridInfo,
+    getMaxGridResolutionLevel,
+    hydrateTilesWithSourceNames,
+    normalizeTiles,
+    type LevelGridInfo,
+    type Tile,
 } from '@/utils/tile-grid';
 import { deserializePattern, deserializeTileSet, serializePattern } from '@/utils/tile-ugc-format';
 import JSZip from 'jszip';
@@ -1011,6 +1011,8 @@ export default function TestScreen() {
     upsertActiveFile,
     updateActiveFileLockedCells,
     updateActiveFileLayer,
+    updateActiveFileLayerVisibility,
+    updateActiveFileLayerLocked,
     replaceTileSourceNames,
     replaceTileSourceNamesWithError,
     ready,
@@ -1498,6 +1500,26 @@ export default function TestScreen() {
     [maxDisplayLevel, editingLevel]
   );
 
+  /** Layer is visible (default true). Hidden layers are excluded from canvas, exports, and thumbnails. */
+  const isLayerVisible = useCallback(
+    (file: { layerVisibility?: Record<number, boolean> } | null, level: number) =>
+      file?.layerVisibility?.[level] !== false,
+    []
+  );
+  /** Layer is locked (default false). Locked layers cannot be edited. */
+  const isLayerLocked = useCallback(
+    (file: { layerLocked?: Record<number, boolean> } | null, level: number) =>
+      file?.layerLocked?.[level] === true,
+    []
+  );
+
+  /** Current layer can be edited (visible and not locked). When false, brush and tools do nothing on this layer. */
+  const canEditCurrentLayer = Boolean(
+    activeFile &&
+      isLayerVisible(activeFile, editingLevel) &&
+      !isLayerLocked(activeFile, editingLevel)
+  );
+
   /** Level-1 layout (for persist when editing a higher layer). */
   const level1LayoutForPersist = useMemo(() => {
     const rows = activeFile?.grid.rows ?? 0;
@@ -1781,9 +1803,9 @@ export default function TestScreen() {
   useEffect(() => {
     if (pendingPaletteFloodRef.current) {
       pendingPaletteFloodRef.current = false;
-      floodFill();
+      if (canEditCurrentLayer) floodFill();
     }
-  }, [brush, floodFill]);
+  }, [brush, floodFill, canEditCurrentLayer]);
   useEffect(() => {
     if (prevTileSourcesKeyRef.current === tileSourcesKey) {
       return;
@@ -1846,19 +1868,36 @@ export default function TestScreen() {
     return gridLayout;
   }, [level1LayoutForPersist, activeFile?.grid?.rows, activeFile?.grid?.columns, zoomRegion, availableWidth, availableHeight, gridLayout]);
 
-  /** Level-1 tiles to show (current layer when editing L1; when editing L2+ use file from list so we never show overwritten data). */
+  /** Level-1 tiles to show (current layer when editing L1; when editing L2+ use file from list). Hidden layer 1 shows as empty. */
   const level1TilesForDisplay = useMemo(() => {
+    const total = level1DisplayLayout.rows * level1DisplayLayout.columns;
+    if (total <= 0) return [];
+    if (activeFile && activeFile.layerVisibility?.[1] === false) {
+      return Array.from({ length: total }, () => ({
+        imageIndex: -1,
+        rotation: 0,
+        mirrorX: false,
+        mirrorY: false,
+      }));
+    }
     if (editingLevel === 1) return tiles;
     const fromList = files.find((f) => f.id === activeFileId)?.tiles;
     const fromActive = activeFile?.tiles ?? [];
-    return (fromList?.length ?? 0) >= (level1DisplayLayout.rows * level1DisplayLayout.columns)
-      ? (fromList ?? [])
-      : fromActive;
-  }, [editingLevel, tiles, files, activeFileId, activeFile?.tiles, level1DisplayLayout.rows, level1DisplayLayout.columns]);
-  /** Level-2 tiles to show (current layer when editing L2, file when not). */
+    return (fromList?.length ?? 0) >= total ? (fromList ?? []) : fromActive;
+  }, [
+    editingLevel,
+    tiles,
+    files,
+    activeFileId,
+    activeFile?.tiles,
+    activeFile?.layerVisibility,
+    level1DisplayLayout.rows,
+    level1DisplayLayout.columns,
+  ]);
+  /** Level-2 tiles to show (current layer when editing L2, file when not). Only rendered when layer visible. */
   const level2TilesForDisplay =
     editingLevel === 2 ? tiles : (activeFile?.layers?.[2] ?? []);
-  /** Level-3 tiles to show (current layer when editing L3, file when not). */
+  /** Level-3 tiles to show (current layer when editing L3, file when not). Only rendered when layer visible. */
   const level3TilesForDisplay =
     editingLevel === 3 ? tiles : (activeFile?.layers?.[3] ?? []);
 
@@ -1870,7 +1909,29 @@ export default function TestScreen() {
       ? fullGridLayoutForSave
       : (level1LayoutForPersist ?? fullGridLayoutForSave);
 
-  /** Overlay layers (L2, L3) for composite thumbnail/preview so file thumbnails show all layers. */
+  /** Base tiles for composite (thumbnail/export); empty when layer 1 is hidden. */
+  const baseTilesForComposite = useMemo(() => {
+    const rows = gridLayoutForSaveImage.rows;
+    const cols = gridLayoutForSaveImage.columns;
+    const n = rows * cols;
+    if (n <= 0) return [];
+    if (activeFile?.layerVisibility?.[1] === false) {
+      return Array.from({ length: n }, () => ({
+        imageIndex: -1,
+        rotation: 0,
+        mirrorX: false,
+        mirrorY: false,
+      }));
+    }
+    return tilesForSaveImage;
+  }, [
+    activeFile?.layerVisibility,
+    gridLayoutForSaveImage.rows,
+    gridLayoutForSaveImage.columns,
+    tilesForSaveImage,
+  ]);
+
+  /** Overlay layers (L2, L3) for composite thumbnail/preview; only includes visible layers. */
   const overlayLayersForThumbnail = useMemo(() => {
     const cols = gridLayoutForSaveImage.columns;
     const rows = gridLayoutForSaveImage.rows;
@@ -1885,31 +1946,35 @@ export default function TestScreen() {
       lineWidth?: number;
       strokeScaleByName?: Map<string, number>;
     }> = [];
-    const level2Info = getLevelGridInfo(cols, rows, 2);
-    const l2Tiles = editingLevel === 2 ? tiles : (activeFile?.layers?.[2] ?? []);
-    if (level2Info && l2Tiles.length === level2Info.cells.length) {
-      layers.push({
-        tiles: l2Tiles,
-        levelInfo: level2Info,
-        level1TileSize,
-        gridGap: GRID_GAP,
-        lineColor: activeLineColor,
-        lineWidth: activeLineWidth,
-        strokeScaleByName,
-      });
+    if (activeFile?.layerVisibility?.[2] !== false) {
+      const level2Info = getLevelGridInfo(cols, rows, 2);
+      const l2Tiles = editingLevel === 2 ? tiles : (activeFile?.layers?.[2] ?? []);
+      if (level2Info && l2Tiles.length === level2Info.cells.length) {
+        layers.push({
+          tiles: l2Tiles,
+          levelInfo: level2Info,
+          level1TileSize,
+          gridGap: GRID_GAP,
+          lineColor: activeLineColor,
+          lineWidth: activeLineWidth,
+          strokeScaleByName,
+        });
+      }
     }
-    const level3Info = getLevelGridInfo(cols, rows, 3);
-    const l3Tiles = editingLevel === 3 ? tiles : (activeFile?.layers?.[3] ?? []);
-    if (level3Info && l3Tiles.length === level3Info.cells.length) {
-      layers.push({
-        tiles: l3Tiles,
-        levelInfo: level3Info,
-        level1TileSize,
-        gridGap: GRID_GAP,
-        lineColor: activeLineColor,
-        lineWidth: activeLineWidth,
-        strokeScaleByName,
-      });
+    if (activeFile?.layerVisibility?.[3] !== false) {
+      const level3Info = getLevelGridInfo(cols, rows, 3);
+      const l3Tiles = editingLevel === 3 ? tiles : (activeFile?.layers?.[3] ?? []);
+      if (level3Info && l3Tiles.length === level3Info.cells.length) {
+        layers.push({
+          tiles: l3Tiles,
+          levelInfo: level3Info,
+          level1TileSize,
+          gridGap: GRID_GAP,
+          lineColor: activeLineColor,
+          lineWidth: activeLineWidth,
+          strokeScaleByName,
+        });
+      }
     }
     return layers.length > 0 ? layers : undefined;
   }, [
@@ -1919,6 +1984,7 @@ export default function TestScreen() {
     editingLevel,
     tiles,
     activeFile?.layers,
+    activeFile?.layerVisibility,
     activeLineColor,
     activeLineWidth,
     strokeScaleByName,
@@ -3165,7 +3231,7 @@ export default function TestScreen() {
         const thumbnailUri =
           Platform.OS === 'web'
             ? await renderTileCanvasToDataUrl({
-                tiles: tilesForSaveImage,
+                tiles: baseTilesForComposite,
                 gridLayout: gridLayoutForSaveImage,
                 tileSources,
                 gridGap: GRID_GAP,
@@ -3218,7 +3284,7 @@ export default function TestScreen() {
             return;
           }
           const previewUri = await renderTileCanvasToDataUrl({
-            tiles: tilesForSaveImage,
+            tiles: baseTilesForComposite,
             gridLayout: gridLayoutForSaveImage,
             tileSources,
             gridGap: GRID_GAP,
@@ -3549,6 +3615,7 @@ export default function TestScreen() {
   };
 
   const paintCellIndex = (cellIndex: number) => {
+    if (!canEditCurrentLayer) return;
     if (lastPaintedRef.current === cellIndex) {
       return;
     }
@@ -3559,13 +3626,14 @@ export default function TestScreen() {
   const clearCanvas = () => {
     clearSequenceRef.current += 1;
     if (canvasSelection) {
+      if (!canEditCurrentLayer) return;
       resetTiles();
       return;
     }
     const clearId = clearSequenceRef.current;
     suppressAutosaveRef.current = true;
     setIsClearing(true);
-    // Clear all layers (L1 + L2 + L3); other tools apply only to current layer.
+    // Clear all layers (L1 + L2 + L3) except locked layers; other tools apply only to current layer.
     const rows = activeFile?.grid?.rows ?? 0;
     const cols = activeFile?.grid?.columns ?? 0;
     const totalL1 = rows * cols;
@@ -3586,10 +3654,20 @@ export default function TestScreen() {
     const emptyL2 = Array.from({ length: l2Count }, () => ({ ...emptyTile }));
     const l3Count = level3GridInfo?.cells.length ?? 0;
     const emptyL3 = Array.from({ length: l3Count }, () => ({ ...emptyTile }));
+    const newTiles =
+      activeFile && isLayerLocked(activeFile, 1) ? (activeFile.tiles ?? []) : emptyL1;
+    const newL2 =
+      activeFile && isLayerLocked(activeFile, 2)
+        ? (activeFile.layers?.[2] ?? [])
+        : emptyL2;
+    const newL3 =
+      activeFile && isLayerLocked(activeFile, 3)
+        ? (activeFile.layers?.[3] ?? [])
+        : emptyL3;
     if (activeFile && totalL1 > 0) {
       upsertActiveFile({
         ...activeFile,
-        tiles: emptyL1,
+        tiles: newTiles,
         gridLayout: {
           rows,
           columns: cols,
@@ -3600,11 +3678,11 @@ export default function TestScreen() {
         preferredTileSize: activeFile.preferredTileSize,
       });
     }
-    if (l2Count > 0) updateActiveFileLayer(2, emptyL2);
-    if (l3Count > 0) updateActiveFileLayer(3, emptyL3);
-    const emptyForCurrentLayer =
-      editingLevel === 1 ? emptyL1 : editingLevel === 2 ? emptyL2 : emptyL3;
-    loadTiles(emptyForCurrentLayer);
+    if (l2Count > 0) updateActiveFileLayer(2, newL2);
+    if (l3Count > 0) updateActiveFileLayer(3, newL3);
+    const tilesForCurrentLayer =
+      editingLevel === 1 ? newTiles : editingLevel === 2 ? newL2 : newL3;
+    loadTiles(tilesForCurrentLayer);
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
         void (async () => {
@@ -4041,7 +4119,7 @@ export default function TestScreen() {
       return;
     }
     const previewUri = await renderTileCanvasToDataUrl({
-      tiles: tilesForSaveImage,
+      tiles: baseTilesForComposite,
       gridLayout: gridLayoutForSaveImage,
       tileSources,
       gridGap: GRID_GAP,
@@ -4056,7 +4134,7 @@ export default function TestScreen() {
       quality: 1,
     });
     const thumbnailUri = await renderTileCanvasToDataUrl({
-      tiles: tilesForSaveImage,
+      tiles: baseTilesForComposite,
       gridLayout: gridLayoutForSaveImage,
       tileSources,
       gridGap: GRID_GAP,
@@ -4688,6 +4766,64 @@ export default function TestScreen() {
     }
   }, []);
 
+  /** Base tiles for rendering a file (empty when layer 1 is hidden). Use when exporting or drawing. */
+  const getBaseTilesForExportFile = useCallback((file: TileFile): Tile[] => {
+    const n = (file.grid?.rows ?? 0) * (file.grid?.columns ?? 0);
+    if (n <= 0) return file.tiles ?? [];
+    if (file.layerVisibility?.[1] === false) {
+      return Array.from({ length: n }, () => ({
+        imageIndex: -1,
+        rotation: 0,
+        mirrorX: false,
+        mirrorY: false,
+      }));
+    }
+    return file.tiles ?? [];
+  }, []);
+
+  /** Build overlay layers (L2, L3) for a file for export; only includes visible layers. */
+  const getOverlayLayersForFile = useCallback(
+    (file: TileFile): RenderSvgOverlayLayer[] | undefined => {
+      const cols = file.grid?.columns ?? 0;
+      const rows = file.grid?.rows ?? 0;
+      const level1TileSize = file.preferredTileSize ?? 0;
+      if (cols <= 0 || rows <= 0) return undefined;
+      const layers: RenderSvgOverlayLayer[] = [];
+      if (file.layerVisibility?.[2] !== false) {
+        const level2Info = getLevelGridInfo(cols, rows, 2);
+        const l2Tiles = file.layers?.[2] ?? [];
+        if (level2Info && l2Tiles.length === level2Info.cells.length) {
+          layers.push({
+            tiles: l2Tiles,
+            levelInfo: level2Info,
+            level1TileSize,
+            gridGap: GRID_GAP,
+            lineColor: file.lineColor,
+            lineWidth: file.lineWidth,
+            strokeScaleByName,
+          });
+        }
+      }
+      if (file.layerVisibility?.[3] !== false) {
+        const level3Info = getLevelGridInfo(cols, rows, 3);
+        const l3Tiles = file.layers?.[3] ?? [];
+        if (level3Info && l3Tiles.length === level3Info.cells.length) {
+          layers.push({
+            tiles: l3Tiles,
+            levelInfo: level3Info,
+            level1TileSize,
+            gridGap: GRID_GAP,
+            lineColor: file.lineColor,
+            lineWidth: file.lineWidth,
+            strokeScaleByName,
+          });
+        }
+      }
+      return layers.length > 0 ? layers : undefined;
+    },
+    [strokeScaleByName]
+  );
+
   /**
    * Build a map of UGC source name → SVG XML.
    * On native: read each UGC file from disk (file.tiles + sources).
@@ -4807,6 +4943,7 @@ export default function TestScreen() {
         void downloadFile(file, sources, {
           backgroundColor: settings.backgroundColor,
           strokeScaleByName,
+          overlayLayers: getOverlayLayersForFile(file),
         });
       } else {
         setIncludeDownloadBackground(true);
@@ -4826,7 +4963,7 @@ export default function TestScreen() {
     for (const file of selectedFiles) {
       const sources = getSourcesForFile(file);
       const dataUrl = await renderTileCanvasToDataUrl({
-        tiles: file.tiles,
+        tiles: getBaseTilesForExportFile(file),
         gridLayout: {
           rows: file.grid.rows,
           columns: file.grid.columns,
@@ -4840,6 +4977,7 @@ export default function TestScreen() {
         lineWidth: file.lineWidth,
         backgroundColor: settings.backgroundColor,
         strokeScaleByName,
+        overlayLayers: getOverlayLayersForFile(file),
         maxDimension: 0,
       });
       if (dataUrl) {
@@ -4857,7 +4995,7 @@ export default function TestScreen() {
     link.click();
     link.remove();
     URL.revokeObjectURL(url);
-  }, [selectedFiles, getSourcesForFile, downloadFile, strokeScaleByName, settings.backgroundColor]);
+  }, [selectedFiles, getSourcesForFile, downloadFile, strokeScaleByName, settings.backgroundColor, getOverlayLayersForFile, getBaseTilesForExportFile]);
 
   const exportSelectedAsSvg = useCallback(async () => {
     if (selectedFiles.length === 0) {
@@ -4872,7 +5010,7 @@ export default function TestScreen() {
         const sourcesWithInlineUgc = await replaceUgcSourcesWithDataUris(sources);
         const sourceXmlCache = await buildSourceXmlCache(sourcesWithInlineUgc);
         await exportTileCanvasAsSvg({
-          tiles: file.tiles,
+          tiles: getBaseTilesForExportFile(file),
           gridLayout: {
             rows: file.grid.rows,
             columns: file.grid.columns,
@@ -4887,6 +5025,7 @@ export default function TestScreen() {
           strokeScaleByName,
           sourceXmlCache,
           ugcXmlBySourceName,
+          overlayLayers: getOverlayLayersForFile(file),
           fileName: `${file.name.replace(/[^\w-]+/g, '_')}.svg`,
         });
       } else {
@@ -4910,7 +5049,7 @@ export default function TestScreen() {
       const sourcesWithInlineUgc = await replaceUgcSourcesWithDataUris(sources);
       const sourceXmlCache = await buildSourceXmlCache(sourcesWithInlineUgc);
       const svg = await renderTileCanvasToSvg({
-        tiles: file.tiles,
+        tiles: getBaseTilesForExportFile(file),
         gridLayout: {
           rows: file.grid.rows,
           columns: file.grid.columns,
@@ -4925,6 +5064,7 @@ export default function TestScreen() {
         sourceXmlCache,
         ugcXmlBySourceName,
         strokeScaleByName,
+        overlayLayers: getOverlayLayersForFile(file),
       });
       if (svg) {
         const safeName = file.name.replace(/[^\w-]+/g, '_');
@@ -4948,6 +5088,8 @@ export default function TestScreen() {
     buildSourceXmlCache,
     settings.backgroundColor,
     strokeScaleByName,
+    getOverlayLayersForFile,
+    getBaseTilesForExportFile,
   ]);
 
   const downloadSingleFileAsTile = useCallback(
@@ -5013,7 +5155,7 @@ export default function TestScreen() {
       const sourcesWithInlineUgc = await replaceUgcSourcesWithDataUris(sources);
       const sourceXmlCache = await buildSourceXmlCache(sourcesWithInlineUgc);
       const svg = await renderTileCanvasToSvg({
-        tiles: downloadTargetFile.tiles,
+        tiles: getBaseTilesForExportFile(downloadTargetFile),
         gridLayout: {
           rows: downloadTargetFile.grid.rows,
           columns: downloadTargetFile.grid.columns,
@@ -5030,6 +5172,7 @@ export default function TestScreen() {
         sourceXmlCache,
         ugcXmlBySourceName,
         strokeScaleByName,
+        overlayLayers: getOverlayLayersForFile(downloadTargetFile),
       });
       if (!svg) {
         Alert.alert('Download failed', 'Unable to render the SVG.');
@@ -5720,6 +5863,7 @@ export default function TestScreen() {
                           ? settings.backgroundColor
                           : undefined,
                         strokeScaleByName,
+                        overlayLayers: getOverlayLayersForFile(file),
                       });
                     } else {
                       setDownloadTargetId(file.id);
@@ -6309,6 +6453,7 @@ export default function TestScreen() {
               icon="format-color-fill"
               onPress={() => {
                 dismissModifyBanner();
+                if (!canEditCurrentLayer) return;
                 if (floodLongPressHandledRef.current) {
                   floodLongPressHandledRef.current = false;
                   return;
@@ -6324,6 +6469,7 @@ export default function TestScreen() {
               }}
               onLongPress={() => {
                 dismissModifyBanner();
+                if (!canEditCurrentLayer) return;
                 floodLongPressHandledRef.current = true;
                 if (pendingFloodCompleteRef.current) {
                   clearTimeout(pendingFloodCompleteRef.current);
@@ -6337,6 +6483,7 @@ export default function TestScreen() {
               icon="puzzle"
               onPress={() => {
                 dismissModifyBanner();
+                if (!canEditCurrentLayer) return;
                 if (pendingFloodCompleteRef.current) {
                   clearTimeout(pendingFloodCompleteRef.current);
                   pendingFloodCompleteRef.current = null;
@@ -6345,6 +6492,7 @@ export default function TestScreen() {
               }}
               onLongPress={() => {
                 dismissModifyBanner();
+                if (!canEditCurrentLayer) return;
                 if (pendingFloodCompleteRef.current) {
                   clearTimeout(pendingFloodCompleteRef.current);
                   pendingFloodCompleteRef.current = null;
@@ -7035,6 +7183,7 @@ export default function TestScreen() {
               ))}
             </ThemedView>
             {!zoomRegion &&
+              activeFile?.layerVisibility?.[2] !== false &&
               level2GridInfo &&
               level2GridInfo.cells.length > 0 && (
                 <View style={[StyleSheet.absoluteFill, { backgroundColor: 'transparent' }]} pointerEvents="none">
@@ -7108,6 +7257,7 @@ export default function TestScreen() {
                 </View>
               )}
             {!zoomRegion &&
+              activeFile?.layerVisibility?.[3] !== false &&
               level3GridInfo &&
               level3GridInfo.cells.length > 0 && (
                 <View style={[StyleSheet.absoluteFill, { backgroundColor: 'transparent' }]} pointerEvents="none">
@@ -7270,6 +7420,7 @@ export default function TestScreen() {
                 ))
               )}
               {!zoomRegion &&
+                activeFile?.layerVisibility?.[2] !== false &&
                 level2GridInfo &&
                 level2GridInfo.cells.length > 0 && (
                   <View style={[StyleSheet.absoluteFill, { backgroundColor: 'transparent' }]} pointerEvents="none">
@@ -7343,6 +7494,7 @@ export default function TestScreen() {
                   </View>
                 )}
               {!zoomRegion &&
+                activeFile?.layerVisibility?.[3] !== false &&
                 level3GridInfo &&
                 level3GridInfo.cells.length > 0 && (
                   <View style={[StyleSheet.absoluteFill, { backgroundColor: 'transparent' }]} pointerEvents="none">
@@ -8861,36 +9013,72 @@ export default function TestScreen() {
                   <ThemedText type="defaultSemiBold">X</ThemedText>
                 </Pressable>
               </ThemedView>
-              <ThemedText type="default" style={styles.gridResolutionHint}>
-                L1 = coarsest (largest cells), L{maxDisplayLevel} = finest (tile grid). Grid from center out; mirror cross = grid lines.
-              </ThemedText>
               {(() => {
                 const current = displayResolutionLevel;
-                return Array.from({ length: maxDisplayLevel }, (_, i) => i + 1).map((level) => (
-                  <Pressable
-                    key={level}
-                    onPress={() => {
-                      setSettings((prev) => ({ ...prev, gridResolutionLevel: maxDisplayLevel - level + 1 }));
-                      setShowGridResolutionModal(false);
-                    }}
-                    style={[
-                      styles.gridResolutionOption,
-                      level === current && styles.gridResolutionOptionActive,
-                    ]}
-                    accessibilityRole="button"
-                    accessibilityLabel={`L${level}${level === current ? ', selected' : ''}`}
-                  >
-                    <ThemedText
-                      type="defaultSemiBold"
-                      style={level === current ? styles.gridResolutionOptionTextActive : undefined}
+                const levelLabel = (l: number) => {
+                  if (l === 1) return 'Least Detail';
+                  if (l === maxDisplayLevel) return 'Most Detail';
+                  if (l === 2 && maxDisplayLevel >= 3) return 'Some Detail';
+                  if (l === 3 && maxDisplayLevel >= 4) return 'More Detail';
+                  return `L${l}`;
+                };
+                return Array.from({ length: maxDisplayLevel }, (_, i) => i + 1).map((level) => {
+                  const visible = isLayerVisible(activeFile, level);
+                  const locked = isLayerLocked(activeFile, level);
+                  return (
+                    <View
+                      key={level}
+                      style={[
+                        styles.gridResolutionOption,
+                        level === current && styles.gridResolutionOptionActive,
+                      ]}
                     >
-                      L{level}
-                    </ThemedText>
-                    {level === current && (
-                      <MaterialCommunityIcons name="check" size={20} color="#22c55e" />
-                    )}
-                  </Pressable>
-                ));
+                      <Pressable
+                        style={styles.gridResolutionOptionLabel}
+                        onPress={() => {
+                          setSettings((prev) => ({ ...prev, gridResolutionLevel: maxDisplayLevel - level + 1 }));
+                          setShowGridResolutionModal(false);
+                        }}
+                        accessibilityRole="button"
+                        accessibilityLabel={`${levelLabel(level)}${level === current ? ', selected' : ''}`}
+                      >
+                        <ThemedText
+                          type="defaultSemiBold"
+                          style={level === current ? styles.gridResolutionOptionTextActive : undefined}
+                        >
+                          {levelLabel(level)}
+                        </ThemedText>
+                        {level === current && (
+                          <MaterialCommunityIcons name="check" size={20} color="#22c55e" />
+                        )}
+                      </Pressable>
+                      <Pressable
+                        onPress={() => updateActiveFileLayerVisibility(level, !visible)}
+                        style={styles.gridResolutionIconButton}
+                        accessibilityRole="button"
+                        accessibilityLabel={visible ? 'Hide layer' : 'Show layer'}
+                      >
+                        <MaterialCommunityIcons
+                          name={visible ? 'eye' : 'eye-off'}
+                          size={22}
+                          color={visible ? '#374151' : '#9ca3af'}
+                        />
+                      </Pressable>
+                      <Pressable
+                        onPress={() => updateActiveFileLayerLocked(level, !locked)}
+                        style={styles.gridResolutionIconButton}
+                        accessibilityRole="button"
+                        accessibilityLabel={locked ? 'Unlock layer' : 'Lock layer'}
+                      >
+                        <MaterialCommunityIcons
+                          name={locked ? 'lock' : 'lock-open-outline'}
+                          size={22}
+                          color={locked ? '#dc2626' : '#9ca3af'}
+                        />
+                      </Pressable>
+                    </View>
+                  );
+                });
               })()}
             </ThemedView>
           </ThemedView>
@@ -9309,7 +9497,6 @@ const styles = StyleSheet.create({
   gridResolutionOption: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
     paddingVertical: 12,
     paddingHorizontal: 16,
     marginBottom: 4,
@@ -9317,6 +9504,16 @@ const styles = StyleSheet.create({
   },
   gridResolutionOptionActive: {
     backgroundColor: 'rgba(34, 197, 94, 0.15)',
+  },
+  gridResolutionOptionLabel: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  gridResolutionIconButton: {
+    padding: 8,
+    marginLeft: 4,
   },
   gridResolutionOptionTextActive: {
     color: '#22c55e',

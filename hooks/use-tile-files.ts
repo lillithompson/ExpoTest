@@ -11,7 +11,7 @@ import {
   deserializeTileFile,
   serializeTileFile,
 } from '@/utils/tile-format';
-import { renderTileCanvasToDataUrl } from '@/utils/tile-export';
+import { renderTileCanvasToDataUrl, type OverlayLayerParams } from '@/utils/tile-export';
 import { applyRemovedSourcesToFile } from '@/utils/tile-file-sync';
 import { type GridLayout, type Tile } from '@/utils/tile-grid';
 
@@ -34,6 +34,10 @@ export type TileFile = {
   updatedAt: number;
   /** Cell indices that are locked (cannot be modified by any tool). */
   lockedCells?: number[];
+  /** Per-layer visibility (level 1 = base grid). If false, layer is hidden from canvas, exports, and thumbnails. Default true. */
+  layerVisibility?: Record<number, boolean>;
+  /** Per-layer lock. If true, layer cannot be edited. Default false. */
+  layerLocked?: Record<number, boolean>;
   /** True when the file was added from the bundled samples (file view shows these in a separate section). */
   isSample?: boolean;
 };
@@ -137,11 +141,49 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
                 }
                 lockedCells = Array.from(seen);
               }
+              let layers: Record<number, Tile[]> | undefined;
+              const rawLayers = (file as { layers?: Record<string, unknown> }).layers;
+              if (rawLayers != null && typeof rawLayers === 'object' && !Array.isArray(rawLayers)) {
+                layers = {};
+                for (const key of Object.keys(rawLayers)) {
+                  const level = parseInt(key, 10);
+                  if (!Number.isInteger(level) || level < 2) continue;
+                  const arr = rawLayers[key];
+                  if (!Array.isArray(arr)) continue;
+                  layers[level] = arr as Tile[];
+                }
+                if (Object.keys(layers).length === 0) layers = undefined;
+              }
+              let layerVisibility: Record<number, boolean> | undefined;
+              const rawVis = (file as { layerVisibility?: Record<string, unknown> }).layerVisibility;
+              if (rawVis != null && typeof rawVis === 'object' && !Array.isArray(rawVis)) {
+                layerVisibility = {};
+                for (const key of Object.keys(rawVis)) {
+                  const level = parseInt(key, 10);
+                  if (Number.isInteger(level) && level >= 1 && rawVis[key] === false) {
+                    layerVisibility[level] = false;
+                  }
+                }
+                if (Object.keys(layerVisibility).length === 0) layerVisibility = undefined;
+              }
+              let layerLocked: Record<number, boolean> | undefined;
+              const rawLock = (file as { layerLocked?: Record<string, unknown> }).layerLocked;
+              if (rawLock != null && typeof rawLock === 'object' && !Array.isArray(rawLock)) {
+                layerLocked = {};
+                for (const key of Object.keys(rawLock)) {
+                  const level = parseInt(key, 10);
+                  if (Number.isInteger(level) && level >= 1 && rawLock[key] === true) {
+                    layerLocked[level] = true;
+                  }
+                }
+                if (Object.keys(layerLocked).length === 0) layerLocked = undefined;
+              }
               return {
                 id: file.id ?? createId(),
                 name: file.name ?? 'Canvas',
                 tiles,
                 grid,
+                ...(layers && { layers }),
                 category: categories[0] ?? safeCategory,
                 categories,
                 tileSetIds: Array.isArray(file.tileSetIds)
@@ -157,6 +199,8 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
                 previewUri: file.previewUri ?? null,
                 updatedAt: file.updatedAt ?? Date.now(),
                 lockedCells,
+                ...(layerVisibility && { layerVisibility }),
+                ...(layerLocked && { layerLocked }),
                 isSample: file.isSample === true,
               };
             })
@@ -230,6 +274,7 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
                 ...file,
                 tiles: payload.tiles,
                 grid: { rows: payload.gridLayout.rows, columns: payload.gridLayout.columns },
+                ...(file.layers && Object.keys(file.layers).length > 0 && { layers: file.layers }),
                 category: payload.categories?.[0] ?? payload.category,
                 categories:
                   payload.categories ??
@@ -296,6 +341,52 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
                 layers: {
                   ...(file.layers ?? {}),
                   [level]: tiles,
+                },
+                updatedAt: Date.now(),
+              }
+            : file
+        );
+        void persistFiles(next, activeFileId);
+        return next;
+      });
+    },
+    [activeFileId, persistFiles]
+  );
+
+  const updateActiveFileLayerVisibility = useCallback(
+    (level: number, visible: boolean) => {
+      if (!activeFileId || level < 1) return;
+      setFiles((prev) => {
+        const next = prev.map((file) =>
+          file.id === activeFileId
+            ? {
+                ...file,
+                layerVisibility: {
+                  ...(file.layerVisibility ?? {}),
+                  [level]: visible,
+                },
+                updatedAt: Date.now(),
+              }
+            : file
+        );
+        void persistFiles(next, activeFileId);
+        return next;
+      });
+    },
+    [activeFileId, persistFiles]
+  );
+
+  const updateActiveFileLayerLocked = useCallback(
+    (level: number, locked: boolean) => {
+      if (!activeFileId || level < 1) return;
+      setFiles((prev) => {
+        const next = prev.map((file) =>
+          file.id === activeFileId
+            ? {
+                ...file,
+                layerLocked: {
+                  ...(file.layerLocked ?? {}),
+                  [level]: locked,
                 },
                 updatedAt: Date.now(),
               }
@@ -393,6 +484,10 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
           lockedCells: Array.isArray(source.lockedCells)
             ? [...source.lockedCells]
             : [],
+          layerVisibility: source.layerVisibility
+            ? { ...source.layerVisibility }
+            : undefined,
+          layerLocked: source.layerLocked ? { ...source.layerLocked } : undefined,
           isSample: false,
         };
         setActiveFileId(nextFile.id);
@@ -441,6 +536,14 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
           Array.isArray(payload.lockedCells) && payload.lockedCells.length > 0
             ? payload.lockedCells
             : undefined,
+        ...(payload.layerVisibility &&
+          Object.keys(payload.layerVisibility).length > 0 && {
+            layerVisibility: payload.layerVisibility,
+          }),
+        ...(payload.layerLocked &&
+          Object.keys(payload.layerLocked).length > 0 && {
+            layerLocked: payload.layerLocked,
+          }),
         isSample: options?.isSample === true,
       };
       setFiles((prev) => {
@@ -492,6 +595,7 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
         backgroundLineColor?: string;
         backgroundLineWidth?: number;
         strokeScaleByName?: Map<string, number>;
+        overlayLayers?: OverlayLayerParams[];
       }
     ) => {
       const dataUrl = await renderTileCanvasToDataUrl({
@@ -509,6 +613,7 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
         lineWidth: file.lineWidth,
         backgroundColor: options?.backgroundColor,
         strokeScaleByName: options?.strokeScaleByName,
+        overlayLayers: options?.overlayLayers,
         maxDimension: 0,
       });
       if (!dataUrl || typeof document === 'undefined') {
@@ -670,6 +775,8 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
     upsertActiveFile,
     updateActiveFileLockedCells,
     updateActiveFileLayer,
+    updateActiveFileLayerVisibility,
+    updateActiveFileLayerLocked,
     replaceTileSourceNames,
     replaceTileSourceNamesWithError,
     ready,

@@ -299,6 +299,17 @@ export const exportTileCanvasAsPng = async ({
   return { ok: true };
 };
 
+/** One overlay layer (e.g. L2 or L3) for SVG export; same shape as OverlayLayerParams. */
+export type RenderSvgOverlayLayer = {
+  tiles: Tile[];
+  levelInfo: LevelGridInfo;
+  level1TileSize: number;
+  gridGap: number;
+  lineColor?: string;
+  lineWidth?: number;
+  strokeScaleByName?: Map<string, number>;
+};
+
 export const renderTileCanvasToSvg = async ({
   tiles,
   gridLayout,
@@ -312,12 +323,14 @@ export const renderTileCanvasToSvg = async ({
   ugcXmlBySourceName,
   outputSize,
   strokeScaleByName,
+  overlayLayers,
 }: Omit<ExportParams, 'blankSource' | 'backgroundLineColor' | 'backgroundLineWidth' | 'fileName'> & {
   sourceXmlCache?: Map<string, string>;
   /** Pre-read UGC SVG XML by source name; used first so export never relies on file/URI load for UGC. */
   ugcXmlBySourceName?: Map<string, string>;
   outputSize?: number;
   strokeScaleByName?: Map<string, number>;
+  overlayLayers?: RenderSvgOverlayLayer[];
 }): Promise<string | null> => {
   if (gridLayout.columns <= 0 || gridLayout.rows <= 0 || gridLayout.tileSize <= 0) {
     return null;
@@ -583,6 +596,120 @@ export const renderTileCanvasToSvg = async ({
     );
   }
 
+  if (overlayLayers?.length) {
+    for (const layer of overlayLayers) {
+      const {
+        tiles: overlayTiles,
+        levelInfo,
+        level1TileSize,
+        gridGap: layerGap,
+        lineColor: layerLineColor,
+        lineWidth: layerLineWidth,
+        strokeScaleByName: layerStrokeScaleByName,
+      } = layer;
+      const layerStride = level1TileSize + layerGap;
+      for (let i = 0; i < levelInfo.cells.length; i += 1) {
+        const tile = overlayTiles[i];
+        if (!tile) continue;
+        const { minCol, maxCol, minRow, maxRow } = levelInfo.cells[i];
+        const left = minCol * layerStride;
+        const top = minRow * layerStride;
+        const cellW =
+          (maxCol - minCol + 1) * level1TileSize + (maxCol - minCol) * layerGap;
+        const cellH =
+          (maxRow - minRow + 1) * level1TileSize + (maxRow - minRow) * layerGap;
+        const sourceByIndex =
+          tile.imageIndex >= 0
+            ? (tileSources[tile.imageIndex] as { name?: string; source?: unknown } | undefined)
+            : null;
+        const sourceByName = tile.name
+          ? (tileSources as { name?: string; source?: unknown }[]).find((s) => s.name === tile.name)
+          : null;
+        const resolvedSource = sourceByName ?? sourceByIndex;
+        const source =
+          tile.imageIndex < 0
+            ? tile.imageIndex === -2
+              ? errorSource
+              : null
+            : resolvedSource?.source ?? errorSource;
+        if (!source) continue;
+        const tileName = (resolvedSource?.name ?? tile.name) ?? '';
+        const strokeScale = layerStrokeScaleByName?.get(tileName) ?? 1;
+        const strokeW =
+          layerLineWidth != null && level1TileSize > 0 && cellW > 0
+            ? layerLineWidth * strokeScale * (level1TileSize / cellW)
+            : undefined;
+        const overrides =
+          resolvedSource != null
+            ? {
+                strokeColor: layerLineColor ?? lineColor,
+                strokeWidth: strokeW,
+              }
+            : undefined;
+        const centerX = cellW / 2;
+        const centerY = cellH / 2;
+        const scaleX = tile.mirrorX ? -1 : 1;
+        const scaleY = tile.mirrorY ? -1 : 1;
+        const rotation = tile.rotation ?? 0;
+        const transform = [
+          `translate(${left} ${top})`,
+          `translate(${centerX} ${centerY})`,
+          `scale(${scaleX} ${scaleY})`,
+          `rotate(${rotation})`,
+          `translate(${-centerX} ${-centerY})`,
+        ].join(' ');
+
+        const ugcXml =
+          (tileName ? ugcXmlBySourceName?.get(tileName) : undefined) ??
+          (tile.name ? ugcXmlBySourceName?.get(tile.name) : undefined) ??
+          (resolvedSource?.name ? ugcXmlBySourceName?.get(resolvedSource.name) : undefined);
+        if (ugcXml) {
+          let nextXml = stripOuterBorder(ugcXml);
+          if (overrides) {
+            nextXml = applySvgOverrides(nextXml, overrides.strokeColor, overrides.strokeWidth);
+          }
+          const extracted = extractSvgContent(nextXml);
+          const content = extracted.content && extracted.content.trim() ? extracted.content : nextXml;
+          if (content) {
+            const viewBox = extracted.viewBox ?? `0 0 ${cellW} ${cellH}`;
+            const viewParts = viewBox.split(/\s+/).map((part) => Number(part));
+            let vbWidth = Number.isFinite(viewParts[2]) ? viewParts[2] : cellW;
+            let vbHeight = Number.isFinite(viewParts[3]) ? viewParts[3] : cellH;
+            const outerScale = getOuterScaleFromSvgContent(content);
+            if (outerScale !== 1) {
+              vbWidth = vbWidth / outerScale;
+              vbHeight = vbHeight / outerScale;
+            }
+            const scaleXToCell = cellW / vbWidth;
+            const scaleYToCell = cellH / vbHeight;
+            const fullTransform = `${transform} scale(${scaleXToCell} ${scaleYToCell})`;
+            svgParts.push(applyTransformToSvgContent(content, fullTransform));
+            continue;
+          }
+        }
+
+        const inline = await toInlineSvg(source, overrides);
+        if (inline && inline.content) {
+          const viewBox = inline.viewBox ?? `0 0 ${cellW} ${cellH}`;
+          const viewParts = viewBox.split(/\s+/).map((part) => Number(part));
+          const vbWidth = Number.isFinite(viewParts[2]) ? viewParts[2] : cellW;
+          const vbHeight = Number.isFinite(viewParts[3]) ? viewParts[3] : cellH;
+          const scaleXToCell = cellW / vbWidth;
+          const scaleYToCell = cellH / vbHeight;
+          const fullTransform = `${transform} scale(${scaleXToCell} ${scaleYToCell})`;
+          svgParts.push(applyTransformToSvgContent(inline.content, fullTransform));
+          continue;
+        }
+
+        const dataUri = await toDataUri(source, overrides);
+        if (!dataUri) continue;
+        svgParts.push(
+          `<g transform="${transform}"><image href="${dataUri}" width="${cellW}" height="${cellH}" /></g>`
+        );
+      }
+    }
+  }
+
   if (scale !== 1) {
     svgParts.push('</g>');
   }
@@ -602,11 +729,13 @@ export const exportTileCanvasAsSvg = async ({
   strokeScaleByName,
   sourceXmlCache,
   ugcXmlBySourceName,
+  overlayLayers,
   fileName = 'tile-canvas.svg',
 }: Omit<ExportParams, 'blankSource' | 'backgroundLineColor' | 'backgroundLineWidth'> & {
   strokeScaleByName?: Map<string, number>;
   sourceXmlCache?: Map<string, string>;
   ugcXmlBySourceName?: Map<string, string>;
+  overlayLayers?: RenderSvgOverlayLayer[];
 }): Promise<ExportResult> => {
   if (typeof document === 'undefined') {
     return { ok: false, error: 'Unable to export SVG.' };
@@ -623,6 +752,7 @@ export const exportTileCanvasAsSvg = async ({
     sourceXmlCache,
     ugcXmlBySourceName,
     strokeScaleByName,
+    overlayLayers,
   });
   if (!svg) {
     return { ok: false, error: 'Unable to render SVG.' };
