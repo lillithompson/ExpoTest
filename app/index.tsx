@@ -103,6 +103,7 @@ import { deserializeTileFile, serializeTileFile } from '@/utils/tile-format';
 import {
     buildInitialTiles,
     computeFixedGridLayout,
+    computeGridLayout,
     getGridLevelLinePositions,
     getLevelCellIndexForPoint,
     getLevelGridInfo,
@@ -166,12 +167,8 @@ const FILE_GRID_GAP = 12;
 const DEFAULT_CATEGORY = (TILE_CATEGORIES as string[]).includes('angular')
   ? ('angular' as TileCategory)
   : TILE_CATEGORIES[0];
-/** On iOS and mobile web, new file dialog shows S/M/L (resolutions 100, 50, 25). */
-const NEW_FILE_RESOLUTION_SIMPLE: { label: string; size: number }[] = [
-  { label: 'S', size: 100 },
-  { label: 'M', size: 50 },
-  { label: 'L', size: 25 },
-];
+/** New files use max resolution: tile size 25 (Large on mobile, 25px on web). */
+const NEW_FILE_TILE_SIZE = 25;
 const ERROR_TILE = require('@/assets/images/tiles/tile_error.svg');
 const PREVIEW_DIR = `${FileSystem.cacheDirectory ?? ''}tile-previews/`;
 /** Max file thumbnail display size (web cap): narrow = this, desktop = 2×. */
@@ -798,7 +795,6 @@ export default function TestScreen() {
       useNativeDriver: true,
     }).start(() => setShowModifyTileSetBanner(false));
   }, [modifyBannerTranslateY]);
-  const [showNewFileModal, setShowNewFileModal] = useState(false);
   const [fileMenuTargetId, setFileMenuTargetId] = useState<string | null>(null);
   const importTileInputRef = useRef<HTMLInputElement | null>(null);
   const importPatternInputRef = useRef<HTMLInputElement | null>(null);
@@ -834,7 +830,6 @@ export default function TestScreen() {
   const [isClearing, setIsClearing] = useState(false);
   const [clearPreviewUri, setClearPreviewUri] = useState<string | null>(null);
   const [isInteracting, setIsInteracting] = useState(false);
-  const NEW_FILE_TILE_SIZES = [25, 50, 75, 100, 150, 200] as const;
   const [viewMode, setViewMode] = useState<'modify' | 'file'>('file');
   const [brush, setBrush] = useState<
     | { mode: 'random' }
@@ -1529,13 +1524,18 @@ export default function TestScreen() {
       !isLayerLocked(activeFile, editingLevel)
   );
 
-  /** Level-1 layout (for persist when editing a higher layer). */
+  /** Level-1 layout (for persist when editing a higher layer). When file has 0,0 grid (new file),
+   * compute from preferredTileSize so we never persist the current layer's dimensions as level-1. */
   const level1LayoutForPersist = useMemo(() => {
     const rows = activeFile?.grid.rows ?? 0;
     const cols = activeFile?.grid.columns ?? 0;
-    if (rows <= 0 || cols <= 0) return null;
-    return computeFixedGridLayout(availableWidth, availableHeight, GRID_GAP, rows, cols);
-  }, [activeFile?.grid?.rows, activeFile?.grid?.columns, availableWidth, availableHeight]);
+    if (rows > 0 && cols > 0) {
+      return computeFixedGridLayout(availableWidth, availableHeight, GRID_GAP, rows, cols);
+    }
+    const preferred = activeFile?.preferredTileSize ?? 25;
+    if (availableWidth <= 0 && availableHeight <= 0) return null;
+    return computeGridLayout(availableWidth, availableHeight, GRID_GAP, preferred);
+  }, [activeFile?.grid?.rows, activeFile?.grid?.columns, activeFile?.preferredTileSize, availableWidth, availableHeight]);
 
   /** When editing level 2+, the grid of complete cells at that level (for hook params and loadTiles). */
   const levelGridInfo = useMemo(() => {
@@ -1979,9 +1979,12 @@ export default function TestScreen() {
     return out;
   }, [zoomRegion, activeFile?.grid?.columns, fullGridLevel1TilesForZoom]);
 
-  /** For thumbnail/preview/save image: always use level-1 so we never overwrite level-1 with level-2 data. */
+  /** For thumbnail/preview/save image: always use level-1 so we never overwrite level-1 with level-2 data.
+   * When editing a higher layer, the hook's tiles are that layer's tiles; we must persist level-1 from the file only. */
   const tilesForSaveImage =
-    editingLevel === 1 ? fullTilesForSave : (activeFile?.tiles ?? fullTilesForSave);
+    editingLevel === 1
+      ? fullTilesForSave
+      : (Array.isArray(activeFile?.tiles) ? activeFile.tiles : []);
   const gridLayoutForSaveImage =
     editingLevel === 1
       ? fullGridLayoutForSave
@@ -2210,10 +2213,59 @@ export default function TestScreen() {
   } | null>(null);
   /** When true, we have zoomed in this session so pending restore must not overwrite current grid on zoom out. */
   const hasZoomedInThisSessionRef = useRef(false);
+  /** Last loadRequestId we handled; prevents re-running the load effect on setSettings re-render and resetting hydrating/loadedToken. */
+  const lastLoadRequestIdHandledRef = useRef(0);
+  useEffect(() => {
+    if (viewMode !== 'modify') {
+      lastLoadRequestIdHandledRef.current = 0;
+    }
+  }, [viewMode]);
   const setHydrating = useCallback((value: boolean) => {
     isHydratingFileRef.current = value;
     setIsHydratingFile(value);
   }, []);
+  const handleCreateNewFile = useCallback(() => {
+    const initialSources = getSourcesForSelection(
+      activeCategories,
+      selectedTileSetIds
+    ).map((source: { name: string }) => source.name);
+    createFile(DEFAULT_CATEGORY, NEW_FILE_TILE_SIZE, {
+      lineWidth: activeLineWidth,
+      lineColor: activeLineColor,
+      tileSetIds: selectedTileSetIds,
+      sourceNames: initialSources,
+    });
+    setFileSourceNames(initialSources);
+    setZoomRegion(null);
+    setLoadRequestId((prev) => prev + 1);
+    setLoadPreviewUri(null);
+    setSuspendTiles(true);
+    setLoadedToken(0);
+    setHydrating(true);
+    setShowModifyTileSetBanner(false);
+    // Force grid resolution to L1 (finest) so the grid hook uses full level-1 dimensions.
+    // If we left a coarser layer selected (e.g. L2), the hook could receive that layer's
+    // fixedRows/fixedColumns and initialize the new file with the wrong grid size.
+    setSettings((prev) => ({ ...prev, gridResolutionLevel: 1 }));
+    setViewMode('modify');
+  }, [
+    activeCategories,
+    selectedTileSetIds,
+    getSourcesForSelection,
+    createFile,
+    activeLineWidth,
+    activeLineColor,
+    setFileSourceNames,
+    setZoomRegion,
+    setLoadRequestId,
+    setLoadPreviewUri,
+    setSuspendTiles,
+    setLoadedToken,
+    setHydrating,
+    setShowModifyTileSetBanner,
+    setSettings,
+    setViewMode,
+  ]);
   const setInteracting = useCallback((value: boolean) => {
     if (isInteractingRef.current === value) {
       return;
@@ -2943,7 +2995,7 @@ export default function TestScreen() {
       null;
     const tilesSnapshot =
       fileSnapshot?.tiles ??
-      (editingLevel === 1 ? fullTilesForSave : (activeFile?.tiles ?? fullTilesForSave));
+      (editingLevel === 1 ? fullTilesForSave : (Array.isArray(activeFile?.tiles) ? activeFile.tiles : []));
     const gridSnapshot =
       fileSnapshot?.grid ??
       (editingLevel === 1 ? fullGridLayoutForSave : (level1LayoutForPersist ?? fullGridLayoutForSave));
@@ -2984,6 +3036,9 @@ export default function TestScreen() {
     if (!ready || !activeFileId || viewMode !== 'modify') {
       return;
     }
+    if (loadRequestId === lastLoadRequestIdHandledRef.current) {
+      return;
+    }
     const file =
       activeFileRef.current ??
       filesRef.current.find((entry) => entry.id === activeFileId) ??
@@ -2993,6 +3048,7 @@ export default function TestScreen() {
       setSuspendTiles(false);
       return;
     }
+    lastLoadRequestIdHandledRef.current = loadRequestId;
     const resolvedCategories = normalizeCategories(
       file.categories && file.categories.length > 0
         ? file.categories
@@ -3050,7 +3106,15 @@ export default function TestScreen() {
       preview: Boolean(previewUri),
       sourceNames: fileSourceNames.length > 0 ? fileSourceNames : undefined,
     };
-  }, [activeFileId, loadRequestId, ready, viewMode, clearCloneSource]);
+    const maxLevel = Math.min(
+      getMaxGridResolutionLevel(file.grid.columns, file.grid.rows),
+      MAX_EDITABLE_GRID_LEVEL
+    );
+    setSettings((prev) => ({
+      ...prev,
+      gridResolutionLevel: Math.max(1, maxLevel - 1),
+    }));
+  }, [activeFileId, loadRequestId, ready, viewMode, clearCloneSource, setSettings]);
 
   useEffect(() => {
     setGridStabilized(false);
@@ -3228,16 +3292,45 @@ export default function TestScreen() {
           ? null
           : { rows: pending.rows, columns: pending.columns, tileSize: 45 };
     const shapeForApply = tileSizeReady ? gridLayoutShape : fallbackGridShape;
-    if (shapeForApply && canApplyNonEmptyRestore(pendingShape, shapeForApply)) {
+    const fileDimensionsMatch =
+      activeFile &&
+      pending.rows === activeFile.grid.rows &&
+      pending.columns === activeFile.grid.columns;
+    // Enter non-empty branch when canApplyNonEmptyRestore passes, OR when file dimensions match but
+    // pending has empty level-1 tiles (e.g. file was never edited at L1). In that case gridLayout
+    // is the current layer (e.g. N-1) so canApplyNonEmptyRestore is false; we still need to run
+    // load-or-defer so we clear pending and setLoadedToken (avoid stuck preview).
+    const canApplyNonEmpty = canApplyNonEmptyRestore(pendingShape, shapeForApply);
+    const enterViaFileDimensionsOnly =
+      shapeForApply &&
+      !canApplyNonEmpty &&
+      Boolean(fileDimensionsMatch) &&
+      pending.rows > 0 &&
+      pending.columns > 0;
+    const enterNonEmptyBranch =
+      shapeForApply &&
+      (canApplyNonEmpty || enterViaFileDimensionsOnly);
+    if (typeof __DEV__ !== 'undefined' && __DEV__ && enterViaFileDimensionsOnly) {
+      console.log('[apply effect] Entering non-empty branch via fileDimensionsMatch (empty L1 tiles)', {
+        pendingRows: pending.rows,
+        pendingCols: pending.columns,
+        pendingTilesLength: pending.tiles.length,
+        gridLayoutRows: gridLayout.rows,
+        gridLayoutCols: gridLayout.columns,
+      });
+    }
+    if (enterNonEmptyBranch) {
       if (hasZoomedInThisSessionRef.current) {
         pendingRestoreRef.current = null;
         setHydrating(false);
         setSuspendTiles(false);
         return;
       }
-      const gridMatchesPending =
-        pending.rows === gridLayout.rows && pending.columns === gridLayout.columns;
-      if (gridMatchesPending) {
+      // When editing L2/L3, gridLayout has level-2/3 dimensions so it never matches pending (level-1).
+      // Use file dimensions so we load the correct layer's tiles; only apply when grid shape matches
+      // to avoid loading 25 L2 tiles into a 400-cell grid (which would show as data loss).
+      let didLoad = false;
+      if (fileDimensionsMatch) {
         const nameSource =
           pending.sourceNames && pending.sourceNames.length > 0
             ? pending.sourceNames
@@ -3275,24 +3368,82 @@ export default function TestScreen() {
               : pending.tiles;
           tilesToLoad = hydrated;
         }
-        loadTiles(tilesToLoad);
+        const gridCells = gridLayout.rows * gridLayout.columns;
+        const expectedCells = tilesToLoad.length;
+        if (gridCells === expectedCells) {
+          loadTiles(tilesToLoad);
+          didLoad = true;
+        }
       }
-      pendingRestoreRef.current = null;
-      setHydrating(false);
-      setSuspendTiles(false);
-      const finalize = () => {
-        setLoadedToken(pending.token ?? 0);
-      };
-      if (pending.preview) {
-        requestAnimationFrame(() => {
-          requestAnimationFrame(finalize);
-        });
+      if (didLoad) {
+        pendingRestoreRef.current = null;
+        setHydrating(false);
+        setSuspendTiles(false);
+        const finalize = () => {
+          setLoadedToken(pending.token ?? 0);
+        };
+        if (pending.preview) {
+          requestAnimationFrame(() => {
+            requestAnimationFrame(finalize);
+          });
+        } else {
+          finalize();
+        }
       } else {
-        finalize();
+        // We didn't load (grid shape mismatch or !fileDimensionsMatch). Layer-sync will load. Defer finalize so file becomes editable.
+        if (typeof __DEV__ !== 'undefined' && __DEV__ && enterViaFileDimensionsOnly) {
+          console.log('[apply effect] Deferred finalize (no load, gridCells !== expectedCells); will setLoadedToken');
+        }
+        const token = pending.token ?? 0;
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            if (pendingRestoreRef.current?.fileId === activeFileId && pendingRestoreRef.current?.token === token) {
+              pendingRestoreRef.current = null;
+              setHydrating(false);
+              setSuspendTiles(false);
+              setLoadedToken(token);
+            }
+          });
+        });
       }
       return;
     }
-    if (shapeForApply && canApplyEmptyNewFileRestore(pendingShape, shapeForApply)) {
+    if (typeof __DEV__ !== 'undefined' && __DEV__ && pending && activeFileId === pending.fileId) {
+      console.log('[apply effect] Stuck preview: no branch taken', {
+        pendingRows: pending.rows,
+        pendingCols: pending.columns,
+        pendingTilesLength: pending.tiles.length,
+        gridLayoutRows: gridLayout.rows,
+        gridLayoutCols: gridLayout.columns,
+        canApplyNonEmpty,
+        fileDimensionsMatch: Boolean(fileDimensionsMatch),
+        isActuallyNewFile: Boolean(activeFile && activeFile.grid.rows === 0 && activeFile.grid.columns === 0),
+      });
+    }
+    // Only treat as empty new file when the file itself has 0,0 grid. Prevents wiping content when pending is stale (0,0) but activeFile has real grid.
+    const isActuallyNewFile =
+      activeFile &&
+      activeFile.grid.rows === 0 &&
+      activeFile.grid.columns === 0;
+    // For new files, use intended full-grid shape from preferredTileSize so we never use
+    // gridLayout from a coarser layer (e.g. L2 from the previous file), which would initialize the wrong size.
+    const newFileIntendedShape =
+      isActuallyNewFile && (availableWidth > 0 || availableHeight > 0)
+        ? computeGridLayout(
+            availableWidth,
+            availableHeight,
+            GRID_GAP,
+            (pending as { preferredTileSize?: number }).preferredTileSize ?? 25
+          )
+        : null;
+    const emptyBranchShape = isActuallyNewFile && newFileIntendedShape
+      ? newFileIntendedShape
+      : shapeForApply;
+    if (
+      emptyBranchShape &&
+      canApplyEmptyNewFileRestore(pendingShape, emptyBranchShape) &&
+      isActuallyNewFile
+    ) {
       if (hasZoomedInThisSessionRef.current) {
         pendingRestoreRef.current = null;
         setHydrating(false);
@@ -3304,11 +3455,21 @@ export default function TestScreen() {
       setHydrating(false);
       setSuspendTiles(false);
       setLoadedToken(pending.token ?? 0);
+      const maxLevel = Math.min(
+        getMaxGridResolutionLevel(emptyBranchShape.columns, emptyBranchShape.rows),
+        MAX_EDITABLE_GRID_LEVEL
+      );
+      setSettings((prev) => ({
+        ...prev,
+        gridResolutionLevel: Math.max(1, maxLevel - 1),
+      }));
     }
   }, [
     activeFileId,
     activeFile,
     editingLevel,
+    availableWidth,
+    availableHeight,
     gridLayout.tileSize,
     gridLayout.columns,
     gridLayout.rows,
@@ -3316,6 +3477,7 @@ export default function TestScreen() {
     setHydrating,
     loadToken,
     activeFileSourceNames,
+    setSettings,
     tileSources.length,
     zoomRegion,
   ]);
@@ -3372,7 +3534,7 @@ export default function TestScreen() {
           setFileSourceNames(resolvedSourceNames);
         }
         const payload: Parameters<typeof upsertActiveFile>[0] = {
-          tiles: editingLevel === 1 ? fullTilesForSave : (activeFile?.tiles ?? fullTilesForSave),
+          tiles: editingLevel === 1 ? fullTilesForSave : (Array.isArray(activeFile?.tiles) ? activeFile.tiles : []),
           gridLayout: editingLevel === 1 ? fullGridLayoutForSave : (level1LayoutForPersist ?? fullGridLayoutForSave),
           category: primaryCategory,
           categories: activeCategories,
@@ -3429,7 +3591,7 @@ export default function TestScreen() {
             setFileSourceNames(resolvedSourceNames);
           }
           const payload: Parameters<typeof upsertActiveFile>[0] = {
-            tiles: editingLevel === 1 ? fullTilesForSave : (activeFile?.tiles ?? fullTilesForSave),
+            tiles: editingLevel === 1 ? fullTilesForSave : (Array.isArray(activeFile?.tiles) ? activeFile.tiles : []),
             gridLayout: editingLevel === 1 ? fullGridLayoutForSave : (level1LayoutForPersist ?? fullGridLayoutForSave),
             category: primaryCategory,
             categories: activeCategories,
@@ -3540,7 +3702,7 @@ export default function TestScreen() {
             setFileSourceNames(resolvedSourceNames);
           }
           const payload: Parameters<typeof upsertActiveFile>[0] = {
-            tiles: editingLevel === 1 ? fullTilesForSave : (activeFile?.tiles ?? fullTilesForSave),
+            tiles: editingLevel === 1 ? fullTilesForSave : (Array.isArray(activeFile?.tiles) ? activeFile.tiles : []),
             gridLayout: editingLevel === 1 ? fullGridLayoutForSave : (level1LayoutForPersist ?? fullGridLayoutForSave),
             category: primaryCategory,
             categories: activeCategories,
@@ -5370,9 +5532,7 @@ export default function TestScreen() {
               label="Create new tile canvas file"
               icon="plus"
               color="#fff"
-              onPress={() => {
-                setShowNewFileModal(true);
-              }}
+              onPress={handleCreateNewFile}
             />
             <ToolbarButton
               label="Select files"
@@ -5479,7 +5639,7 @@ export default function TestScreen() {
           {userFiles.length === 0 && (
             <Pressable
               style={[styles.fileCard, { width: fileCardWidth }]}
-              onPress={() => setShowNewFileModal(true)}
+              onPress={handleCreateNewFile}
               accessibilityRole="button"
               accessibilityLabel="Create new file"
             >
@@ -6099,62 +6259,6 @@ export default function TestScreen() {
             </ThemedView>
           </ThemedView>
         )}
-        {showNewFileModal && (
-          <ThemedView style={styles.overlay} accessibilityRole="dialog">
-            <Pressable
-              style={styles.overlayBackdrop}
-              onPress={() => setShowNewFileModal(false)}
-              accessibilityRole="button"
-              accessibilityLabel="Close new file options"
-            />
-            <ThemedView style={styles.newFilePanel}>
-              <ThemedText type="title">
-                {isWeb && !isMobileWeb ? 'Preferred Tile Size' : 'New File Size'}
-              </ThemedText>
-              <ThemedView style={styles.newFileGrid}>
-                {(Platform.OS === 'ios' || isMobileWeb
-                  ? NEW_FILE_RESOLUTION_SIMPLE
-                  : NEW_FILE_TILE_SIZES.map((size) => ({ label: String(size), size }))
-                ).map((option) => (
-                  <Pressable
-                    key={`new-file-size-${option.label}`}
-                    onPress={() => {
-                      const initialSources = getSourcesForSelection(
-                        activeCategories,
-                        selectedTileSetIds
-                      ).map((source) => source.name);
-                      createFile(DEFAULT_CATEGORY, option.size, {
-                        lineWidth: activeLineWidth,
-                        lineColor: activeLineColor,
-                        tileSetIds: selectedTileSetIds,
-                        sourceNames: initialSources,
-                      });
-                      setFileSourceNames(initialSources);
-                      setZoomRegion(null);
-                      setLoadRequestId((prev) => prev + 1);
-                      setLoadPreviewUri(null);
-                      setSuspendTiles(true);
-                      setLoadedToken(0);
-                      setHydrating(true);
-                      setShowNewFileModal(false);
-                      setShowModifyTileSetBanner(false);
-                      setViewMode('modify');
-                    }}
-                    style={styles.newFileButton}
-                    accessibilityRole="button"
-                    accessibilityLabel={
-                      Platform.OS === 'ios' || isMobileWeb
-                        ? `Create file with resolution ${option.label} (${option.size}px)`
-                        : `Create file with tile size ${option.size}`
-                    }
-                  >
-                    <ThemedText type="defaultSemiBold">{option.label}</ThemedText>
-                  </Pressable>
-                ))}
-              </ThemedView>
-            </ThemedView>
-          </ThemedView>
-        )}
         {showSettingsOverlay && (
           <ThemedView
             style={[styles.settingsScreen, { paddingTop: insets.top }]}
@@ -6332,8 +6436,10 @@ export default function TestScreen() {
                     setZoomRegion(null);
                   }
                 } else {
-                  persistActiveFileNow();
-                  setViewMode('file');
+                  void (async () => {
+                    await persistActiveFileNow();
+                    setViewMode('file');
+                  })();
                 }
               }}
               style={styles.navBackSquare}
@@ -8069,7 +8175,7 @@ export default function TestScreen() {
                         }));
                         if (activeFileId) {
                           upsertActiveFile({
-                            tiles: editingLevel === 1 ? fullTilesForSave : (activeFile?.tiles ?? fullTilesForSave),
+                            tiles: editingLevel === 1 ? fullTilesForSave : (Array.isArray(activeFile?.tiles) ? activeFile.tiles : []),
                             gridLayout: editingLevel === 1 ? fullGridLayoutForSave : (level1LayoutForPersist ?? fullGridLayoutForSave),
                             tileSetIds: selectedTileSetIds,
                             sourceNames: nextSourceNames,
@@ -8144,7 +8250,7 @@ export default function TestScreen() {
                           ensureFileSourceNames(nextPaletteSources);
                         if (activeFileId) {
                           upsertActiveFile({
-                            tiles: editingLevel === 1 ? fullTilesForSave : (activeFile?.tiles ?? fullTilesForSave),
+                            tiles: editingLevel === 1 ? fullTilesForSave : (Array.isArray(activeFile?.tiles) ? activeFile.tiles : []),
                             gridLayout: editingLevel === 1 ? fullGridLayoutForSave : (level1LayoutForPersist ?? fullGridLayoutForSave),
                             tileSetIds: nextTileSetIds,
                             sourceNames: nextSourceNames,
@@ -8902,7 +9008,7 @@ export default function TestScreen() {
                         }));
                         if (activeFileId) {
                           upsertActiveFile({
-                            tiles: editingLevel === 1 ? fullTilesForSave : (activeFile?.tiles ?? fullTilesForSave),
+                            tiles: editingLevel === 1 ? fullTilesForSave : (Array.isArray(activeFile?.tiles) ? activeFile.tiles : []),
                             gridLayout: editingLevel === 1 ? fullGridLayoutForSave : (level1LayoutForPersist ?? fullGridLayoutForSave),
                             tileSetIds: selectedTileSetIds,
                             sourceNames: nextSourceNames,
@@ -8996,7 +9102,7 @@ export default function TestScreen() {
                           ensureFileSourceNames(nextPaletteSources);
                         if (activeFileId) {
                           upsertActiveFile({
-                            tiles: editingLevel === 1 ? fullTilesForSave : (activeFile?.tiles ?? fullTilesForSave),
+                            tiles: editingLevel === 1 ? fullTilesForSave : (Array.isArray(activeFile?.tiles) ? activeFile.tiles : []),
                             gridLayout: editingLevel === 1 ? fullGridLayoutForSave : (level1LayoutForPersist ?? fullGridLayoutForSave),
                             tileSetIds: nextTileSetIds,
                             sourceNames: nextSourceNames,
@@ -10047,15 +10153,6 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
   },
-  newFilePanel: {
-    width: 320,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#1f1f1f',
-    backgroundColor: '#fff',
-    padding: 16,
-    gap: 12,
-  },
   moveConfirmPanelWrap: {
     position: 'absolute',
     left: 0,
@@ -10095,21 +10192,6 @@ const styles = StyleSheet.create({
   },
   moveConfirmButtonPrimaryText: {
     color: '#fff',
-  },
-  newFileGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    justifyContent: 'space-between',
-  },
-  newFileButton: {
-    width: '30%',
-    paddingVertical: 10,
-    borderWidth: 1,
-    borderColor: '#1f1f1f',
-    borderRadius: 6,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   contentFrame: {
     alignSelf: 'center',
