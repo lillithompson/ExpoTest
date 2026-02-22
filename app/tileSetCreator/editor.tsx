@@ -203,7 +203,7 @@ export default function TileSetEditorScreen() {
           lineColor: tileSet.lineColor,
           lineWidth: tileSet.lineWidth,
           backgroundColor: null,
-          fileName: `${tileSet.name}_${bits}.svg`,
+          fileName: `${tileSet.name}_1_${bits}.svg`,
         });
       }
       setShowTileExportMenu(false);
@@ -218,7 +218,7 @@ export default function TileSetEditorScreen() {
     for (let i = 0; i < selectedTiles.length; i++) {
       const tile = selectedTiles[i];
       const { bits } = getBorderStatus(tile, sourcesForHooks);
-      const fileName = `${tileSet.name}_${bits}_${i + 1}.svg`;
+      const fileName = `${tileSet.name}_${i + 1}_${bits}.svg`;
       const svg = await renderTileCanvasToSvg({
         tiles: tile.tiles,
         gridLayout: {
@@ -432,7 +432,7 @@ export default function TileSetEditorScreen() {
       lineColor: tileSet.lineColor,
       lineWidth: tileSet.lineWidth,
       backgroundColor: null,
-      fileName: `${tileSet.name}_${bits}.svg`,
+      fileName: `${tileSet.name}_1_${bits}.svg`,
     });
   };
 

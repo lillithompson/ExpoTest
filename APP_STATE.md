@@ -59,7 +59,7 @@ Tile Set Creator List (tileSetCreator/index.tsx)
 
 Tile Set Editor (tileSetCreator/editor.tsx)
 - Header row: Back, tile set name, actions for Add Tile, Select Mode, and Settings.
-- Select mode bar: Animated bar with Delete | Export, selected count (hidden on mobile web), Exit (same styling as other select bars). Export opens an export-options overlay with "Export .svg?" and Cancel | Export; the only export option is .svg (single tile = one SVG download; multiple tiles on web = ZIP of SVGs; multi-export on native closes without download).
+- Select mode bar: Animated bar with Delete | Export, selected count (hidden on mobile web), Exit (same styling as other select bars). Export opens an export-options overlay with "Export .svg?" and Cancel | Export; the only export option is .svg (single tile = one SVG download; multiple tiles on web = ZIP of SVGs; multi-export on native closes without download). Exported SVG filenames: `{tilesetname}_{tileindex}_{connectivityCode}.svg` (e.g. single tile as MySet_1_00010001.svg, multiple as MySet_1_00010001.svg, MySet_2_10001000.svg).
 - Tile grid: Cards with thumbnails or live previews. On web, the card’s context menu is suppressed so the browser does not show “Save image” on long-press; the app’s context menu is shown instead.
 - Context menu (web only): Duplicate, Download SVG, Delete, Cancel.
 - Settings overlay: Rename tile set.
