@@ -9023,8 +9023,10 @@ export default function TestScreen() {
                   return `L${l}`;
                 };
                 return Array.from({ length: maxDisplayLevel }, (_, i) => i + 1).map((level) => {
-                  const visible = isLayerVisible(activeFile, level);
-                  const locked = isLayerLocked(activeFile, level);
+                  // level is display order (1 = coarsest, maxDisplayLevel = finest); internal level is reversed (1 = finest)
+                  const internalLevel = maxDisplayLevel - level + 1;
+                  const visible = isLayerVisible(activeFile, internalLevel);
+                  const locked = isLayerLocked(activeFile, internalLevel);
                   return (
                     <View
                       key={level}
@@ -9053,7 +9055,7 @@ export default function TestScreen() {
                         )}
                       </Pressable>
                       <Pressable
-                        onPress={() => updateActiveFileLayerVisibility(level, !visible)}
+                        onPress={() => updateActiveFileLayerVisibility(internalLevel, !visible)}
                         style={styles.gridResolutionIconButton}
                         accessibilityRole="button"
                         accessibilityLabel={visible ? 'Hide layer' : 'Show layer'}
@@ -9065,7 +9067,7 @@ export default function TestScreen() {
                         />
                       </Pressable>
                       <Pressable
-                        onPress={() => updateActiveFileLayerLocked(level, !locked)}
+                        onPress={() => updateActiveFileLayerLocked(internalLevel, !locked)}
                         style={styles.gridResolutionIconButton}
                         accessibilityRole="button"
                         accessibilityLabel={locked ? 'Unlock layer' : 'Lock layer'}
