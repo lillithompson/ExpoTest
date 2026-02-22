@@ -16,6 +16,7 @@ import {
     hydrateTilesWithSourceNames,
     normalizeTiles,
     resolveDisplaySource,
+    zoomRegionHasPartialCellsAtLevel,
 } from '../tile-grid';
 
 describe('hydrateTilesWithSourceNames', () => {
@@ -386,5 +387,34 @@ describe('getLevelCellIndexForPoint', () => {
     expect(cellAbove).not.toBeNull();
     const rowAbove = cellAbove! < info.levelCols ? 0 : Math.floor(cellAbove! / info.levelCols);
     expect(rowAbove).toBe(1);
+  });
+});
+
+describe('zoomRegionHasPartialCellsAtLevel', () => {
+  const cols = 10;
+  const rows = 8;
+  // 10×8: centerCol=5, centerRow=4. Level 2 cellTiles=2; level 3 cellTiles=4.
+
+  it('returns false for level 1 (always full tiles in zoom)', () => {
+    expect(zoomRegionHasPartialCellsAtLevel({ minRow: 0, maxRow: 3, minCol: 0, maxCol: 5 }, cols, rows, 1)).toBe(false);
+  });
+
+  it('returns false when zoom aligns to level-2 grid (2×2)', () => {
+    expect(zoomRegionHasPartialCellsAtLevel({ minRow: 0, maxRow: 1, minCol: 1, maxCol: 2 }, cols, rows, 2)).toBe(false);
+    expect(zoomRegionHasPartialCellsAtLevel({ minRow: 4, maxRow: 5, minCol: 5, maxCol: 6 }, cols, rows, 2)).toBe(false);
+  });
+
+  it('returns true when zoom cuts through level-2 cells', () => {
+    expect(zoomRegionHasPartialCellsAtLevel({ minRow: 0, maxRow: 1, minCol: 0, maxCol: 1 }, cols, rows, 2)).toBe(true);
+    expect(zoomRegionHasPartialCellsAtLevel({ minRow: 0, maxRow: 2, minCol: 1, maxCol: 2 }, cols, rows, 2)).toBe(true);
+  });
+
+  it('returns false when zoom aligns to level-3 grid (4×4)', () => {
+    expect(zoomRegionHasPartialCellsAtLevel({ minRow: 0, maxRow: 3, minCol: 1, maxCol: 4 }, cols, rows, 3)).toBe(false);
+  });
+
+  it('returns true when zoom cuts through level-3 cells', () => {
+    expect(zoomRegionHasPartialCellsAtLevel({ minRow: 0, maxRow: 2, minCol: 1, maxCol: 4 }, cols, rows, 3)).toBe(true);
+    expect(zoomRegionHasPartialCellsAtLevel({ minRow: 0, maxRow: 3, minCol: 0, maxCol: 3 }, cols, rows, 3)).toBe(true);
   });
 });

@@ -106,6 +106,7 @@ import {
     getLevelCellIndexForPoint,
     getLevelGridInfo,
     getMaxGridResolutionLevel,
+    zoomRegionHasPartialCellsAtLevel,
     hydrateTilesWithSourceNames,
     normalizeTiles,
     type LevelGridInfo,
@@ -1710,14 +1711,39 @@ export default function TestScreen() {
       : (activeFile?.grid.columns ?? 0);
   const getFullIndexForCanvas = useCallback(
     (visibleIndex: number) => {
-      if (!zoomRegion || fullGridColumnsForMapping <= 0) return visibleIndex;
-      const { minRow, minCol, maxCol } = zoomRegion;
-      const zoomCols = maxCol - minCol + 1;
-      const visibleRow = Math.floor(visibleIndex / zoomCols);
-      const visibleCol = visibleIndex % zoomCols;
-      return (minRow + visibleRow) * fullGridColumnsForMapping + (minCol + visibleCol);
+      if (zoomRegion && fullGridColumnsForMapping > 0) {
+        const { minRow, minCol, maxCol } = zoomRegion;
+        const zoomCols = maxCol - minCol + 1;
+        const visibleRow = Math.floor(visibleIndex / zoomCols);
+        const visibleCol = visibleIndex % zoomCols;
+        return (minRow + visibleRow) * fullGridColumnsForMapping + (minCol + visibleCol);
+      }
+      if (isEditingHigherLayer && levelGridInfo && fullGridColumnsForMapping > 0) {
+        const cell = levelGridInfo.cells[visibleIndex];
+        if (!cell) return visibleIndex;
+        return cell.minRow * fullGridColumnsForMapping + cell.minCol;
+      }
+      return visibleIndex;
     },
-    [zoomRegion, fullGridColumnsForMapping]
+    [zoomRegion, fullGridColumnsForMapping, isEditingHigherLayer, levelGridInfo]
+  );
+
+  /** Level-1 index range for the given canvas cell (so selection outline and bounds use level-1 at all layers). */
+  const getLevel1BoundsForCanvasCell = useCallback(
+    (cellIndex: number): { minIdx: number; maxIdx: number } => {
+      const fullCols = fullGridColumnsForMapping;
+      if (fullCols <= 0) return { minIdx: cellIndex, maxIdx: cellIndex };
+      if (isEditingHigherLayer && levelGridInfo) {
+        const cell = levelGridInfo.cells[cellIndex];
+        if (!cell) return { minIdx: cellIndex, maxIdx: cellIndex };
+        const minIdx = cell.minRow * fullCols + cell.minCol;
+        const maxIdx = cell.maxRow * fullCols + cell.maxCol;
+        return { minIdx, maxIdx };
+      }
+      const idx = zoomRegion ? getFullIndexForCanvas(cellIndex) : cellIndex;
+      return { minIdx: idx, maxIdx: idx };
+    },
+    [fullGridColumnsForMapping, isEditingHigherLayer, levelGridInfo, zoomRegion, getFullIndexForCanvas]
   );
   const showLockButton = viewMode === 'modify' && !!(canvasSelection && gridLayout.columns > 0);
   const showZoomButton =
@@ -1917,6 +1943,51 @@ export default function TestScreen() {
   const level3TilesForDisplay =
     editingLevel === 3 ? tiles : (activeFile?.layers?.[3] ?? []);
 
+  /** Full grid level-1 tiles used only for building the zoom slice (stable so switching layers doesn't change the zoomed view). Uses file data so L2/L3 view is correct; when editing L1 the hook's slice is used for display. */
+  const fullGridLevel1TilesForZoom = useMemo(() => {
+    const fullCols = activeFile?.grid?.columns ?? 0;
+    const fullRows = activeFile?.grid?.rows ?? 0;
+    const n = fullCols * fullRows;
+    if (n <= 0) return [];
+    if (activeFile?.layerVisibility?.[1] === false) {
+      return Array.from({ length: n }, () => ({
+        imageIndex: -1,
+        rotation: 0,
+        mirrorX: false,
+        mirrorY: false,
+      }));
+    }
+    const source = activeFile?.tiles ?? [];
+    if (source.length >= n) return source;
+    const out = source.slice();
+    while (out.length < n) {
+      out.push({ imageIndex: -1, rotation: 0, mirrorX: false, mirrorY: false });
+    }
+    return out;
+  }, [
+    activeFile?.grid?.columns,
+    activeFile?.grid?.rows,
+    activeFile?.tiles,
+    activeFile?.layerVisibility?.[1],
+  ]);
+
+  /** When zoomed, slice of full grid L1 for the zoom region. Built from file so the view does not change when switching layers (only grid lines change). */
+  const zoomedLevel1TilesSlice = useMemo(() => {
+    if (!zoomRegion) return null;
+    const fullCols = activeFile?.grid?.columns ?? 0;
+    if (fullCols <= 0) return null;
+    const { minRow, maxRow, minCol, maxCol } = zoomRegion;
+    const out: Tile[] = [];
+    for (let r = minRow; r <= maxRow; r += 1) {
+      for (let c = minCol; c <= maxCol; c += 1) {
+        const idx = r * fullCols + c;
+        const t = fullGridLevel1TilesForZoom[idx];
+        out.push(t ?? { imageIndex: -1, rotation: 0, mirrorX: false, mirrorY: false });
+      }
+    }
+    return out;
+  }, [zoomRegion, activeFile?.grid?.columns, fullGridLevel1TilesForZoom]);
+
   /** For thumbnail/preview/save image: always use level-1 so we never overwrite level-1 with level-2 data. */
   const tilesForSaveImage =
     editingLevel === 1 ? fullTilesForSave : (activeFile?.tiles ?? fullTilesForSave);
@@ -2009,11 +2080,19 @@ export default function TestScreen() {
   const gridWidth = displayGridWidth;
   const gridHeight = displayGridHeight;
 
-  /** When not zoomed we composite level-1 + level-2; use level-1 layout for the base grid. */
-  const effectiveRows = zoomRegion ? gridLayout.rows : level1DisplayLayout.rows;
-  const effectiveCols = zoomRegion ? gridLayout.columns : level1DisplayLayout.columns;
-  const effectiveTileSize = zoomRegion ? gridLayout.tileSize : level1DisplayLayout.tileSize;
-  const effectiveTiles = zoomRegion ? displayTiles : level1TilesForDisplay;
+  /** Display is always level-1 composite so switching layers only changes grid lines. When zoomed: use file-based slice so the view is stable when switching to L2/L3; when editing L1 use the hook's zoom slice so in-progress edits are visible. */
+  const zoomRows = zoomRegion ? zoomRegion.maxRow - zoomRegion.minRow + 1 : 0;
+  const zoomCols = zoomRegion ? zoomRegion.maxCol - zoomRegion.minCol + 1 : 0;
+  const zoomedDisplayTiles =
+    zoomRegion && zoomedLevel1TilesSlice
+      ? editingLevel === 1
+        ? level1TilesForDisplay
+        : zoomedLevel1TilesSlice
+      : null;
+  const effectiveRows = zoomedDisplayTiles ? zoomRows : level1DisplayLayout.rows;
+  const effectiveCols = zoomedDisplayTiles ? zoomCols : level1DisplayLayout.columns;
+  const effectiveTileSize = level1DisplayLayout.tileSize;
+  const effectiveTiles = zoomedDisplayTiles ?? level1TilesForDisplay;
 
   /** When zoomed, use zoomed content dimensions so the canvas can be centered; otherwise full grid size. */
   const actualGridWidth = zoomRegion
@@ -3603,34 +3682,41 @@ export default function TestScreen() {
   };
 
   const getCellIndexForPoint = (x: number, y: number) => {
+    const stride = level1DisplayLayout.tileSize + GRID_GAP;
     if (isEditingHigherLayer && levelGridInfo && level1LayoutForPersist) {
       const level1Rows = activeFile?.grid.rows ?? 0;
+      const xFull = zoomRegion ? x + zoomRegion.minCol * stride : x;
+      const yFull = zoomRegion ? y + zoomRegion.minRow * stride : y;
       return getLevelCellIndexForPoint(
-        x,
-        y,
+        xFull,
+        yFull,
         levelGridInfo,
         level1LayoutForPersist.tileSize,
         GRID_GAP,
         level1Rows
       );
     }
-    if (gridLayout.columns === 0 || gridLayout.rows === 0) {
+    const zoomed = Boolean(zoomRegion);
+    const cols = zoomed ? (zoomRegion!.maxCol - zoomRegion!.minCol + 1) : gridLayout.columns;
+    const rows = zoomed ? (zoomRegion!.maxRow - zoomRegion!.minRow + 1) : gridLayout.rows;
+    if (cols === 0 || rows === 0) {
       return null;
     }
-    const tileStride = gridLayout.tileSize + GRID_GAP;
+    const tileStride = zoomed ? stride : gridLayout.tileSize + GRID_GAP;
     const col = Math.floor(x / (tileStride || 1));
     const row = Math.floor(y / (tileStride || 1));
-    if (col < 0 || row < 0 || col >= gridLayout.columns || row >= gridLayout.rows) {
+    if (col < 0 || row < 0 || col >= cols || row >= rows) {
       return null;
     }
-    return row * gridLayout.columns + col;
+    return row * cols + col;
   };
 
   const getSelectionBounds = (startIndex: number, endIndex: number) => {
-    const startRow = Math.floor(startIndex / gridLayout.columns);
-    const startCol = startIndex % gridLayout.columns;
-    const endRow = Math.floor(endIndex / gridLayout.columns);
-    const endCol = endIndex % gridLayout.columns;
+    const cols = fullGridColumnsForMapping > 0 ? fullGridColumnsForMapping : gridLayout.columns;
+    const startRow = Math.floor(startIndex / cols);
+    const startCol = startIndex % cols;
+    const endRow = Math.floor(endIndex / cols);
+    const endCol = endIndex % cols;
     const minRow = Math.min(startRow, endRow);
     const maxRow = Math.max(startRow, endRow);
     const minCol = Math.min(startCol, endCol);
@@ -3781,48 +3867,48 @@ export default function TestScreen() {
       height,
     };
   }, [patternSelection, gridLayout.columns, gridLayout.tileSize, gridLayout.rows]);
+  /** Selection is always stored in full level-1 indices; draw the green outline in level-1 coordinates so it aligns with the grid at any layer. */
   const canvasSelectionRect = useMemo(() => {
-    if (!canvasSelection || gridLayout.columns === 0) {
-      return null;
-    }
-    const tileStride = gridLayout.tileSize + GRID_GAP;
+    if (!canvasSelection || fullGridColumnsForMapping <= 0) return null;
+    const fullCols = fullGridColumnsForMapping;
+    const stride = level1DisplayLayout.tileSize + GRID_GAP;
+    const startRow = Math.floor(canvasSelection.start / fullCols);
+    const startCol = canvasSelection.start % fullCols;
+    const endRow = Math.floor(canvasSelection.end / fullCols);
+    const endCol = canvasSelection.end % fullCols;
+    const fullMinRow = Math.min(startRow, endRow);
+    const fullMaxRow = Math.max(startRow, endRow);
+    const fullMinCol = Math.min(startCol, endCol);
+    const fullMaxCol = Math.max(startCol, endCol);
     let minRow: number;
     let maxRow: number;
     let minCol: number;
     let maxCol: number;
-    if (zoomRegion && fullGridColumnsForMapping > 0) {
-      const fullCols = fullGridColumnsForMapping;
-      const startRow = Math.floor(canvasSelection.start / fullCols);
-      const startCol = canvasSelection.start % fullCols;
-      const endRow = Math.floor(canvasSelection.end / fullCols);
-      const endCol = canvasSelection.end % fullCols;
-      const fullMinRow = Math.min(startRow, endRow);
-      const fullMaxRow = Math.max(startRow, endRow);
-      const fullMinCol = Math.min(startCol, endCol);
-      const fullMaxCol = Math.max(startCol, endCol);
-      minRow = Math.max(0, Math.min(gridLayout.rows - 1, fullMinRow - zoomRegion.minRow));
-      maxRow = Math.max(0, Math.min(gridLayout.rows - 1, fullMaxRow - zoomRegion.minRow));
-      minCol = Math.max(0, Math.min(gridLayout.columns - 1, fullMinCol - zoomRegion.minCol));
-      maxCol = Math.max(0, Math.min(gridLayout.columns - 1, fullMaxCol - zoomRegion.minCol));
+    if (zoomRegion) {
+      const zoomRows = zoomRegion.maxRow - zoomRegion.minRow + 1;
+      const zoomCols = zoomRegion.maxCol - zoomRegion.minCol + 1;
+      minRow = Math.max(0, Math.min(zoomRows - 1, fullMinRow - zoomRegion.minRow));
+      maxRow = Math.max(0, Math.min(zoomRows - 1, fullMaxRow - zoomRegion.minRow));
+      minCol = Math.max(0, Math.min(zoomCols - 1, fullMinCol - zoomRegion.minCol));
+      maxCol = Math.max(0, Math.min(zoomCols - 1, fullMaxCol - zoomRegion.minCol));
       if (minRow > maxRow || minCol > maxCol) return null;
     } else {
-      const bounds = getSelectionBounds(canvasSelection.start, canvasSelection.end);
-      minRow = bounds.minRow;
-      maxRow = bounds.maxRow;
-      minCol = bounds.minCol;
-      maxCol = bounds.maxCol;
+      minRow = fullMinRow;
+      maxRow = fullMaxRow;
+      minCol = fullMinCol;
+      maxCol = fullMaxCol;
     }
     const width =
-      (maxCol - minCol + 1) * tileStride - (GRID_GAP > 0 ? GRID_GAP : 0);
+      (maxCol - minCol + 1) * stride - (GRID_GAP > 0 ? GRID_GAP : 0);
     const height =
-      (maxRow - minRow + 1) * tileStride - (GRID_GAP > 0 ? GRID_GAP : 0);
+      (maxRow - minRow + 1) * stride - (GRID_GAP > 0 ? GRID_GAP : 0);
     return {
-      left: minCol * tileStride,
-      top: minRow * tileStride,
+      left: minCol * stride,
+      top: minRow * stride,
       width,
       height,
     };
-  }, [canvasSelection, gridLayout.columns, gridLayout.rows, gridLayout.tileSize, zoomRegion, fullGridColumnsForMapping]);
+  }, [canvasSelection, fullGridColumnsForMapping, level1DisplayLayout.tileSize, zoomRegion]);
 
   const selectionBoundsFullGrid = useMemo(() => {
     if (!canvasSelection || fullGridColumnsForMapping <= 0) return null;
@@ -3842,11 +3928,17 @@ export default function TestScreen() {
   const fullGridRows = activeFile?.grid.rows ?? 0;
 
   const movePreviewRect = useMemo(() => {
-    if (!isMoveMode || !canvasSelection || !moveDragOffset || !selectionBoundsFullGrid || gridLayout.columns === 0) {
+    if (!isMoveMode || !canvasSelection || !moveDragOffset || !selectionBoundsFullGrid) {
       return null;
     }
+    const zoomed = Boolean(zoomRegion);
+    const visRows = zoomed ? zoomRegion!.maxRow - zoomRegion!.minRow + 1 : gridLayout.rows;
+    const visCols = zoomed ? zoomRegion!.maxCol - zoomRegion!.minCol + 1 : gridLayout.columns;
+    if (visCols === 0 || visRows === 0) return null;
+    const tileStride = zoomed
+      ? level1DisplayLayout.tileSize + GRID_GAP
+      : gridLayout.tileSize + GRID_GAP;
     const { minRow: fullMinRow, maxRow: fullMaxRow, minCol: fullMinCol, maxCol: fullMaxCol } = selectionBoundsFullGrid;
-    const tileStride = gridLayout.tileSize + GRID_GAP;
     const { dRow, dCol } = moveDragOffset;
     let visMinRow: number;
     let visMaxRow: number;
@@ -3863,13 +3955,13 @@ export default function TestScreen() {
       visMinCol = fullMinCol + dCol;
       visMaxCol = fullMaxCol + dCol;
     }
-    if (visMinRow > gridLayout.rows - 1 || visMaxRow < 0 || visMinCol > gridLayout.columns - 1 || visMaxCol < 0) {
+    if (visMinRow > visRows - 1 || visMaxRow < 0 || visMinCol > visCols - 1 || visMaxCol < 0) {
       return null;
     }
     const clampMinR = Math.max(0, visMinRow);
-    const clampMaxR = Math.min(gridLayout.rows - 1, visMaxRow);
+    const clampMaxR = Math.min(visRows - 1, visMaxRow);
     const clampMinC = Math.max(0, visMinCol);
-    const clampMaxC = Math.min(gridLayout.columns - 1, visMaxCol);
+    const clampMaxC = Math.min(visCols - 1, visMaxCol);
     const width = (clampMaxC - clampMinC + 1) * tileStride - (GRID_GAP > 0 ? GRID_GAP : 0);
     const height = (clampMaxR - clampMinR + 1) * tileStride - (GRID_GAP > 0 ? GRID_GAP : 0);
     return {
@@ -3878,7 +3970,7 @@ export default function TestScreen() {
       width,
       height,
     };
-  }, [isMoveMode, canvasSelection, moveDragOffset, selectionBoundsFullGrid, gridLayout, zoomRegion]);
+  }, [isMoveMode, canvasSelection, moveDragOffset, selectionBoundsFullGrid, gridLayout, zoomRegion, level1DisplayLayout.tileSize]);
 
   const lockedCellIndicesSet = useMemo(() => {
     const cells = activeFile?.lockedCells ?? [];
@@ -6797,8 +6889,8 @@ export default function TestScreen() {
                     return;
                   }
                   if (isSelectionMode) {
-                    const fullIdx = getFullIndexForCanvas(cellIndex);
-                    setCanvasSelection({ start: fullIdx, end: fullIdx });
+                    const b = getLevel1BoundsForCanvasCell(cellIndex);
+                    setCanvasSelection({ start: b.minIdx, end: b.maxIdx });
                     return;
                   }
                   if (isPatternCreationMode) {
@@ -6807,8 +6899,8 @@ export default function TestScreen() {
                   }
                   if (lockedCellIndicesSet?.has(getFullIndexForCanvas(cellIndex))) {
                     setIsSelectionMode(true);
-                    const fullIdx = getFullIndexForCanvas(cellIndex);
-                    setCanvasSelection({ start: fullIdx, end: fullIdx });
+                    const b = getLevel1BoundsForCanvasCell(cellIndex);
+                    setCanvasSelection({ start: b.minIdx, end: b.maxIdx });
                     return;
                   }
                   if (brush.mode === 'clone' && cloneSourceIndex === null) {
@@ -6842,9 +6934,14 @@ export default function TestScreen() {
                     if (isSelectionMode) {
                       const cellIndex = getCellIndexForPoint(point.x, point.y);
                       if (cellIndex !== null) {
-                        const fullIdx = getFullIndexForCanvas(cellIndex);
+                        const b = getLevel1BoundsForCanvasCell(cellIndex);
                         setCanvasSelection((prev) =>
-                          prev ? { ...prev, end: fullIdx } : prev
+                          prev
+                            ? {
+                                start: Math.min(prev.start, b.minIdx),
+                                end: Math.max(prev.end, b.maxIdx),
+                              }
+                            : prev
                         );
                       }
                       return;
@@ -6951,8 +7048,8 @@ export default function TestScreen() {
                       if (lockedCellIndicesSet?.has(getFullIndexForCanvas(cellIndex))) {
                         multiFingerTouchCountRef.current = 0;
                         setIsSelectionMode(true);
-                        const fullIdx = getFullIndexForCanvas(cellIndex);
-                        setCanvasSelection({ start: fullIdx, end: fullIdx });
+                        const b = getLevel1BoundsForCanvasCell(cellIndex);
+                        setCanvasSelection({ start: b.minIdx, end: b.maxIdx });
                         return;
                       }
                       pendingSingleTouchPointRef.current = { x: point.x, y: point.y };
@@ -6989,8 +7086,8 @@ export default function TestScreen() {
                     return;
                   }
                   if (isSelectionMode) {
-                    const fullIdx = getFullIndexForCanvas(cellIndex);
-                    setCanvasSelection({ start: fullIdx, end: fullIdx });
+                    const b = getLevel1BoundsForCanvasCell(cellIndex);
+                    setCanvasSelection({ start: b.minIdx, end: b.maxIdx });
                     return;
                   }
                   if (isPatternCreationMode) {
@@ -6999,8 +7096,8 @@ export default function TestScreen() {
                   }
                   if (lockedCellIndicesSet?.has(getFullIndexForCanvas(cellIndex))) {
                     setIsSelectionMode(true);
-                    const fullIdx = getFullIndexForCanvas(cellIndex);
-                    setCanvasSelection({ start: fullIdx, end: fullIdx });
+                    const b = getLevel1BoundsForCanvasCell(cellIndex);
+                    setCanvasSelection({ start: b.minIdx, end: b.maxIdx });
                     return;
                   }
                   if (brush.mode === 'clone' && cloneSourceIndex === null) {
@@ -7054,9 +7151,14 @@ export default function TestScreen() {
                   if (isSelectionMode) {
                     const cellIndex = getCellIndexForPoint(point.x, point.y);
                     if (cellIndex !== null) {
-                      const fullIdx = getFullIndexForCanvas(cellIndex);
+                      const b = getLevel1BoundsForCanvasCell(cellIndex);
                       setCanvasSelection((prev) =>
-                        prev ? { ...prev, end: fullIdx } : prev
+                        prev
+                          ? {
+                              start: Math.min(prev.start, b.minIdx),
+                              end: Math.max(prev.end, b.maxIdx),
+                            }
+                          : prev
                       );
                     }
                     return;
@@ -7677,8 +7779,8 @@ export default function TestScreen() {
                       return;
                     }
                     if (isSelectionMode) {
-                      const fullIdx = getFullIndexForCanvas(cellIndex);
-                      setCanvasSelection({ start: fullIdx, end: fullIdx });
+                      const b = getLevel1BoundsForCanvasCell(cellIndex);
+                      setCanvasSelection({ start: b.minIdx, end: b.maxIdx });
                       return;
                     }
                     if (isPatternCreationMode) {
@@ -7726,9 +7828,14 @@ export default function TestScreen() {
                     if (isSelectionMode) {
                       const cellIndex = getCellIndexForPoint(point.x, point.y);
                       if (cellIndex !== null) {
-                        const fullIdx = getFullIndexForCanvas(cellIndex);
+                        const b = getLevel1BoundsForCanvasCell(cellIndex);
                         setCanvasSelection((prev) =>
-                          prev ? { ...prev, end: fullIdx } : prev
+                          prev
+                            ? {
+                                start: Math.min(prev.start, b.minIdx),
+                                end: Math.max(prev.end, b.maxIdx),
+                              }
+                            : prev
                         );
                       }
                       return;
@@ -9091,6 +9198,8 @@ export default function TestScreen() {
               </ThemedView>
               {(() => {
                 const current = displayResolutionLevel;
+                const fullCols = activeFile?.grid?.columns ?? 0;
+                const fullRows = activeFile?.grid?.rows ?? 0;
                 const levelLabel = (l: number) => {
                   if (l === 1) return 'Large Structures';
                   if (l === maxDisplayLevel) return 'Fine Details';
@@ -9104,67 +9213,82 @@ export default function TestScreen() {
                   const visible = isLayerVisible(activeFile, internalLevel);
                   const locked = isLayerLocked(activeFile, internalLevel);
                   const emphasized = isLayerEmphasized(activeFile, internalLevel);
+                  const hasPartialTilesInZoom =
+                    zoomRegion &&
+                    fullCols > 0 &&
+                    fullRows > 0 &&
+                    zoomRegionHasPartialCellsAtLevel(zoomRegion, fullCols, fullRows, internalLevel);
+                  const disabledWhenZoomed = Boolean(hasPartialTilesInZoom);
                   return (
                     <View
                       key={level}
                       style={[
                         styles.gridResolutionOption,
                         level === current && styles.gridResolutionOptionActive,
+                        disabledWhenZoomed && styles.gridResolutionOptionDisabled,
                       ]}
                     >
                       <Pressable
                         style={styles.gridResolutionOptionLabel}
                         onPress={() => {
+                          if (disabledWhenZoomed) return;
                           setSettings((prev) => ({ ...prev, gridResolutionLevel: maxDisplayLevel - level + 1 }));
                           setShowGridResolutionModal(false);
                         }}
                         accessibilityRole="button"
-                        accessibilityLabel={`${levelLabel(level)}${level === current ? ', selected' : ''}`}
+                        accessibilityState={{ disabled: disabledWhenZoomed }}
+                        accessibilityLabel={`${levelLabel(level)}${level === current ? ', selected' : ''}${disabledWhenZoomed ? ', not editable when zoomed (partial tiles in region)' : ''}`}
                       >
                         <ThemedText
                           type="defaultSemiBold"
-                          style={level === current ? styles.gridResolutionOptionTextActive : undefined}
+                          style={[
+                            level === current ? styles.gridResolutionOptionTextActive : undefined,
+                            disabledWhenZoomed && styles.gridResolutionOptionTextDisabled,
+                          ]}
                         >
                           {levelLabel(level)}
                         </ThemedText>
-                        {level === current && (
+                        {level === current && !disabledWhenZoomed && (
                           <MaterialCommunityIcons name="check" size={20} color="#22c55e" />
                         )}
                       </Pressable>
                       <Pressable
-                        onPress={() => updateActiveFileLayerVisibility(internalLevel, !visible)}
+                        onPress={() => !disabledWhenZoomed && updateActiveFileLayerVisibility(internalLevel, !visible)}
                         style={styles.gridResolutionIconButton}
                         accessibilityRole="button"
+                        accessibilityState={{ disabled: disabledWhenZoomed }}
                         accessibilityLabel={visible ? 'Hide layer' : 'Show layer'}
                       >
                         <MaterialCommunityIcons
                           name={visible ? 'eye' : 'eye-off'}
                           size={22}
-                          color={visible ? '#374151' : '#9ca3af'}
+                          color={disabledWhenZoomed ? '#9ca3af' : visible ? '#374151' : '#9ca3af'}
                         />
                       </Pressable>
                       <Pressable
-                        onPress={() => updateActiveFileLayerLocked(internalLevel, !locked)}
+                        onPress={() => !disabledWhenZoomed && updateActiveFileLayerLocked(internalLevel, !locked)}
                         style={styles.gridResolutionIconButton}
                         accessibilityRole="button"
+                        accessibilityState={{ disabled: disabledWhenZoomed }}
                         accessibilityLabel={locked ? 'Unlock layer' : 'Lock layer'}
                       >
                         <MaterialCommunityIcons
                           name={locked ? 'lock' : 'lock-open-outline'}
                           size={22}
-                          color={locked ? '#dc2626' : '#9ca3af'}
+                          color={disabledWhenZoomed ? '#9ca3af' : locked ? '#dc2626' : '#9ca3af'}
                         />
                       </Pressable>
                       <Pressable
-                        onPress={() => updateActiveFileLayerEmphasized(internalLevel, !emphasized)}
+                        onPress={() => !disabledWhenZoomed && updateActiveFileLayerEmphasized(internalLevel, !emphasized)}
                         style={styles.gridResolutionIconButton}
                         accessibilityRole="button"
+                        accessibilityState={{ disabled: disabledWhenZoomed }}
                         accessibilityLabel={emphasized ? 'Remove emphasize' : 'Emphasize layer'}
                       >
                         <MaterialCommunityIcons
                           name="format-color-highlight"
                           size={22}
-                          color={emphasized ? getEmphasizeStrokeColor(internalLevel) : '#9ca3af'}
+                          color={disabledWhenZoomed ? '#9ca3af' : emphasized ? getEmphasizeStrokeColor(internalLevel) : '#9ca3af'}
                         />
                       </Pressable>
                     </View>
@@ -9596,6 +9720,9 @@ const styles = StyleSheet.create({
   gridResolutionOptionActive: {
     backgroundColor: 'rgba(34, 197, 94, 0.15)',
   },
+  gridResolutionOptionDisabled: {
+    opacity: 0.5,
+  },
   gridResolutionOptionLabel: {
     flex: 1,
     flexDirection: 'row',
@@ -9608,6 +9735,9 @@ const styles = StyleSheet.create({
   },
   gridResolutionOptionTextActive: {
     color: '#22c55e',
+  },
+  gridResolutionOptionTextDisabled: {
+    color: '#9ca3af',
   },
   settingsClose: {
     paddingHorizontal: 8,

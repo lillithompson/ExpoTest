@@ -474,6 +474,40 @@ export function getLevelGridInfo(
   return { levelCols, levelRows, cells };
 }
 
+/** Zoom region in level-1 tile coordinates. */
+export type ZoomRegion = {
+  minRow: number;
+  maxRow: number;
+  minCol: number;
+  maxCol: number;
+};
+
+/**
+ * Returns true if the zoom region contains partial cells at the given level (center-out grid).
+ * Level 1 (one tile per cell) never has partial cells. Level 2+ has partial cells when the
+ * zoom rect does not align to that level's cell boundaries (e.g. zoom cuts through 2×2 or 4×4 cells).
+ * When true, that layer should be greyed out in the layer menu when zoomed (not editable in zoom).
+ */
+export function zoomRegionHasPartialCellsAtLevel(
+  zoomRegion: ZoomRegion,
+  columns: number,
+  rows: number,
+  level: number
+): boolean {
+  if (level <= 1 || columns <= 0 || rows <= 0) return false;
+  const cellTiles = Math.pow(2, level - 1);
+  const centerCol = Math.floor(columns / 2);
+  const centerRow = Math.floor(rows / 2);
+  const mod = (a: number, b: number) => ((a % b) + b) % b;
+  const minColAlign = mod(zoomRegion.minCol - centerCol, cellTiles) === 0;
+  const minRowAlign = mod(zoomRegion.minRow - centerRow, cellTiles) === 0;
+  const width = zoomRegion.maxCol - zoomRegion.minCol + 1;
+  const height = zoomRegion.maxRow - zoomRegion.minRow + 1;
+  const widthAlign = mod(width, cellTiles) === 0;
+  const heightAlign = mod(height, cellTiles) === 0;
+  return !(minColAlign && minRowAlign && widthAlign && heightAlign);
+}
+
 /**
  * Converts a point (x, y) in level-1 pixel coordinates to the level-L cell index
  * when (x,y) lies inside a complete level-L cell. Returns null if the point is
