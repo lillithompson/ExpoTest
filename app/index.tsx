@@ -9016,8 +9016,8 @@ export default function TestScreen() {
               {(() => {
                 const current = displayResolutionLevel;
                 const levelLabel = (l: number) => {
-                  if (l === 1) return 'Least Detail';
-                  if (l === maxDisplayLevel) return 'Most Detail';
+                  if (l === 1) return 'Large Structures';
+                  if (l === maxDisplayLevel) return 'Fine Details';
                   if (l === 2 && maxDisplayLevel >= 3) return 'Some Detail';
                   if (l === 3 && maxDisplayLevel >= 4) return 'More Detail';
                   return `L${l}`;
