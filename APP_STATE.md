@@ -113,7 +113,7 @@ Layout Rules
 - File grids are 3 columns on mobile with side padding (12) and gaps (12).
 - Modify view layout: tile canvas is centered vertically in the space above the tile palette. The tile palette is pinned to the bottom with fixed height (2 rows of 75px tiles).
 - Tile palette (File Modify view): always 2 rows, 75px per tile; palette pinned to bottom, canvas centered above. Other views (e.g. Tile Set Creator) use 2–4 rows with dynamic tile size. On mobile web, content width uses the visual viewport and the brush panel has minWidth: 0 so the palette lays out correctly; palette content uses justifyContent: 'flex-start' on web.
-- Tile canvas layout is capped at 512 cells: `computeGridLayout` and `computeFixedGridLayout` (utils/tile-grid.ts) never return a grid with more than 512 tiles; when capping is needed, dimensions are chosen to be as square as possible (e.g. 22×23). The hook (use-tile-grid) also clamps `totalCells` to this limit.
+- Tile canvas layout is capped at 512 cells: `computeGridLayout` and `computeFixedGridLayout` (utils/tile-grid.ts) never return a grid with more than 512 tiles; when capping is needed, dimensions are chosen to be as square as possible. At the highest resolution (auto layout), the grid always has an even number of rows and columns (e.g. 22×22 when capped); `getSquarestDimensionsEven` and the fallback path in `computeGridLayout` enforce this. The hook (use-tile-grid) also clamps `totalCells` to this limit.
 
 **Infrastructure**
 

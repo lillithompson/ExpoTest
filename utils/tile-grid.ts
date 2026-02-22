@@ -90,6 +90,21 @@ function getSquarestDimensions(maxCells: number): { rows: number; columns: numbe
   return { rows, columns };
 }
 
+/**
+ * Same as getSquarestDimensions but ensures both rows and columns are even.
+ * Used for the full tile canvas at highest resolution so layout is always even.
+ */
+function getSquarestDimensionsEven(maxCells: number): { rows: number; columns: number } {
+  const { rows: r, columns: c } = getSquarestDimensions(maxCells);
+  let rows = Math.max(2, 2 * Math.floor(r / 2));
+  let columns = Math.max(2, 2 * Math.floor(c / 2));
+  while (rows * columns > maxCells && (rows > 2 || columns > 2)) {
+    if (rows >= columns) rows -= 2;
+    else columns -= 2;
+  }
+  return { rows, columns };
+}
+
 export const pickRotation = () => {
   const options = [0, 90, 180, 270];
   return options[Math.floor(Math.random() * options.length)];
@@ -239,7 +254,7 @@ export const computeGridLayout = (
       continue;
     }
     if (rows * columns > MAX_TILE_CANVAS_CELLS) {
-      const { rows: sqRows, columns: sqCols } = getSquarestDimensions(MAX_TILE_CANVAS_CELLS);
+      const { rows: sqRows, columns: sqCols } = getSquarestDimensionsEven(MAX_TILE_CANVAS_CELLS);
       rows = sqRows;
       const cappedColumns = sqCols;
       const cappedTileSize = Math.floor(
@@ -257,15 +272,17 @@ export const computeGridLayout = (
   }
 
   if (candidates.length === 0) {
-    let columns = Math.max(1, maxColumns);
+    let columns = Math.max(2, 2 * Math.floor(maxColumns / 2));
     const rawTileSize = (availableWidth - gridGap * (columns - 1)) / columns;
     let tileSize = Math.floor(rawTileSize);
     let rows = Math.max(
-      1,
+      2,
       Math.floor((availableHeight + gridGap) / (tileSize + gridGap))
     );
+    if (rows % 2 === 1) rows -= 1;
+    if (rows < 2) rows = 2;
     if (rows * columns > MAX_TILE_CANVAS_CELLS) {
-      const sq = getSquarestDimensions(MAX_TILE_CANVAS_CELLS);
+      const sq = getSquarestDimensionsEven(MAX_TILE_CANVAS_CELLS);
       columns = sq.columns;
       rows = sq.rows;
       tileSize = Math.floor(
