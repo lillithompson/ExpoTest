@@ -2008,6 +2008,14 @@ export default function TestScreen() {
   const effectiveTileSize = zoomRegion ? gridLayout.tileSize : level1DisplayLayout.tileSize;
   const effectiveTiles = zoomRegion ? displayTiles : level1TilesForDisplay;
 
+  /** When zoomed, use zoomed content dimensions so the canvas can be centered; otherwise full grid size. */
+  const actualGridWidth = zoomRegion
+    ? effectiveCols * effectiveTileSize + (effectiveCols - 1) * GRID_GAP
+    : gridWidth;
+  const actualGridHeight = zoomRegion
+    ? effectiveRows * effectiveTileSize + (effectiveRows - 1) * GRID_GAP
+    : gridHeight;
+
   const effectiveRowIndices = useMemo(
     () => Array.from({ length: effectiveRows }, (_, i) => i),
     [effectiveRows]
@@ -6638,8 +6646,8 @@ export default function TestScreen() {
             style={[
               styles.gridWrapper,
               {
-                height: gridHeight,
-                width: gridWidth,
+                height: actualGridHeight,
+                width: actualGridWidth,
               },
             ]}
           >
@@ -6647,8 +6655,8 @@ export default function TestScreen() {
             rows={effectiveRows}
             columns={effectiveCols}
             tileSize={effectiveTileSize}
-            width={gridWidth}
-            height={gridHeight}
+            width={actualGridWidth}
+            height={actualGridHeight}
             backgroundColor={settings.backgroundColor}
             lineColor={settings.backgroundLineColor}
             lineWidth={settings.backgroundLineWidth}
@@ -6684,16 +6692,16 @@ export default function TestScreen() {
             </>
           )}
           {(settings.mirrorHorizontal || settings.mirrorVertical) &&
-            gridWidth > 0 &&
-            gridHeight > 0 && (
+            actualGridWidth > 0 &&
+            actualGridHeight > 0 && (
               <View pointerEvents="none" style={styles.mirrorLines}>
                 {settings.mirrorHorizontal && (
                   <View
                     style={[
                       styles.mirrorLineVertical,
                       {
-                        left: gridWidth / 2 - 1,
-                        height: gridHeight,
+                        left: actualGridWidth / 2 - 1,
+                        height: actualGridHeight,
                         width: 2,
                       },
                     ]}
@@ -6704,8 +6712,8 @@ export default function TestScreen() {
                     style={[
                       styles.mirrorLineHorizontal,
                       {
-                        top: gridHeight / 2 - 1,
-                        width: gridWidth,
+                        top: actualGridHeight / 2 - 1,
+                        width: actualGridWidth,
                         height: 2,
                       },
                     ]}
@@ -7191,12 +7199,18 @@ export default function TestScreen() {
                 </ThemedView>
               ))}
             </ThemedView>
-            {!zoomRegion &&
-              activeFile?.layerVisibility?.[2] !== false &&
+            {activeFile?.layerVisibility?.[2] !== false &&
               level2GridInfo &&
               level2GridInfo.cells.length > 0 && (
                 <View style={[StyleSheet.absoluteFill, { backgroundColor: 'transparent' }]} pointerEvents="none">
                   {level2GridInfo.cells.map((cell, i) => {
+                    if (zoomRegion && (
+                      cell.minCol > zoomRegion.maxCol ||
+                      cell.maxCol < zoomRegion.minCol ||
+                      cell.minRow > zoomRegion.maxRow ||
+                      cell.maxRow < zoomRegion.minRow
+                    ))
+                      return null;
                     const tile = level2TilesForDisplay[i];
                     if (!tile || tile.imageIndex < 0) return null;
                     const resolvedByName =
@@ -7219,14 +7233,21 @@ export default function TestScreen() {
                       tile.name ?? resolvedByIndex?.name ?? '';
                     const source = resolved?.source ?? null;
                     if (!source) return null;
-                    const stride = level1DisplayLayout.tileSize + GRID_GAP;
-                    const left = cell.minCol * stride;
-                    const top = cell.minRow * stride;
+                    const stride = zoomRegion
+                      ? effectiveTileSize + GRID_GAP
+                      : level1DisplayLayout.tileSize + GRID_GAP;
+                    const left = zoomRegion
+                      ? (cell.minCol - zoomRegion.minCol) * stride
+                      : cell.minCol * stride;
+                    const top = zoomRegion
+                      ? (cell.minRow - zoomRegion.minRow) * stride
+                      : cell.minRow * stride;
+                    const tileSizeForCell = zoomRegion ? effectiveTileSize : level1DisplayLayout.tileSize;
                     const w =
-                      (cell.maxCol - cell.minCol + 1) * level1DisplayLayout.tileSize +
+                      (cell.maxCol - cell.minCol + 1) * tileSizeForCell +
                       (cell.maxCol - cell.minCol) * GRID_GAP;
                     const h =
-                      (cell.maxRow - cell.minRow + 1) * level1DisplayLayout.tileSize +
+                      (cell.maxRow - cell.minRow + 1) * tileSizeForCell +
                       (cell.maxRow - cell.minRow) * GRID_GAP;
                     return (
                       <View
@@ -7265,12 +7286,18 @@ export default function TestScreen() {
                   })}
                 </View>
               )}
-            {!zoomRegion &&
-              activeFile?.layerVisibility?.[3] !== false &&
+            {activeFile?.layerVisibility?.[3] !== false &&
               level3GridInfo &&
               level3GridInfo.cells.length > 0 && (
                 <View style={[StyleSheet.absoluteFill, { backgroundColor: 'transparent' }]} pointerEvents="none">
                   {level3GridInfo.cells.map((cell, i) => {
+                    if (zoomRegion && (
+                      cell.minCol > zoomRegion.maxCol ||
+                      cell.maxCol < zoomRegion.minCol ||
+                      cell.minRow > zoomRegion.maxRow ||
+                      cell.maxRow < zoomRegion.minRow
+                    ))
+                      return null;
                     const tile = level3TilesForDisplay[i];
                     if (!tile || tile.imageIndex < 0) return null;
                     const resolvedByName =
@@ -7293,14 +7320,21 @@ export default function TestScreen() {
                       tile.name ?? resolvedByIndex?.name ?? '';
                     const source = resolved?.source ?? null;
                     if (!source) return null;
-                    const stride = level1DisplayLayout.tileSize + GRID_GAP;
-                    const left = cell.minCol * stride;
-                    const top = cell.minRow * stride;
+                    const stride = zoomRegion
+                      ? effectiveTileSize + GRID_GAP
+                      : level1DisplayLayout.tileSize + GRID_GAP;
+                    const left = zoomRegion
+                      ? (cell.minCol - zoomRegion.minCol) * stride
+                      : cell.minCol * stride;
+                    const top = zoomRegion
+                      ? (cell.minRow - zoomRegion.minRow) * stride
+                      : cell.minRow * stride;
+                    const tileSizeForCell = zoomRegion ? effectiveTileSize : level1DisplayLayout.tileSize;
                     const w =
-                      (cell.maxCol - cell.minCol + 1) * level1DisplayLayout.tileSize +
+                      (cell.maxCol - cell.minCol + 1) * tileSizeForCell +
                       (cell.maxCol - cell.minCol) * GRID_GAP;
                     const h =
-                      (cell.maxRow - cell.minRow + 1) * level1DisplayLayout.tileSize +
+                      (cell.maxRow - cell.minRow + 1) * tileSizeForCell +
                       (cell.maxRow - cell.minRow) * GRID_GAP;
                     return (
                       <View
@@ -7348,16 +7382,16 @@ export default function TestScreen() {
                 styles.grid,
                 {
                   opacity: gridVisible || isCapturingPreview ? 1 : 0,
-                  width: gridWidth,
-                  height: gridHeight,
+                  width: actualGridWidth,
+                  height: actualGridHeight,
                 },
               ]}
               pointerEvents="none"
             >
               {useSkiaGrid ? (
                 <TileGridCanvas
-                  width={gridWidth}
-                  height={gridHeight}
+                  width={actualGridWidth}
+                  height={actualGridHeight}
                   tileSize={effectiveTileSize}
                   rows={effectiveRows}
                   columns={effectiveCols}
@@ -7429,12 +7463,18 @@ export default function TestScreen() {
                 ))
               )}
             </ViewShot>
-              {!zoomRegion &&
-                activeFile?.layerVisibility?.[2] !== false &&
+              {activeFile?.layerVisibility?.[2] !== false &&
                 level2GridInfo &&
                 level2GridInfo.cells.length > 0 && (
                   <View style={[StyleSheet.absoluteFill, { backgroundColor: 'transparent' }]} pointerEvents="none">
                     {level2GridInfo.cells.map((cell, i) => {
+                      if (zoomRegion && (
+                        cell.minCol > zoomRegion.maxCol ||
+                        cell.maxCol < zoomRegion.minCol ||
+                        cell.minRow > zoomRegion.maxRow ||
+                        cell.maxRow < zoomRegion.minRow
+                      ))
+                        return null;
                       const tile = level2TilesForDisplay[i];
                       if (!tile || tile.imageIndex < 0) return null;
                       const resolvedByName =
@@ -7457,14 +7497,21 @@ export default function TestScreen() {
                         tile.name ?? resolvedByIndex?.name ?? '';
                       const source = resolved?.source ?? null;
                       if (!source) return null;
-                      const stride = level1DisplayLayout.tileSize + GRID_GAP;
-                      const left = cell.minCol * stride;
-                      const top = cell.minRow * stride;
+                      const stride = zoomRegion
+                        ? effectiveTileSize + GRID_GAP
+                        : level1DisplayLayout.tileSize + GRID_GAP;
+                      const left = zoomRegion
+                        ? (cell.minCol - zoomRegion.minCol) * stride
+                        : cell.minCol * stride;
+                      const top = zoomRegion
+                        ? (cell.minRow - zoomRegion.minRow) * stride
+                        : cell.minRow * stride;
+                      const tileSizeForCell = zoomRegion ? effectiveTileSize : level1DisplayLayout.tileSize;
                       const w =
-                        (cell.maxCol - cell.minCol + 1) * level1DisplayLayout.tileSize +
+                        (cell.maxCol - cell.minCol + 1) * tileSizeForCell +
                         (cell.maxCol - cell.minCol) * GRID_GAP;
                       const h =
-                        (cell.maxRow - cell.minRow + 1) * level1DisplayLayout.tileSize +
+                        (cell.maxRow - cell.minRow + 1) * tileSizeForCell +
                         (cell.maxRow - cell.minRow) * GRID_GAP;
                       return (
                         <View
@@ -7503,12 +7550,18 @@ export default function TestScreen() {
                     })}
                   </View>
                 )}
-              {!zoomRegion &&
-                activeFile?.layerVisibility?.[3] !== false &&
+              {activeFile?.layerVisibility?.[3] !== false &&
                 level3GridInfo &&
                 level3GridInfo.cells.length > 0 && (
                   <View style={[StyleSheet.absoluteFill, { backgroundColor: 'transparent' }]} pointerEvents="none">
                     {level3GridInfo.cells.map((cell, i) => {
+                      if (zoomRegion && (
+                        cell.minCol > zoomRegion.maxCol ||
+                        cell.maxCol < zoomRegion.minCol ||
+                        cell.minRow > zoomRegion.maxRow ||
+                        cell.maxRow < zoomRegion.minRow
+                      ))
+                        return null;
                       const tile = level3TilesForDisplay[i];
                       if (!tile || tile.imageIndex < 0) return null;
                       const resolvedByName =
@@ -7531,14 +7584,21 @@ export default function TestScreen() {
                         tile.name ?? resolvedByIndex?.name ?? '';
                       const source = resolved?.source ?? null;
                       if (!source) return null;
-                      const stride = level1DisplayLayout.tileSize + GRID_GAP;
-                      const left = cell.minCol * stride;
-                      const top = cell.minRow * stride;
+                      const stride = zoomRegion
+                        ? effectiveTileSize + GRID_GAP
+                        : level1DisplayLayout.tileSize + GRID_GAP;
+                      const left = zoomRegion
+                        ? (cell.minCol - zoomRegion.minCol) * stride
+                        : cell.minCol * stride;
+                      const top = zoomRegion
+                        ? (cell.minRow - zoomRegion.minRow) * stride
+                        : cell.minRow * stride;
+                      const tileSizeForCell = zoomRegion ? effectiveTileSize : level1DisplayLayout.tileSize;
                       const w =
-                        (cell.maxCol - cell.minCol + 1) * level1DisplayLayout.tileSize +
+                        (cell.maxCol - cell.minCol + 1) * tileSizeForCell +
                         (cell.maxCol - cell.minCol) * GRID_GAP;
                       const h =
-                        (cell.maxRow - cell.minRow + 1) * level1DisplayLayout.tileSize +
+                        (cell.maxRow - cell.minRow + 1) * tileSizeForCell +
                         (cell.maxRow - cell.minRow) * GRID_GAP;
                       return (
                         <View
