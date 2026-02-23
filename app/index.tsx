@@ -6755,15 +6755,40 @@ export default function TestScreen() {
             {viewMode === 'modify' &&
               (activeFile?.grid?.columns ?? 0) > 0 &&
               (activeFile?.grid?.rows ?? 0) > 0 && (
-                <ToolbarButton
-                  label={`Layers L${displayResolutionLevel}`}
-                  icon="layers-outline"
-                  onPress={() => {
-                    dismissModifyBanner();
-                    setShowGridResolutionModal(true);
-                  }}
-                  accessibilityLabel="Layers"
-                />
+                <View style={{ position: 'relative' }}>
+                  <ToolbarButton
+                    label={(() => {
+                      const info =
+                        (activeFile?.grid?.columns ?? 0) > 0 && (activeFile?.grid?.rows ?? 0) > 0
+                          ? getLevelGridInfo(activeFile!.grid.columns, activeFile!.grid.rows, editingLevel)
+                          : null;
+                      return info
+                        ? `Level ${displayResolutionLevel}: ${info.levelCols}\u00d7${info.levelRows}`
+                        : `Level ${displayResolutionLevel}`;
+                    })()}
+                    icon="layers-outline"
+                    color={getEmphasizeStrokeColor(editingLevel)}
+                    onPress={() => {
+                      dismissModifyBanner();
+                      setShowGridResolutionModal(true);
+                    }}
+                    accessibilityLabel="Layers"
+                  />
+                  <Text
+                    pointerEvents="none"
+                    style={[styles.layerNameLabel, { color: getEmphasizeStrokeColor(editingLevel) }]}
+                    accessibilityElementsHidden
+                  >
+                    {(() => {
+                      const cols = activeFile?.grid?.columns ?? 0;
+                      const rows = activeFile?.grid?.rows ?? 0;
+                      const info = cols > 0 && rows > 0 ? getLevelGridInfo(cols, rows, editingLevel) : null;
+                      return info
+                        ? `Level ${displayResolutionLevel}: ${info.levelCols}\u00d7${info.levelRows}`
+                        : `Level ${displayResolutionLevel}`;
+                    })()}
+                  </Text>
+                </View>
               )}
             <ToolbarButton
               label={
@@ -8942,11 +8967,14 @@ export default function TestScreen() {
                 const fullCols = activeFile?.grid?.columns ?? 0;
                 const fullRows = activeFile?.grid?.rows ?? 0;
                 const levelLabel = (l: number) => {
-                  if (l === 1) return 'Large Structures';
-                  if (l === maxDisplayLevel) return 'Fine Details';
-                  if (l === 2 && maxDisplayLevel >= 3) return 'Some Detail';
-                  if (l === 3 && maxDisplayLevel >= 4) return 'More Detail';
-                  return `L${l}`;
+                  const iLevel = maxDisplayLevel - l + 1;
+                  const info =
+                    fullCols > 0 && fullRows > 0
+                      ? getLevelGridInfo(fullCols, fullRows, iLevel)
+                      : null;
+                  const w = info ? info.levelCols : '?';
+                  const h = info ? info.levelRows : '?';
+                  return `Level ${l}: ${w}\u00d7${h}`;
                 };
                 return Array.from({ length: maxDisplayLevel }, (_, i) => i + 1).map((level) => {
                   // level is display order (1 = coarsest, maxDisplayLevel = finest); internal level is reversed (1 = finest)
@@ -9284,6 +9312,14 @@ const styles = StyleSheet.create({
     backgroundColor: '#e5e5e5',
   },
   /** Overlay pinned to bottom of toolbar; overlays canvas area (unused top margin when grid is centered, else top of grid). */
+  layerNameLabel: {
+    position: 'absolute',
+    top: (HEADER_HEIGHT + TOOLBAR_BUTTON_SIZE) / 2,
+    left: -30,
+    right: -30,
+    textAlign: 'center',
+    fontSize: 11,
+  },
   toolbarBannersOverlay: {
     position: 'absolute',
     top: HEADER_HEIGHT,
