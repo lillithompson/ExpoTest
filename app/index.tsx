@@ -1661,11 +1661,11 @@ export default function TestScreen() {
     fullGridColumns: viewMode === 'modify' && zoomRegion ? (activeFile?.grid.columns ?? undefined) : undefined,
     fullGridRows: viewMode === 'modify' && zoomRegion ? (activeFile?.grid.rows ?? undefined) : undefined,
   });
-  /** When switching resolution layer or file, load that layer’s tiles into the grid hook. */
-  const lastLayerLoadRef = useRef({ editingLevel: 0, fileId: ‘’ });
+  /** When switching resolution layer or file, load that layer's tiles into the grid hook. */
+  const lastLayerLoadRef = useRef({ editingLevel: 0, fileId: '' });
   // Reset the guard on each new load so returning to the same file/layer always re-runs the load.
   useEffect(() => {
-    lastLayerLoadRef.current = { editingLevel: 0, fileId: ‘’ };
+    lastLayerLoadRef.current = { editingLevel: 0, fileId: '' };
   }, [loadToken]);
   useEffect(() => {
     if (!activeFile || viewMode !== 'modify') return;
@@ -2109,7 +2109,7 @@ export default function TestScreen() {
     [effectiveCols]
   );
 
-  /** Level-2 overlay: cell size in px. Baked image uses proportionally thinner stroke so it’s not just L1 scaled (same stroke/cell ratio as L1). */
+  /** Level-2 overlay: cell size in px. Baked image uses proportionally thinner stroke so it's not just L1 scaled (same stroke/cell ratio as L1). */
   const level2CellSize =
     level1DisplayLayout.tileSize * 2 + GRID_GAP;
   const TILE_VIEWBOX_SIZE = 256;
