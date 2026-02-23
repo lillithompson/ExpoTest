@@ -1,0 +1,342 @@
+import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { useRef, useState } from 'react';
+import { Animated, Pressable, StyleSheet, Text, View } from 'react-native';
+
+import { getEmphasizeStrokeColor, getLevelGridInfo, zoomRegionHasPartialCellsAtLevel } from '@/utils/tile-grid';
+import { type TileFile } from '@/hooks/use-tile-files';
+
+const BUTTON_SIZE = 40;
+const SLIDEOUT_WIDTH = 220;
+const SLIDEOUT_DURATION_MS = 250;
+const DOUBLE_TAP_MS = 300;
+
+interface LayerSidePanelProps {
+  maxDisplayLevel: number;
+  displayResolutionLevel: number;
+  activeFile: TileFile | null;
+  containerWidth: number;
+  gridWidth: number;
+  zoomRegion: { minRow: number; maxRow: number; minCol: number; maxCol: number } | null;
+  onSelectLayer: (internalLevel: number) => void;
+  onToggleVisibility: (internalLevel: number, visible: boolean) => void;
+  onToggleLocked: (internalLevel: number, locked: boolean) => void;
+  onToggleEmphasized: (internalLevel: number, emphasized: boolean) => void;
+}
+
+export function LayerSidePanel({
+  maxDisplayLevel,
+  displayResolutionLevel,
+  activeFile,
+  containerWidth,
+  gridWidth,
+  zoomRegion,
+  onSelectLayer,
+  onToggleVisibility,
+  onToggleLocked,
+  onToggleEmphasized,
+}: LayerSidePanelProps) {
+  const [expandedLayer, setExpandedLayer] = useState<number | null>(null);
+
+  // Animated.Value map keyed by internalLevel
+  const animRefs = useRef<Map<number, Animated.Value>>(new Map());
+  const getAnim = (internalLevel: number): Animated.Value => {
+    if (!animRefs.current.has(internalLevel)) {
+      animRefs.current.set(internalLevel, new Animated.Value(0));
+    }
+    return animRefs.current.get(internalLevel)!;
+  };
+
+  // Last-tap tracking for double-tap detection
+  const lastTapRef = useRef<{ level: number; time: number } | null>(null);
+
+  const leftMargin = (containerWidth - gridWidth) / 2;
+  const isFullMode = leftMargin >= BUTTON_SIZE;
+  const buttonLeft = isFullMode ? leftMargin - BUTTON_SIZE : leftMargin - BUTTON_SIZE / 2;
+
+  const expandLayer = (internalLevel: number) => {
+    // Collapse any currently expanded layer
+    if (expandedLayer !== null && expandedLayer !== internalLevel) {
+      const prevAnim = getAnim(expandedLayer);
+      Animated.timing(prevAnim, {
+        toValue: 0,
+        duration: SLIDEOUT_DURATION_MS,
+        useNativeDriver: false,
+      }).start();
+    }
+
+    const anim = getAnim(internalLevel);
+    if (expandedLayer === internalLevel) {
+      // Collapse this one
+      Animated.timing(anim, {
+        toValue: 0,
+        duration: SLIDEOUT_DURATION_MS,
+        useNativeDriver: false,
+      }).start(() => setExpandedLayer(null));
+    } else {
+      setExpandedLayer(internalLevel);
+      Animated.timing(anim, {
+        toValue: SLIDEOUT_WIDTH,
+        duration: SLIDEOUT_DURATION_MS,
+        useNativeDriver: false,
+      }).start();
+    }
+  };
+
+  const collapseAll = () => {
+    if (expandedLayer !== null) {
+      const anim = getAnim(expandedLayer);
+      Animated.timing(anim, {
+        toValue: 0,
+        duration: SLIDEOUT_DURATION_MS,
+        useNativeDriver: false,
+      }).start(() => setExpandedLayer(null));
+    }
+  };
+
+  const isLayerVisible = (level: number) => activeFile?.layerVisibility?.[level] !== false;
+  const isLayerLocked = (level: number) => activeFile?.layerLocked?.[level] === true;
+  const isLayerEmphasized = (level: number) => activeFile?.layerEmphasized?.[level] === true;
+
+  const fullCols = activeFile?.grid?.columns ?? 0;
+  const fullRows = activeFile?.grid?.rows ?? 0;
+
+  const isDisabled = (internalLevel: number): boolean => {
+    if (!zoomRegion || fullCols <= 0 || fullRows <= 0) return false;
+    return Boolean(zoomRegionHasPartialCellsAtLevel(zoomRegion, fullCols, fullRows, internalLevel));
+  };
+
+  // Render nothing if no layers
+  if (maxDisplayLevel <= 0) return null;
+
+  return (
+    <>
+      {/* Backdrop to dismiss slide-out */}
+      {expandedLayer !== null && (
+        <Pressable
+          style={StyleSheet.absoluteFill}
+          onPress={collapseAll}
+          accessibilityRole="button"
+          accessibilityLabel="Close layer panel"
+          pointerEvents="auto"
+        />
+      )}
+
+      {/* Button column */}
+      <View
+        style={[
+          styles.buttonColumn,
+          { left: buttonLeft, top: 4 },
+        ]}
+        pointerEvents="box-none"
+      >
+        {Array.from({ length: maxDisplayLevel }, (_, i) => i + 1).map((displayLevel) => {
+          const internalLevel = maxDisplayLevel - displayLevel + 1;
+          const isSelected = displayLevel === displayResolutionLevel;
+          const emphasized = isLayerEmphasized(internalLevel);
+          const emphColor = getEmphasizeStrokeColor(internalLevel);
+          const visible = isLayerVisible(internalLevel);
+          const locked = isLayerLocked(internalLevel);
+          const disabled = isDisabled(internalLevel);
+
+          // Compute button fill, border, text color
+          let fillColor: string;
+          let borderColor: string;
+          let textColor: string;
+          if (isSelected && emphasized) {
+            fillColor = emphColor;
+            borderColor = emphColor;
+            textColor = '#000';
+          } else if (isSelected && !emphasized) {
+            fillColor = '#ffffff';
+            borderColor = '#ffffff';
+            textColor = '#000';
+          } else if (!isSelected && emphasized) {
+            fillColor = 'transparent';
+            borderColor = emphColor;
+            textColor = emphColor;
+          } else {
+            fillColor = 'transparent';
+            borderColor = 'rgba(255,255,255,0.35)';
+            textColor = 'rgba(255,255,255,0.6)';
+          }
+
+          const borderRadius = isFullMode ? 8 : 20;
+          const anim = getAnim(internalLevel);
+          const isExpanded = expandedLayer === internalLevel;
+          const levelInfo = fullCols > 0 && fullRows > 0
+            ? getLevelGridInfo(fullCols, fullRows, internalLevel)
+            : null;
+          const resolutionLabel = levelInfo
+            ? `${levelInfo.levelCols}\u00d7${levelInfo.levelRows}`
+            : `L${displayLevel}`;
+
+          return (
+            <View
+              key={internalLevel}
+              style={styles.buttonRow}
+              pointerEvents="box-none"
+            >
+              {isExpanded && (
+                <View
+                  pointerEvents="none"
+                  style={[
+                    styles.buttonWhiteFill,
+                    { borderTopLeftRadius: borderRadius, borderBottomLeftRadius: borderRadius },
+                  ]}
+                />
+              )}
+              <Pressable
+                onPress={() => {
+                  if (disabled) return;
+                  const now = Date.now();
+                  const last = lastTapRef.current;
+                  if (last && last.level === internalLevel && now - last.time < DOUBLE_TAP_MS) {
+                    // Double tap: expand slide-out
+                    lastTapRef.current = null;
+                    expandLayer(internalLevel);
+                  } else {
+                    // Single tap: select layer, collapse any other open panel
+                    lastTapRef.current = { level: internalLevel, time: now };
+                    if (expandedLayer !== null && expandedLayer !== internalLevel) {
+                      collapseAll();
+                    }
+                    onSelectLayer(internalLevel);
+                  }
+                }}
+                onLongPress={() => {
+                  if (disabled) return;
+                  lastTapRef.current = null;
+                  onSelectLayer(internalLevel);
+                  expandLayer(internalLevel);
+                }}
+                style={[
+                  styles.button,
+                  {
+                    width: BUTTON_SIZE,
+                    height: BUTTON_SIZE,
+                    borderRadius,
+                    backgroundColor: fillColor,
+                    borderColor,
+                    opacity: disabled ? 0.5 : 1,
+                  },
+                ]}
+                accessibilityRole="button"
+                accessibilityLabel={`Layer ${displayLevel}${isSelected ? ', selected' : ''}${disabled ? ', not editable when zoomed' : ''}`}
+                accessibilityState={{ disabled }}
+              >
+                <Text style={[styles.buttonLabel, { color: textColor }]}>
+                  L{displayLevel}
+                </Text>
+              </Pressable>
+
+              {/* Slide-out panel */}
+              <Animated.View
+                style={[styles.slideOut, { width: anim }]}
+                pointerEvents={isExpanded ? 'box-none' : 'none'}
+              >
+                <View style={styles.slideOutContent}>
+                  <Text style={styles.slideOutLabel} numberOfLines={1}>
+                    {resolutionLabel}
+                  </Text>
+                  <Pressable
+                    onPress={() => !disabled && onToggleVisibility(internalLevel, !visible)}
+                    style={styles.iconButton}
+                    accessibilityRole="button"
+                    accessibilityLabel={visible ? 'Hide layer' : 'Show layer'}
+                    accessibilityState={{ disabled }}
+                  >
+                    <MaterialCommunityIcons
+                      name={visible ? 'eye' : 'eye-off'}
+                      size={20}
+                      color={disabled ? '#9ca3af' : visible ? '#374151' : '#9ca3af'}
+                    />
+                  </Pressable>
+                  <Pressable
+                    onPress={() => !disabled && onToggleLocked(internalLevel, !locked)}
+                    style={styles.iconButton}
+                    accessibilityRole="button"
+                    accessibilityLabel={locked ? 'Unlock layer' : 'Lock layer'}
+                    accessibilityState={{ disabled }}
+                  >
+                    <MaterialCommunityIcons
+                      name={locked ? 'lock' : 'lock-open-outline'}
+                      size={20}
+                      color={disabled ? '#9ca3af' : locked ? '#dc2626' : '#9ca3af'}
+                    />
+                  </Pressable>
+                  <Pressable
+                    onPress={() => !disabled && onToggleEmphasized(internalLevel, !emphasized)}
+                    style={styles.iconButton}
+                    accessibilityRole="button"
+                    accessibilityLabel={emphasized ? 'Remove emphasize' : 'Emphasize layer'}
+                    accessibilityState={{ disabled }}
+                  >
+                    <MaterialCommunityIcons
+                      name="format-color-highlight"
+                      size={20}
+                      color={disabled ? '#9ca3af' : emphasized ? emphColor : '#9ca3af'}
+                    />
+                  </Pressable>
+                </View>
+              </Animated.View>
+            </View>
+          );
+        })}
+      </View>
+    </>
+  );
+}
+
+const styles = StyleSheet.create({
+  buttonColumn: {
+    position: 'absolute',
+    flexDirection: 'column',
+    gap: 4,
+    zIndex: 60,
+  },
+  buttonRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  button: {
+    borderWidth: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  buttonLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  buttonWhiteFill: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    width: BUTTON_SIZE,
+    height: BUTTON_SIZE,
+    backgroundColor: '#fff',
+  },
+  slideOut: {
+    height: BUTTON_SIZE,
+    overflow: 'hidden',
+    backgroundColor: '#fff',
+    borderTopRightRadius: 8,
+    borderBottomRightRadius: 8,
+    zIndex: 60,
+  },
+  slideOutContent: {
+    width: SLIDEOUT_WIDTH,
+    height: BUTTON_SIZE,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+  },
+  slideOutLabel: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#111',
+  },
+  iconButton: {
+    padding: 6,
+  },
+});

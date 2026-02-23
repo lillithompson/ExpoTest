@@ -42,6 +42,7 @@ import { ThemedView } from '@/components/themed-view';
 import { clearTileAssetCache, prefetchTileAssets, TileAsset } from '@/components/tile-asset';
 import { TileAtlasSprite } from '@/components/tile-atlas-sprite';
 import { clearBrushFavorites } from '@/components/tile-brush-panel';
+import { LayerSidePanel } from '@/components/layer-side-panel';
 import { ModifyPalette } from '@/components/modify-palette';
 import { TileDebugOverlay } from '@/components/tile-debug-overlay';
 import { TileGridCanvas } from '@/components/tile-grid-canvas';
@@ -104,11 +105,11 @@ import {
     buildInitialTiles,
     computeFixedGridLayout,
     computeGridLayout,
+    getEmphasizeStrokeColor,
     getGridLevelLinePositions,
     getLevelCellIndexForPoint,
     getLevelGridInfo,
     getMaxGridResolutionLevel,
-    zoomRegionHasPartialCellsAtLevel,
     hydrateTilesWithSourceNames,
     normalizeTiles,
     type LevelGridInfo,
@@ -120,15 +121,6 @@ import { deserializePattern, deserializeTileSet, serializePattern } from '@/util
 import JSZip from 'jszip';
 
 const GRID_GAP = 0;
-/** Stroke colors for emphasized layers by resolution: highest (L1) = cyan, then yellow, red, violet for coarser. */
-const EMPHASIZE_STROKE_COLORS: Record<number, string> = {
-  1: '#00ffff', // cyan – highest resolution (finest)
-  2: '#eab308', // yellow – mid
-  3: '#dc2626', // red – lower
-  4: '#8b5cf6', // violet – coarsest
-};
-const getEmphasizeStrokeColor = (internalLevel: number) =>
-  EMPHASIZE_STROKE_COLORS[internalLevel] ?? EMPHASIZE_STROKE_COLORS[4];
 /** Max internal grid level (3 = 4×4 cells per tile). Display: L1 = coarsest, Lmax = finest. */
 const MAX_EDITABLE_GRID_LEVEL = 3;
 const CONTENT_PADDING = 0;
@@ -838,7 +830,7 @@ export default function TestScreen() {
   );
   const [showSettingsOverlay, setShowSettingsOverlay] = useState(false);
   const [showDebugModal, setShowDebugModal] = useState(false);
-  const [showGridResolutionModal, setShowGridResolutionModal] = useState(false);
+  const [canvasAreaWidth, setCanvasAreaWidth] = useState(0);
   const [showTileSetChooser, setShowTileSetChooser] = useState(false);
   const [showModifyTileSetBanner, setShowModifyTileSetBanner] = useState(false);
   const MODIFY_BANNER_HEIGHT = 52;
@@ -1563,6 +1555,18 @@ export default function TestScreen() {
     );
   }, [maxResolutionLevelFromFile, settings.gridResolutionLevel]);
 
+  /**
+   * Tracks which editing level the grid hook's `tiles` is actually populated for.
+   * Updated in the same effect batch as loadTiles so display never reads hook tiles
+   * for the wrong level during the one-render gap before the effect fires.
+   */
+  const [hookLoadedLevel, setHookLoadedLevel] = useState(() =>
+    Math.min(
+      Math.max(1, settings.gridResolutionLevel ?? 1),
+      MAX_EDITABLE_GRID_LEVEL
+    )
+  );
+
   /** Display only: L1 = coarsest, Lmax = finest. Uses same max as modal so selection highlight matches. */
   const displayResolutionLevel = useMemo(
     () => maxDisplayLevel - editingLevel + 1,
@@ -1856,6 +1860,7 @@ export default function TestScreen() {
       if (n > 0)
         loadTiles(normalizeTiles(activeFile.tiles, n, tileSources.length));
     }
+    setHookLoadedLevel(editingLevel);
   }, [
     editingLevel,
     activeFile?.id,
@@ -2082,7 +2087,11 @@ export default function TestScreen() {
     return gridLayout;
   }, [level1LayoutForPersist, activeFile?.grid?.rows, activeFile?.grid?.columns, zoomRegion, availableWidth, availableHeight, gridLayout]);
 
-  /** Level-1 tiles to show (current layer when editing L1; when editing L2+ use file from list). Hidden layer 1 shows as empty. */
+  /**
+   * Level-1 tiles to show. Uses hook's live `tiles` only when the hook is confirmed loaded
+   * for L1 (hookLoadedLevel === 1), preventing stale hook data from flashing on layer switch.
+   * Hidden layer 1 shows as empty.
+   */
   const level1TilesForDisplay = useMemo(() => {
     const total = level1DisplayLayout.rows * level1DisplayLayout.columns;
     if (total <= 0) return [];
@@ -2094,12 +2103,13 @@ export default function TestScreen() {
         mirrorY: false,
       }));
     }
-    if (editingLevel === 1) return tiles;
+    if (editingLevel === 1 && hookLoadedLevel === 1) return tiles;
     const fromList = files.find((f) => f.id === activeFileId)?.tiles;
     const fromActive = activeFile?.tiles ?? [];
     return (fromList?.length ?? 0) >= total ? (fromList ?? []) : fromActive;
   }, [
     editingLevel,
+    hookLoadedLevel,
     tiles,
     files,
     activeFileId,
@@ -2108,12 +2118,12 @@ export default function TestScreen() {
     level1DisplayLayout.rows,
     level1DisplayLayout.columns,
   ]);
-  /** Level-2 tiles to show (current layer when editing L2, file when not). Only rendered when layer visible. */
+  /** Level-2 tiles to show. Uses hook's live tiles only once the hook is loaded for L2. */
   const level2TilesForDisplay =
-    editingLevel === 2 ? tiles : (activeFile?.layers?.[2] ?? []);
-  /** Level-3 tiles to show (current layer when editing L3, file when not). Only rendered when layer visible. */
+    editingLevel === 2 && hookLoadedLevel === 2 ? tiles : (activeFile?.layers?.[2] ?? []);
+  /** Level-3 tiles to show. Uses hook's live tiles only once the hook is loaded for L3. */
   const level3TilesForDisplay =
-    editingLevel === 3 ? tiles : (activeFile?.layers?.[3] ?? []);
+    editingLevel === 3 && hookLoadedLevel === 3 ? tiles : (activeFile?.layers?.[3] ?? []);
 
   /** Full grid level-1 tiles used only for building the zoom slice (stable so switching layers doesn't change the zoomed view). Uses file data so L2/L3 view is correct; when editing L1 the hook's slice is used for display. */
   const fullGridLevel1TilesForZoom = useMemo(() => {
@@ -7140,44 +7150,6 @@ export default function TestScreen() {
                 controlledRandomize();
               }}
             />
-            {viewMode === 'modify' &&
-              (activeFile?.grid?.columns ?? 0) > 0 &&
-              (activeFile?.grid?.rows ?? 0) > 0 && (
-                <View style={{ position: 'relative' }}>
-                  <ToolbarButton
-                    label={(() => {
-                      const info =
-                        (activeFile?.grid?.columns ?? 0) > 0 && (activeFile?.grid?.rows ?? 0) > 0
-                          ? getLevelGridInfo(activeFile!.grid.columns, activeFile!.grid.rows, editingLevel)
-                          : null;
-                      return info
-                        ? `Level ${displayResolutionLevel}: ${info.levelCols}\u00d7${info.levelRows}`
-                        : `Level ${displayResolutionLevel}`;
-                    })()}
-                    icon="layers-outline"
-                    color={getEmphasizeStrokeColor(editingLevel)}
-                    onPress={() => {
-                      dismissModifyBanner();
-                      setShowGridResolutionModal(true);
-                    }}
-                    accessibilityLabel="Layers"
-                  />
-                  <Text
-                    pointerEvents="none"
-                    style={[styles.layerNameLabel, { color: getEmphasizeStrokeColor(editingLevel) }]}
-                    accessibilityElementsHidden
-                  >
-                    {(() => {
-                      const cols = activeFile?.grid?.columns ?? 0;
-                      const rows = activeFile?.grid?.rows ?? 0;
-                      const info = cols > 0 && rows > 0 ? getLevelGridInfo(cols, rows, editingLevel) : null;
-                      return info
-                        ? `Level ${displayResolutionLevel}: ${info.levelCols}\u00d7${info.levelRows}`
-                        : `Level ${displayResolutionLevel}`;
-                    })()}
-                  </Text>
-                </View>
-              )}
             <ToolbarButton
               label={
                 !settings.mirrorHorizontal && !settings.mirrorVertical
@@ -7304,6 +7276,7 @@ export default function TestScreen() {
             Platform.OS === 'web' && styles.gridCanvasWebCenter,
             viewMode === 'modify' && styles.gridCanvasAreaCentered,
           ]}
+          onLayout={(e) => setCanvasAreaWidth(e.nativeEvent.layout.width)}
         >
           <View
             key={
@@ -8495,6 +8468,22 @@ export default function TestScreen() {
             </>
           )}
           </View>
+          {viewMode === 'modify' && maxDisplayLevel > 0 && canvasAreaWidth > 0 && (
+            <LayerSidePanel
+              maxDisplayLevel={maxDisplayLevel}
+              displayResolutionLevel={displayResolutionLevel}
+              activeFile={activeFile}
+              containerWidth={canvasAreaWidth}
+              gridWidth={actualGridWidth}
+              zoomRegion={zoomRegion}
+              onSelectLayer={(internalLevel) =>
+                setSettings((prev) => ({ ...prev, gridResolutionLevel: internalLevel }))
+              }
+              onToggleVisibility={updateActiveFileLayerVisibility}
+              onToggleLocked={updateActiveFileLayerLocked}
+              onToggleEmphasized={updateActiveFileLayerEmphasized}
+            />
+          )}
           {showZoomOutMirrorConfirm && zoomRegion && (
             <>
               <Pressable
@@ -9397,131 +9386,6 @@ export default function TestScreen() {
             </ThemedView>
           </ThemedView>
         )}
-        {showGridResolutionModal && viewMode === 'modify' && gridLayout.rows > 0 && gridLayout.columns > 0 && (
-          <ThemedView style={styles.overlay} accessibilityRole="dialog">
-            <Pressable
-              style={styles.overlayBackdrop}
-              onPress={() => setShowGridResolutionModal(false)}
-              accessibilityRole="button"
-              accessibilityLabel="Close layers"
-            />
-            <ThemedView style={styles.overlayPanel}>
-              <ThemedView style={styles.settingsHeader}>
-                <ThemedText type="title">Layers</ThemedText>
-                <Pressable
-                  onPress={() => setShowGridResolutionModal(false)}
-                  style={styles.settingsClose}
-                  accessibilityRole="button"
-                  accessibilityLabel="Close layers"
-                >
-                  <ThemedText type="defaultSemiBold">X</ThemedText>
-                </Pressable>
-              </ThemedView>
-              {(() => {
-                const current = displayResolutionLevel;
-                const fullCols = activeFile?.grid?.columns ?? 0;
-                const fullRows = activeFile?.grid?.rows ?? 0;
-                const levelLabel = (l: number) => {
-                  const iLevel = maxDisplayLevel - l + 1;
-                  const info =
-                    fullCols > 0 && fullRows > 0
-                      ? getLevelGridInfo(fullCols, fullRows, iLevel)
-                      : null;
-                  const w = info ? info.levelCols : '?';
-                  const h = info ? info.levelRows : '?';
-                  return `Level ${l}: ${w}\u00d7${h}`;
-                };
-                return Array.from({ length: maxDisplayLevel }, (_, i) => i + 1).map((level) => {
-                  // level is display order (1 = coarsest, maxDisplayLevel = finest); internal level is reversed (1 = finest)
-                  const internalLevel = maxDisplayLevel - level + 1;
-                  const visible = isLayerVisible(activeFile, internalLevel);
-                  const locked = isLayerLocked(activeFile, internalLevel);
-                  const emphasized = isLayerEmphasized(activeFile, internalLevel);
-                  const hasPartialTilesInZoom =
-                    zoomRegion &&
-                    fullCols > 0 &&
-                    fullRows > 0 &&
-                    zoomRegionHasPartialCellsAtLevel(zoomRegion, fullCols, fullRows, internalLevel);
-                  const disabledWhenZoomed = Boolean(hasPartialTilesInZoom);
-                  return (
-                    <View
-                      key={level}
-                      style={[
-                        styles.gridResolutionOption,
-                        level === current && styles.gridResolutionOptionActive,
-                        disabledWhenZoomed && styles.gridResolutionOptionDisabled,
-                      ]}
-                    >
-                      <Pressable
-                        style={styles.gridResolutionOptionLabel}
-                        onPress={() => {
-                          if (disabledWhenZoomed) return;
-                          setSettings((prev) => ({ ...prev, gridResolutionLevel: maxDisplayLevel - level + 1 }));
-                          setShowGridResolutionModal(false);
-                        }}
-                        accessibilityRole="button"
-                        accessibilityState={{ disabled: disabledWhenZoomed }}
-                        accessibilityLabel={`${levelLabel(level)}${level === current ? ', selected' : ''}${disabledWhenZoomed ? ', not editable when zoomed (partial tiles in region)' : ''}`}
-                      >
-                        <ThemedText
-                          type="defaultSemiBold"
-                          style={[
-                            level === current ? styles.gridResolutionOptionTextActive : undefined,
-                            disabledWhenZoomed && styles.gridResolutionOptionTextDisabled,
-                          ]}
-                        >
-                          {levelLabel(level)}
-                        </ThemedText>
-                        {level === current && !disabledWhenZoomed && (
-                          <MaterialCommunityIcons name="check" size={20} color="#22c55e" />
-                        )}
-                      </Pressable>
-                      <Pressable
-                        onPress={() => !disabledWhenZoomed && updateActiveFileLayerVisibility(internalLevel, !visible)}
-                        style={styles.gridResolutionIconButton}
-                        accessibilityRole="button"
-                        accessibilityState={{ disabled: disabledWhenZoomed }}
-                        accessibilityLabel={visible ? 'Hide layer' : 'Show layer'}
-                      >
-                        <MaterialCommunityIcons
-                          name={visible ? 'eye' : 'eye-off'}
-                          size={22}
-                          color={disabledWhenZoomed ? '#9ca3af' : visible ? '#374151' : '#9ca3af'}
-                        />
-                      </Pressable>
-                      <Pressable
-                        onPress={() => !disabledWhenZoomed && updateActiveFileLayerLocked(internalLevel, !locked)}
-                        style={styles.gridResolutionIconButton}
-                        accessibilityRole="button"
-                        accessibilityState={{ disabled: disabledWhenZoomed }}
-                        accessibilityLabel={locked ? 'Unlock layer' : 'Lock layer'}
-                      >
-                        <MaterialCommunityIcons
-                          name={locked ? 'lock' : 'lock-open-outline'}
-                          size={22}
-                          color={disabledWhenZoomed ? '#9ca3af' : locked ? '#dc2626' : '#9ca3af'}
-                        />
-                      </Pressable>
-                      <Pressable
-                        onPress={() => !disabledWhenZoomed && updateActiveFileLayerEmphasized(internalLevel, !emphasized)}
-                        style={styles.gridResolutionIconButton}
-                        accessibilityRole="button"
-                        accessibilityState={{ disabled: disabledWhenZoomed }}
-                        accessibilityLabel={emphasized ? 'Remove emphasize' : 'Emphasize layer'}
-                      >
-                        <MaterialCommunityIcons
-                          name="format-color-highlight"
-                          size={22}
-                          color={disabledWhenZoomed ? '#9ca3af' : emphasized ? getEmphasizeStrokeColor(internalLevel) : '#9ca3af'}
-                        />
-                      </Pressable>
-                    </View>
-                  );
-                });
-              })()}
-            </ThemedView>
-          </ThemedView>
-        )}
         {showTileSetChooser && (
           <ThemedView style={styles.overlay} accessibilityRole="dialog">
             <Pressable
@@ -9766,15 +9630,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 6,
     backgroundColor: '#e5e5e5',
   },
-  /** Overlay pinned to bottom of toolbar; overlays canvas area (unused top margin when grid is centered, else top of grid). */
-  layerNameLabel: {
-    position: 'absolute',
-    top: (HEADER_HEIGHT + TOOLBAR_BUTTON_SIZE) / 2,
-    left: -30,
-    right: -30,
-    textAlign: 'center',
-    fontSize: 11,
-  },
   toolbarBannersOverlay: {
     position: 'absolute',
     top: HEADER_HEIGHT,
@@ -9935,41 +9790,6 @@ const styles = StyleSheet.create({
   debugResolutionText: {
     color: '#9ca3af',
     fontSize: 14,
-  },
-  gridResolutionHint: {
-    marginBottom: 12,
-    color: '#9ca3af',
-    fontSize: 13,
-  },
-  gridResolutionOption: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    marginBottom: 4,
-    borderRadius: 8,
-  },
-  gridResolutionOptionActive: {
-    backgroundColor: 'rgba(34, 197, 94, 0.15)',
-  },
-  gridResolutionOptionDisabled: {
-    opacity: 0.5,
-  },
-  gridResolutionOptionLabel: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  gridResolutionIconButton: {
-    padding: 8,
-    marginLeft: 4,
-  },
-  gridResolutionOptionTextActive: {
-    color: '#22c55e',
-  },
-  gridResolutionOptionTextDisabled: {
-    color: '#9ca3af',
   },
   settingsClose: {
     paddingHorizontal: 8,

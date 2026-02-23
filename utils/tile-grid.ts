@@ -540,3 +540,14 @@ export function getLevelCellIndexForPoint(
   }
   return null;
 }
+
+/** Stroke colors for emphasized layers by resolution: highest (L1) = cyan, then yellow, red, violet for coarser. */
+export const EMPHASIZE_STROKE_COLORS: Record<number, string> = {
+  1: '#00ffff', // cyan – highest resolution (finest)
+  2: '#eab308', // yellow – mid
+  3: '#dc2626', // red – lower
+  4: '#8b5cf6', // violet – coarsest
+};
+
+export const getEmphasizeStrokeColor = (internalLevel: number): string =>
+  EMPHASIZE_STROKE_COLORS[internalLevel] ?? EMPHASIZE_STROKE_COLORS[4];
