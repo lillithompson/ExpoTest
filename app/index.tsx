@@ -2085,7 +2085,7 @@ export default function TestScreen() {
       : null;
   const effectiveRows = zoomedDisplayTiles ? zoomRows : level1DisplayLayout.rows;
   const effectiveCols = zoomedDisplayTiles ? zoomCols : level1DisplayLayout.columns;
-  const effectiveTileSize = level1DisplayLayout.tileSize;
+  const effectiveTileSize = zoomedDisplayTiles ? gridLayout.tileSize : level1DisplayLayout.tileSize;
   const effectiveTiles = zoomedDisplayTiles ?? level1TilesForDisplay;
 
   /** When zoomed, use zoomed content dimensions so the canvas can be centered; otherwise full grid size. */
@@ -3860,10 +3860,11 @@ export default function TestScreen() {
 
   const getCellIndexForPoint = (x: number, y: number) => {
     const stride = level1DisplayLayout.tileSize + GRID_GAP;
+    const effectiveStride = effectiveTileSize + GRID_GAP;
     if (isEditingHigherLayer && levelGridInfo && level1LayoutForPersist) {
       const level1Rows = activeFile?.grid.rows ?? 0;
-      const xFull = zoomRegion ? x + zoomRegion.minCol * stride : x;
-      const yFull = zoomRegion ? y + zoomRegion.minRow * stride : y;
+      const xFull = zoomRegion ? (x / effectiveStride + zoomRegion.minCol) * stride : x;
+      const yFull = zoomRegion ? (y / effectiveStride + zoomRegion.minRow) * stride : y;
       return getLevelCellIndexForPoint(
         xFull,
         yFull,
@@ -3879,7 +3880,7 @@ export default function TestScreen() {
     if (cols === 0 || rows === 0) {
       return null;
     }
-    const tileStride = zoomed ? stride : gridLayout.tileSize + GRID_GAP;
+    const tileStride = zoomed ? effectiveStride : gridLayout.tileSize + GRID_GAP;
     const col = Math.floor(x / (tileStride || 1));
     const row = Math.floor(y / (tileStride || 1));
     if (col < 0 || row < 0 || col >= cols || row >= rows) {
@@ -4048,7 +4049,7 @@ export default function TestScreen() {
   const canvasSelectionRect = useMemo(() => {
     if (!canvasSelection || fullGridColumnsForMapping <= 0) return null;
     const fullCols = fullGridColumnsForMapping;
-    const stride = level1DisplayLayout.tileSize + GRID_GAP;
+    const stride = (zoomRegion ? effectiveTileSize : level1DisplayLayout.tileSize) + GRID_GAP;
     const startRow = Math.floor(canvasSelection.start / fullCols);
     const startCol = canvasSelection.start % fullCols;
     const endRow = Math.floor(canvasSelection.end / fullCols);
