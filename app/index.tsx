@@ -831,6 +831,7 @@ export default function TestScreen() {
   const [showSettingsOverlay, setShowSettingsOverlay] = useState(false);
   const [showDebugModal, setShowDebugModal] = useState(false);
   const [canvasAreaWidth, setCanvasAreaWidth] = useState(0);
+  const [canvasAreaHeight, setCanvasAreaHeight] = useState(0);
   const [showTileSetChooser, setShowTileSetChooser] = useState(false);
   const [showModifyTileSetBanner, setShowModifyTileSetBanner] = useState(false);
   const MODIFY_BANNER_HEIGHT = 52;
@@ -7276,7 +7277,10 @@ export default function TestScreen() {
             Platform.OS === 'web' && styles.gridCanvasWebCenter,
             viewMode === 'modify' && styles.gridCanvasAreaCentered,
           ]}
-          onLayout={(e) => setCanvasAreaWidth(e.nativeEvent.layout.width)}
+          onLayout={(e) => {
+            setCanvasAreaWidth(e.nativeEvent.layout.width);
+            setCanvasAreaHeight(e.nativeEvent.layout.height);
+          }}
         >
           <View
             key={
@@ -8474,6 +8478,7 @@ export default function TestScreen() {
               displayResolutionLevel={displayResolutionLevel}
               activeFile={activeFile}
               containerWidth={canvasAreaWidth}
+              containerHeight={canvasAreaHeight}
               gridWidth={actualGridWidth}
               zoomRegion={zoomRegion}
               onSelectLayer={(internalLevel) =>

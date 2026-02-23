@@ -1,19 +1,24 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRef, useState } from 'react';
 import { Animated, Pressable, StyleSheet, Text, View } from 'react-native';
+import Svg, { Circle, Defs, RadialGradient, Stop } from 'react-native-svg';
 
 import { getEmphasizeStrokeColor, getLevelGridInfo, zoomRegionHasPartialCellsAtLevel } from '@/utils/tile-grid';
 import { type TileFile } from '@/hooks/use-tile-files';
 
 const BUTTON_SIZE = 40;
+const COMPACT_BUTTON_SIZE = Math.round(BUTTON_SIZE * 1.1); // 44
 const SLIDEOUT_DURATION_MS = 250;
 const DOUBLE_TAP_MS = 300;
+const FULL_GAP = 4;
+const COMPACT_GAP = 8;
 
 interface LayerSidePanelProps {
   maxDisplayLevel: number;
   displayResolutionLevel: number;
   activeFile: TileFile | null;
   containerWidth: number;
+  containerHeight: number;
   gridWidth: number;
   zoomRegion: { minRow: number; maxRow: number; minCol: number; maxCol: number } | null;
   onSelectLayer: (internalLevel: number) => void;
@@ -27,6 +32,7 @@ export function LayerSidePanel({
   displayResolutionLevel,
   activeFile,
   containerWidth,
+  containerHeight,
   gridWidth,
   zoomRegion,
   onSelectLayer,
@@ -61,7 +67,17 @@ export function LayerSidePanel({
 
   const leftMargin = (containerWidth - gridWidth) / 2;
   const isFullMode = leftMargin >= BUTTON_SIZE;
-  const buttonLeft = isFullMode ? leftMargin - BUTTON_SIZE : leftMargin - BUTTON_SIZE / 2;
+  const buttonSize = isFullMode ? BUTTON_SIZE : COMPACT_BUTTON_SIZE;
+  const gap = isFullMode ? FULL_GAP : COMPACT_GAP;
+  const buttonLeft = isFullMode
+    ? leftMargin - BUTTON_SIZE
+    : leftMargin - COMPACT_BUTTON_SIZE / 2;
+
+  // Vertically center the compact button group on the canvas center (horizontal mirror line).
+  const buttonGroupHeight = maxDisplayLevel * buttonSize + (maxDisplayLevel - 1) * gap;
+  const topOffset = !isFullMode && containerHeight > 0
+    ? Math.max(0, (containerHeight - buttonGroupHeight) / 2)
+    : FULL_GAP;
 
   const expandLayer = (internalLevel: number) => {
     const targetWidth = slideOutWidth;
@@ -138,7 +154,7 @@ export function LayerSidePanel({
       <View
         style={[
           styles.buttonColumn,
-          { left: buttonLeft, top: 4 },
+          { left: buttonLeft, top: topOffset, gap },
         ]}
         pointerEvents="box-none"
       >
@@ -173,7 +189,14 @@ export function LayerSidePanel({
             textColor = 'rgba(255,255,255,0.6)';
           }
 
-          const borderRadius = isFullMode ? 8 : 20;
+          // Radial gradient colors for compact mode
+          const gradientColor = (isSelected || emphasized) ? (emphasized ? emphColor : '#ffffff') : '#ffffff';
+          const gradientOpacity = isSelected && emphasized ? 0.8
+            : isSelected ? 0.65
+            : emphasized ? 0.35
+            : 0.18;
+
+          const borderRadius = isFullMode ? 8 : COMPACT_BUTTON_SIZE / 2;
           const anim = getAnim(internalLevel);
           const isExpanded = expandedLayer === internalLevel;
           const levelInfo = fullCols > 0 && fullRows > 0
@@ -184,7 +207,7 @@ export function LayerSidePanel({
             : `L${displayLevel}`;
 
           // Inline style reused by both the real content and the measurer.
-          const contentStyle = [styles.slideOutContent, { width: slideOutWidth }];
+          const contentStyle = [styles.slideOutContent, { width: slideOutWidth, height: buttonSize }];
 
           return (
             <View
@@ -213,7 +236,12 @@ export function LayerSidePanel({
                   pointerEvents="none"
                   style={[
                     styles.buttonWhiteFill,
-                    { borderTopLeftRadius: borderRadius, borderBottomLeftRadius: borderRadius },
+                    {
+                      width: buttonSize,
+                      height: buttonSize,
+                      borderTopLeftRadius: borderRadius,
+                      borderBottomLeftRadius: borderRadius,
+                    },
                   ]}
                 />
               )}
@@ -244,10 +272,10 @@ export function LayerSidePanel({
                 style={[
                   styles.button,
                   {
-                    width: BUTTON_SIZE,
-                    height: BUTTON_SIZE,
+                    width: buttonSize,
+                    height: buttonSize,
                     borderRadius,
-                    backgroundColor: fillColor,
+                    backgroundColor: isFullMode ? fillColor : 'transparent',
                     borderColor,
                     opacity: disabled ? 0.5 : 1,
                   },
@@ -256,14 +284,46 @@ export function LayerSidePanel({
                 accessibilityLabel={`Layer ${displayLevel}${isSelected ? ', selected' : ''}${disabled ? ', not editable when zoomed' : ''}`}
                 accessibilityState={{ disabled }}
               >
-                <Text style={[styles.buttonLabel, { color: textColor }]}>
-                  L{displayLevel}
-                </Text>
+                {/* Radial gradient fill — compact mode only */}
+                {!isFullMode && (
+                  <Svg
+                    style={StyleSheet.absoluteFill}
+                    pointerEvents="none"
+                    width={COMPACT_BUTTON_SIZE}
+                    height={COMPACT_BUTTON_SIZE}
+                  >
+                    <Defs>
+                      <RadialGradient
+                        id={`rg-${internalLevel}`}
+                        cx="50%"
+                        cy="50%"
+                        r="50%"
+                        fx="50%"
+                        fy="50%"
+                      >
+                        <Stop offset="0" stopColor={gradientColor} stopOpacity={gradientOpacity} />
+                        <Stop offset="1" stopColor={gradientColor} stopOpacity={0} />
+                      </RadialGradient>
+                    </Defs>
+                    <Circle
+                      cx={COMPACT_BUTTON_SIZE / 2}
+                      cy={COMPACT_BUTTON_SIZE / 2}
+                      r={COMPACT_BUTTON_SIZE / 2}
+                      fill={`url(#rg-${internalLevel})`}
+                    />
+                  </Svg>
+                )}
+                {/* Label — full mode only */}
+                {isFullMode && (
+                  <Text style={[styles.buttonLabel, { color: textColor }]}>
+                    L{displayLevel}
+                  </Text>
+                )}
               </Pressable>
 
               {/* Slide-out panel — width animates 0 → slideOutWidth */}
               <Animated.View
-                style={[styles.slideOut, { width: anim }]}
+                style={[styles.slideOut, { width: anim, height: buttonSize }]}
                 pointerEvents={isExpanded ? 'box-none' : 'none'}
               >
                 <View style={contentStyle}>
@@ -323,7 +383,6 @@ const styles = StyleSheet.create({
   buttonColumn: {
     position: 'absolute',
     flexDirection: 'column',
-    gap: 4,
     zIndex: 60,
   },
   buttonRow: {
@@ -334,6 +393,7 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     alignItems: 'center',
     justifyContent: 'center',
+    overflow: 'hidden',
   },
   buttonLabel: {
     fontSize: 11,
@@ -343,8 +403,6 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 0,
     top: 0,
-    width: BUTTON_SIZE,
-    height: BUTTON_SIZE,
     backgroundColor: '#fff',
   },
   /**
@@ -364,7 +422,6 @@ const styles = StyleSheet.create({
     height: 20,
   },
   slideOut: {
-    height: BUTTON_SIZE,
     overflow: 'hidden',
     backgroundColor: '#fff',
     borderTopRightRadius: 8,
@@ -372,8 +429,7 @@ const styles = StyleSheet.create({
     zIndex: 60,
   },
   slideOutContent: {
-    // width applied inline from slideOutWidth state
-    height: BUTTON_SIZE,
+    // width and height applied inline
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 8,
