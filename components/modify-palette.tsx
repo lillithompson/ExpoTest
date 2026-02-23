@@ -204,7 +204,13 @@ function ModifyPaletteInner({
     () =>
       activePatterns.map((p) => ({
         id: p.id,
-        pattern: { tiles: p.tiles, width: p.width, height: p.height },
+        pattern: {
+          tiles: p.tiles,
+          width: p.width,
+          height: p.height,
+          ...(p.createdAtLevel != null && { createdAtLevel: p.createdAtLevel }),
+          ...(p.layerTiles && Object.keys(p.layerTiles).length > 0 && { layerTiles: p.layerTiles }),
+        },
         rotation: patternRotations[p.id] ?? 0,
         mirrorX: patternMirrors[p.id] ?? false,
         tileSetIds: p.tileSetIds,

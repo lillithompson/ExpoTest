@@ -73,7 +73,7 @@ type Props = {
   /** All patterns for the patterns section (Pattern button + these thumbs). Shown in a collapsible section like tile groups. */
   patternList?: Array<{
     id: string;
-    pattern: { tiles: Tile[]; width: number; height: number };
+    pattern: { tiles: Tile[]; width: number; height: number; createdAtLevel?: number; layerTiles?: Record<number, { tiles: Tile[]; width: number; height: number }> };
     rotation: number;
     mirrorX: boolean;
     tileSetIds?: string[];
@@ -425,7 +425,7 @@ export function TileBrushPanel({
     | {
         type: 'pattern-thumb';
         id: string;
-        pattern: { tiles: Tile[]; width: number; height: number };
+        pattern: { tiles: Tile[]; width: number; height: number; createdAtLevel?: number; layerTiles?: Record<number, { tiles: Tile[]; width: number; height: number }> };
         rotation: number;
         mirrorX: boolean;
         tileSetIds?: string[];
