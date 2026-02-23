@@ -4103,6 +4103,34 @@ export default function TestScreen() {
     };
   }, [canvasSelection, fullGridColumnsForMapping]);
 
+  /** When editing a higher resolution layer (L2/L3), convert the full-grid selection bounds to layer-cell row/col coordinates.
+   * Layer cells are row-major: index = layerRow * levelCols + layerCol.
+   * Returns null when not editing a higher layer or no selection. */
+  const selectionBoundsLayerGrid = useMemo(() => {
+    if (!selectionBoundsFullGrid || !isEditingHigherLayer || !levelGridInfo) return null;
+    const { minRow, maxRow, minCol, maxCol } = selectionBoundsFullGrid;
+    let layerMinRow = Infinity;
+    let layerMaxRow = -Infinity;
+    let layerMinCol = Infinity;
+    let layerMaxCol = -Infinity;
+    const { levelCols } = levelGridInfo;
+    levelGridInfo.cells.forEach((cell, idx) => {
+      if (
+        cell.minRow >= minRow && cell.maxRow <= maxRow &&
+        cell.minCol >= minCol && cell.maxCol <= maxCol
+      ) {
+        const layerRow = Math.floor(idx / levelCols);
+        const layerCol = idx % levelCols;
+        if (layerRow < layerMinRow) layerMinRow = layerRow;
+        if (layerRow > layerMaxRow) layerMaxRow = layerRow;
+        if (layerCol < layerMinCol) layerMinCol = layerCol;
+        if (layerCol > layerMaxCol) layerMaxCol = layerCol;
+      }
+    });
+    if (layerMinRow === Infinity) return null;
+    return { minRow: layerMinRow, maxRow: layerMaxRow, minCol: layerMinCol, maxCol: layerMaxCol };
+  }, [selectionBoundsFullGrid, isEditingHigherLayer, levelGridInfo]);
+
   const fullGridRows = activeFile?.grid.rows ?? 0;
 
   const movePreviewRect = useMemo(() => {
@@ -4116,17 +4144,23 @@ export default function TestScreen() {
     const tileStride = zoomed
       ? level1DisplayLayout.tileSize + GRID_GAP
       : gridLayout.tileSize + GRID_GAP;
-    const { minRow: fullMinRow, maxRow: fullMaxRow, minCol: fullMinCol, maxCol: fullMaxCol } = selectionBoundsFullGrid;
+    // When editing a higher layer and not zoomed, use layer-cell coordinates for the preview.
+    const previewBounds =
+      !zoomed && isEditingHigherLayer && selectionBoundsLayerGrid
+        ? selectionBoundsLayerGrid
+        : selectionBoundsFullGrid;
+    const { minRow: fullMinRow, maxRow: fullMaxRow, minCol: fullMinCol, maxCol: fullMaxCol } = previewBounds;
     const { dRow, dCol } = moveDragOffset;
     let visMinRow: number;
     let visMaxRow: number;
     let visMinCol: number;
     let visMaxCol: number;
     if (zoomRegion) {
-      visMinRow = fullMinRow + dRow - zoomRegion.minRow;
-      visMaxRow = fullMaxRow + dRow - zoomRegion.minRow;
-      visMinCol = fullMinCol + dCol - zoomRegion.minCol;
-      visMaxCol = fullMaxCol + dCol - zoomRegion.minCol;
+      const { minRow: selMinRow, maxRow: selMaxRow, minCol: selMinCol, maxCol: selMaxCol } = selectionBoundsFullGrid;
+      visMinRow = selMinRow + dRow - zoomRegion.minRow;
+      visMaxRow = selMaxRow + dRow - zoomRegion.minRow;
+      visMinCol = selMinCol + dCol - zoomRegion.minCol;
+      visMaxCol = selMaxCol + dCol - zoomRegion.minCol;
     } else {
       visMinRow = fullMinRow + dRow;
       visMaxRow = fullMaxRow + dRow;
@@ -4148,7 +4182,7 @@ export default function TestScreen() {
       width,
       height,
     };
-  }, [isMoveMode, canvasSelection, moveDragOffset, selectionBoundsFullGrid, gridLayout, zoomRegion, level1DisplayLayout.tileSize]);
+  }, [isMoveMode, canvasSelection, moveDragOffset, selectionBoundsFullGrid, selectionBoundsLayerGrid, isEditingHigherLayer, gridLayout, zoomRegion, level1DisplayLayout.tileSize]);
 
   const lockedCellIndicesSet = useMemo(() => {
     const cells = activeFile?.lockedCells ?? [];
@@ -7019,9 +7053,12 @@ export default function TestScreen() {
                       const fullCols = fullGridColumnsForMapping;
                       let dCol = Math.round((point.x - moveDragStartRef.current.x) / (tileStride || 1));
                       let dRow = Math.round((point.y - moveDragStartRef.current.y) / (tileStride || 1));
-                      const { minRow, maxRow, minCol, maxCol } = selectionBoundsFullGrid;
-                      dRow = Math.max(-minRow, Math.min(fullGridRows - 1 - maxRow, dRow));
-                      dCol = Math.max(-minCol, Math.min(fullCols - 1 - maxCol, dCol));
+                      const clampBounds = isEditingHigherLayer && selectionBoundsLayerGrid ? selectionBoundsLayerGrid : selectionBoundsFullGrid;
+                      const clampRows = isEditingHigherLayer && levelGridInfo ? levelGridInfo.levelRows : fullGridRows;
+                      const clampCols = isEditingHigherLayer && levelGridInfo ? levelGridInfo.levelCols : fullCols;
+                      const { minRow, maxRow, minCol, maxCol } = clampBounds;
+                      dRow = Math.max(-minRow, Math.min(clampRows - 1 - maxRow, dRow));
+                      dCol = Math.max(-minCol, Math.min(clampCols - 1 - maxCol, dCol));
                       setMoveDragOffset({ dRow, dCol });
                       return;
                     }
@@ -7913,9 +7950,12 @@ export default function TestScreen() {
                       const fullCols = fullGridColumnsForMapping;
                       let dCol = Math.round((point.x - moveDragStartRef.current.x) / (tileStride || 1));
                       let dRow = Math.round((point.y - moveDragStartRef.current.y) / (tileStride || 1));
-                      const { minRow, maxRow, minCol, maxCol } = selectionBoundsFullGrid;
-                      dRow = Math.max(-minRow, Math.min(fullGridRows - 1 - maxRow, dRow));
-                      dCol = Math.max(-minCol, Math.min(fullCols - 1 - maxCol, dCol));
+                      const clampBounds = isEditingHigherLayer && selectionBoundsLayerGrid ? selectionBoundsLayerGrid : selectionBoundsFullGrid;
+                      const clampRows = isEditingHigherLayer && levelGridInfo ? levelGridInfo.levelRows : fullGridRows;
+                      const clampCols = isEditingHigherLayer && levelGridInfo ? levelGridInfo.levelCols : fullCols;
+                      const { minRow, maxRow, minCol, maxCol } = clampBounds;
+                      dRow = Math.max(-minRow, Math.min(clampRows - 1 - maxRow, dRow));
+                      dCol = Math.max(-minCol, Math.min(clampCols - 1 - maxCol, dCol));
                       setMoveDragOffset({ dRow, dCol });
                       return;
                     }
@@ -8088,26 +8128,54 @@ export default function TestScreen() {
                     </Pressable>
                     <Pressable
                       onPress={() => {
-                        const cols = fullGridColumnsForMapping;
-                        const fromIndices = getCellIndicesInRegion(
-                          canvasSelection.start,
-                          canvasSelection.end,
-                          cols
-                        );
-                        const toIndices = fromIndices.map((i) => {
-                          const r = Math.floor(i / cols);
-                          const c = i % cols;
-                          return (r + pendingMoveOffset.dRow) * cols + (c + pendingMoveOffset.dCol);
-                        });
-                        moveRegion(fromIndices, toIndices);
-                        const { minRow, maxRow, minCol, maxCol } = selectionBoundsFullGrid;
-                        const newMinRow = minRow + pendingMoveOffset.dRow;
-                        const newMinCol = minCol + pendingMoveOffset.dCol;
-                        const newMaxRow = maxRow + pendingMoveOffset.dRow;
-                        const newMaxCol = maxCol + pendingMoveOffset.dCol;
-                        const newStart = newMinRow * cols + newMinCol;
-                        const newEnd = newMaxRow * cols + newMaxCol;
-                        setCanvasSelection({ start: newStart, end: newEnd });
+                        if (isEditingHigherLayer && levelGridInfo && selectionBoundsLayerGrid) {
+                          // Higher layer (L2/L3): indices are layer-cell indices, not L1 indices.
+                          const layerCols = levelGridInfo.levelCols;
+                          const { minRow: lyrMinRow, maxRow: lyrMaxRow, minCol: lyrMinCol, maxCol: lyrMaxCol } = selectionBoundsLayerGrid;
+                          const layerFromIndices: number[] = [];
+                          for (let r = lyrMinRow; r <= lyrMaxRow; r += 1) {
+                            for (let c = lyrMinCol; c <= lyrMaxCol; c += 1) {
+                              layerFromIndices.push(r * layerCols + c);
+                            }
+                          }
+                          const layerToIndices = layerFromIndices.map((i) => {
+                            const r = Math.floor(i / layerCols);
+                            const c = i % layerCols;
+                            return (r + pendingMoveOffset.dRow) * layerCols + (c + pendingMoveOffset.dCol);
+                          });
+                          moveRegion(layerFromIndices, layerToIndices);
+                          // Update selection in L1 coordinates (each layer cell spans cellTiles L1 cells).
+                          const cellTiles = Math.pow(2, editingLevel - 1);
+                          const { minRow, maxRow, minCol, maxCol } = selectionBoundsFullGrid;
+                          const newMinRow = minRow + pendingMoveOffset.dRow * cellTiles;
+                          const newMinCol = minCol + pendingMoveOffset.dCol * cellTiles;
+                          const newMaxRow = maxRow + pendingMoveOffset.dRow * cellTiles;
+                          const newMaxCol = maxCol + pendingMoveOffset.dCol * cellTiles;
+                          const newStart = newMinRow * fullGridColumnsForMapping + newMinCol;
+                          const newEnd = newMaxRow * fullGridColumnsForMapping + newMaxCol;
+                          setCanvasSelection({ start: newStart, end: newEnd });
+                        } else {
+                          const cols = fullGridColumnsForMapping;
+                          const fromIndices = getCellIndicesInRegion(
+                            canvasSelection.start,
+                            canvasSelection.end,
+                            cols
+                          );
+                          const toIndices = fromIndices.map((i) => {
+                            const r = Math.floor(i / cols);
+                            const c = i % cols;
+                            return (r + pendingMoveOffset.dRow) * cols + (c + pendingMoveOffset.dCol);
+                          });
+                          moveRegion(fromIndices, toIndices);
+                          const { minRow, maxRow, minCol, maxCol } = selectionBoundsFullGrid;
+                          const newMinRow = minRow + pendingMoveOffset.dRow;
+                          const newMinCol = minCol + pendingMoveOffset.dCol;
+                          const newMaxRow = maxRow + pendingMoveOffset.dRow;
+                          const newMaxCol = maxCol + pendingMoveOffset.dCol;
+                          const newStart = newMinRow * cols + newMinCol;
+                          const newEnd = newMaxRow * cols + newMaxCol;
+                          setCanvasSelection({ start: newStart, end: newEnd });
+                        }
                         setShowMoveConfirmDialog(false);
                         setPendingMoveOffset(null);
                       }}
