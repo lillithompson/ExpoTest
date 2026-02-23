@@ -6,7 +6,6 @@ import { getEmphasizeStrokeColor, getLevelGridInfo, zoomRegionHasPartialCellsAtL
 import { type TileFile } from '@/hooks/use-tile-files';
 
 const BUTTON_SIZE = 40;
-const SLIDEOUT_WIDTH = 220;
 const SLIDEOUT_DURATION_MS = 250;
 const DOUBLE_TAP_MS = 300;
 
@@ -49,11 +48,25 @@ export function LayerSidePanel({
   // Last-tap tracking for double-tap detection
   const lastTapRef = useRef<{ level: number; time: number } | null>(null);
 
+  // Measured natural widths per layer; shared max drives all animations.
+  const measuredWidthsRef = useRef<Map<number, number>>(new Map());
+  const [slideOutWidth, setSlideOutWidth] = useState(0);
+  const handleMeasure = (internalLevel: number, w: number) => {
+    if (w <= 0) return;
+    if (measuredWidthsRef.current.get(internalLevel) === w) return;
+    measuredWidthsRef.current.set(internalLevel, w);
+    const maxW = Math.max(...measuredWidthsRef.current.values());
+    setSlideOutWidth((prev) => (maxW > prev ? maxW : prev));
+  };
+
   const leftMargin = (containerWidth - gridWidth) / 2;
   const isFullMode = leftMargin >= BUTTON_SIZE;
   const buttonLeft = isFullMode ? leftMargin - BUTTON_SIZE : leftMargin - BUTTON_SIZE / 2;
 
   const expandLayer = (internalLevel: number) => {
+    const targetWidth = slideOutWidth;
+    if (targetWidth <= 0) return;
+
     // Collapse any currently expanded layer
     if (expandedLayer !== null && expandedLayer !== internalLevel) {
       const prevAnim = getAnim(expandedLayer);
@@ -75,7 +88,7 @@ export function LayerSidePanel({
     } else {
       setExpandedLayer(internalLevel);
       Animated.timing(anim, {
-        toValue: SLIDEOUT_WIDTH,
+        toValue: targetWidth,
         duration: SLIDEOUT_DURATION_MS,
         useNativeDriver: false,
       }).start();
@@ -170,12 +183,31 @@ export function LayerSidePanel({
             ? `${levelInfo.levelCols}\u00d7${levelInfo.levelRows}`
             : `L${displayLevel}`;
 
+          // Inline style reused by both the real content and the measurer.
+          const contentStyle = [styles.slideOutContent, { width: slideOutWidth }];
+
           return (
             <View
               key={internalLevel}
               style={styles.buttonRow}
               pointerEvents="box-none"
             >
+              {/*
+               * Hidden measurer: absolutely positioned so it doesn't constrain to the
+               * animated parent's width. Sizes to natural content width; onLayout
+               * captures that width so all slide-outs animate to the same measured size.
+               */}
+              <View
+                pointerEvents="none"
+                style={styles.slideOutMeasurer}
+                onLayout={(e) => handleMeasure(internalLevel, e.nativeEvent.layout.width)}
+              >
+                <Text style={styles.slideOutLabel} numberOfLines={1}>{resolutionLabel}</Text>
+                <View style={styles.iconButton}><View style={styles.iconPlaceholder} /></View>
+                <View style={styles.iconButton}><View style={styles.iconPlaceholder} /></View>
+                <View style={styles.iconButton}><View style={styles.iconPlaceholder} /></View>
+              </View>
+
               {isExpanded && (
                 <View
                   pointerEvents="none"
@@ -229,12 +261,12 @@ export function LayerSidePanel({
                 </Text>
               </Pressable>
 
-              {/* Slide-out panel */}
+              {/* Slide-out panel — width animates 0 → slideOutWidth */}
               <Animated.View
                 style={[styles.slideOut, { width: anim }]}
                 pointerEvents={isExpanded ? 'box-none' : 'none'}
               >
-                <View style={styles.slideOutContent}>
+                <View style={contentStyle}>
                   <Text style={styles.slideOutLabel} numberOfLines={1}>
                     {resolutionLabel}
                   </Text>
@@ -315,6 +347,22 @@ const styles = StyleSheet.create({
     height: BUTTON_SIZE,
     backgroundColor: '#fff',
   },
+  /**
+   * Invisible reference view used to measure the natural content width.
+   * position: 'absolute' removes it from flex flow so it doesn't constrain
+   * to the animated parent; no explicit width lets it expand to its content.
+   */
+  slideOutMeasurer: {
+    position: 'absolute',
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    opacity: 0,
+  },
+  iconPlaceholder: {
+    width: 20,
+    height: 20,
+  },
   slideOut: {
     height: BUTTON_SIZE,
     overflow: 'hidden',
@@ -324,7 +372,7 @@ const styles = StyleSheet.create({
     zIndex: 60,
   },
   slideOutContent: {
-    width: SLIDEOUT_WIDTH,
+    // width applied inline from slideOutWidth state
     height: BUTTON_SIZE,
     flexDirection: 'row',
     alignItems: 'center',
