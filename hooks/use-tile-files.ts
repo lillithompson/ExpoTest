@@ -367,6 +367,22 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
     [activeFileId, persistFiles]
   );
 
+  const updateActiveFileTilesL1 = useCallback(
+    (tiles: Tile[]) => {
+      if (!activeFileId) return;
+      setFiles((prev) => {
+        const next = prev.map((file) =>
+          file.id === activeFileId
+            ? { ...file, tiles, updatedAt: Date.now() }
+            : file
+        );
+        void persistFiles(next, activeFileId);
+        return next;
+      });
+    },
+    [activeFileId, persistFiles]
+  );
+
   const updateActiveFileLayerVisibility = useCallback(
     (level: number, visible: boolean) => {
       if (!activeFileId || level < 1) return;
@@ -817,6 +833,7 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
     upsertActiveFile,
     updateActiveFileLockedCells,
     updateActiveFileLayer,
+    updateActiveFileTilesL1,
     updateActiveFileLayerVisibility,
     updateActiveFileLayerLocked,
     updateActiveFileLayerEmphasized,

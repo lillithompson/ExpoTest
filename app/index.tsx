@@ -1009,6 +1009,7 @@ export default function TestScreen() {
     upsertActiveFile,
     updateActiveFileLockedCells,
     updateActiveFileLayer,
+    updateActiveFileTilesL1,
     updateActiveFileLayerVisibility,
     updateActiveFileLayerLocked,
     updateActiveFileLayerEmphasized,
@@ -8197,6 +8198,73 @@ export default function TestScreen() {
                             return (r + pendingMoveOffset.dRow) * layerCols + (c + pendingMoveOffset.dCol);
                           });
                           moveRegion(layerFromIndices, layerToIndices);
+                          // Also move tiles on every higher-resolution layer (internal levels
+                          // 1..editingLevel-1) whose L1 footprint is fully inside the selection.
+                          const fullCols = activeFile!.grid.columns;
+                          const fullRows = activeFile!.grid.rows;
+                          const cellTilesN = Math.pow(2, editingLevel - 1);
+                          const dRowL1 = pendingMoveOffset.dRow * cellTilesN;
+                          const dColL1 = pendingMoveOffset.dCol * cellTilesN;
+                          const { minRow: selMinRow, maxRow: selMaxRow, minCol: selMinCol, maxCol: selMaxCol } = selectionBoundsFullGrid;
+                          const emptyTile = { imageIndex: -1, rotation: 0, mirrorX: false, mirrorY: false };
+                          // Level 1 (file.tiles)
+                          if (fullCols > 0 && fullRows > 0) {
+                            const l1Count = fullCols * fullRows;
+                            const l1Src = normalizeTiles(activeFile!.tiles, l1Count, tileSources.length);
+                            const l1Pairs: Array<{ fromIdx: number; tile: Tile }> = [];
+                            for (let r = selMinRow; r <= selMaxRow; r += 1) {
+                              for (let c = selMinCol; c <= selMaxCol; c += 1) {
+                                const fromIdx = r * fullCols + c;
+                                l1Pairs.push({ fromIdx, tile: l1Src[fromIdx] ?? { ...emptyTile } });
+                              }
+                            }
+                            if (l1Pairs.length > 0) {
+                              const nextL1 = [...l1Src];
+                              l1Pairs.forEach(({ fromIdx }) => { nextL1[fromIdx] = { ...emptyTile }; });
+                              l1Pairs.forEach(({ fromIdx, tile }) => {
+                                const r = Math.floor(fromIdx / fullCols);
+                                const c = fromIdx % fullCols;
+                                const toR = r + dRowL1;
+                                const toC = c + dColL1;
+                                if (toR >= 0 && toR < fullRows && toC >= 0 && toC < fullCols) {
+                                  nextL1[toR * fullCols + toC] = tile;
+                                }
+                              });
+                              updateActiveFileTilesL1(nextL1);
+                            }
+                          }
+                          // Intermediate layers (internal levels 2..editingLevel-1)
+                          for (let M = 2; M < editingLevel; M += 1) {
+                            const levelMInfo = getLevelGridInfo(fullCols, fullRows, M);
+                            if (!levelMInfo) continue;
+                            const mCols = levelMInfo.levelCols;
+                            const mCount = levelMInfo.cells.length;
+                            const mSrc = normalizeTiles(activeFile?.layers?.[M] ?? [], mCount, tileSources.length);
+                            const dRowM = pendingMoveOffset.dRow * Math.pow(2, editingLevel - M);
+                            const dColM = pendingMoveOffset.dCol * Math.pow(2, editingLevel - M);
+                            const mPairs: Array<{ fromIdx: number; tile: Tile }> = [];
+                            levelMInfo.cells.forEach((cell, idx) => {
+                              if (
+                                cell.minRow >= selMinRow && cell.maxRow <= selMaxRow &&
+                                cell.minCol >= selMinCol && cell.maxCol <= selMaxCol
+                              ) {
+                                mPairs.push({ fromIdx: idx, tile: mSrc[idx] ?? { ...emptyTile } });
+                              }
+                            });
+                            if (mPairs.length === 0) continue;
+                            const nextM = [...mSrc];
+                            mPairs.forEach(({ fromIdx }) => { nextM[fromIdx] = { ...emptyTile }; });
+                            mPairs.forEach(({ fromIdx, tile }) => {
+                              const r = Math.floor(fromIdx / mCols);
+                              const c = fromIdx % mCols;
+                              const toR = r + dRowM;
+                              const toC = c + dColM;
+                              if (toR >= 0 && toR < levelMInfo.levelRows && toC >= 0 && toC < mCols) {
+                                nextM[toR * mCols + toC] = tile;
+                              }
+                            });
+                            updateActiveFileLayer(M, nextM);
+                          }
                           // Update selection in L1 coordinates (each layer cell spans cellTiles L1 cells).
                           const cellTiles = Math.pow(2, editingLevel - 1);
                           const { minRow, maxRow, minCol, maxCol } = selectionBoundsFullGrid;
