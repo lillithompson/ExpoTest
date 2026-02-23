@@ -123,6 +123,16 @@ type Result = {
   fullGridRowsForZoom?: number;
   /** Move a region: copy tiles from fromIndices to toIndices, clear fromIndices. Same length; respects locked cells. One undo step. */
   moveRegion: (fromIndices: number[], toIndices: number[]) => void;
+  /** Stamp a pattern onto the grid at (anchorRow, anchorCol). Respects locked cells. One undo step. */
+  placeStamp: (
+    anchorRow: number,
+    anchorCol: number,
+    patternTiles: Tile[],
+    patternWidth: number,
+    patternHeight: number,
+    rotation: number,
+    mirrorX: boolean
+  ) => void;
   /** Rotate the rectangular region 90° clockwise. Bounds in full-grid row/col. One undo step. */
   rotateRegion: (minRow: number, maxRow: number, minCol: number, maxCol: number, gridColumns: number) => void;
   /** Full-grid tiles for persisting; use this (not tiles) when saving so zoomed view never overwrites file. */
@@ -2888,6 +2898,62 @@ export const useTileGrid = ({
     ]
   );
 
+  const placeStamp = useCallback(
+    (
+      anchorRow: number,
+      anchorCol: number,
+      patternTiles: Tile[],
+      patternWidth: number,
+      patternHeight: number,
+      rotation: number,
+      mirrorX: boolean
+    ) => {
+      const rotCW = ((rotation % 360) + 360) % 360;
+      const { rotW, rotH } = getRotatedDimensions(rotCW, patternWidth, patternHeight);
+      const cols = fullGridLayout.columns;
+      const rows = fullGridLayout.rows;
+      if (cols <= 0 || rows <= 0 || rotW <= 0 || rotH <= 0) return;
+      pushUndo();
+      withBulkUpdate(() => {
+        setTiles((prev) => {
+          const current = normalizeTiles(prev, internalTotalCells, tileSourcesLength);
+          const next = [...current];
+          for (let dr = 0; dr < rotH; dr += 1) {
+            for (let dc = 0; dc < rotW; dc += 1) {
+              const destRow = anchorRow + dr;
+              const destCol = anchorCol + dc;
+              if (destRow < 0 || destRow >= rows || destCol < 0 || destCol >= cols) continue;
+              const destIndex = destRow * cols + destCol;
+              if (lockedCellIndices?.has(destIndex)) continue;
+              const mapped = displayToPatternCell(dr, dc, patternWidth, patternHeight, rotCW, mirrorX);
+              if (!mapped) continue;
+              const srcTile = patternTiles[mapped.sourceRow * patternWidth + mapped.sourceCol];
+              if (!srcTile) continue;
+              const rot = normalizeRotationCW(rotCW);
+              const tr = applyGroupRotationToTile(srcTile.rotation, srcTile.mirrorX, srcTile.mirrorY, rot);
+              next[destIndex] = {
+                imageIndex: srcTile.imageIndex,
+                rotation: tr.rotation,
+                mirrorX: mirrorX ? !tr.mirrorX : tr.mirrorX,
+                mirrorY: tr.mirrorY,
+                name: srcTile.name,
+              };
+            }
+          }
+          return next;
+        });
+      });
+    },
+    [
+      fullGridLayout.columns,
+      fullGridLayout.rows,
+      internalTotalCells,
+      tileSourcesLength,
+      lockedCellIndices,
+      pushUndo,
+    ]
+  );
+
   const setCloneSource = useCallback((cellIndex: number) => {
     const full = isZoomed ? visibleToFull(cellIndex) : cellIndex;
     cloneSourceRef.current = full;
@@ -3002,6 +3068,7 @@ export const useTileGrid = ({
     fullGridRowsForZoom: isZoomed ? fullGridLayout.rows : undefined,
     moveRegion,
     rotateRegion,
+    placeStamp,
     fullTilesForSave: renderTiles,
     fullGridLayoutForSave: fullGridLayout,
     mirrorZoomRegionToRestOfGrid,
