@@ -1524,6 +1524,10 @@ export default function TestScreen() {
       !isLayerLocked(activeFile, editingLevel)
   );
 
+  const isEditingInvisibleLayer = Boolean(
+    activeFile && viewMode === 'modify' && !isLayerVisible(activeFile, editingLevel)
+  );
+
   /** Level-1 layout (for persist when editing a higher layer). When file has 0,0 grid (new file),
    * compute from preferredTileSize so we never persist the current layer's dimensions as level-1. */
   const level1LayoutForPersist = useMemo(() => {
@@ -6810,7 +6814,7 @@ export default function TestScreen() {
             </ThemedView>
           </ThemedView>
         </ThemedView>
-        {(undoRedoBanner !== null || zoomRegion !== null) && (
+        {(undoRedoBanner !== null || zoomRegion !== null || isEditingInvisibleLayer) && (
           <View style={styles.toolbarBannersOverlay} pointerEvents="box-none">
             {undoRedoBanner !== null && (
               <View style={styles.toolbarBannerRow} overflow="hidden">
@@ -6857,6 +6861,26 @@ export default function TestScreen() {
                   accessibilityLabel="Zoom out to full canvas"
                 >
                   <Text style={styles.zoomedBannerBackLinkText}>Back</Text>
+                </Pressable>
+              </View>
+            )}
+            {isEditingInvisibleLayer && (
+              <View pointerEvents="box-none" style={[styles.toolbarBannerRow, styles.zoomedBannerRow]}>
+                <Text
+                  style={styles.undoRedoBannerText}
+                  numberOfLines={1}
+                  adjustsFontSizeToFit
+                >
+                  Currently editing invisible layer
+                </Text>
+                <Pressable
+                  onPress={() => updateActiveFileLayerVisibility(editingLevel, true)}
+                  hitSlop={8}
+                  style={({ pressed }) => [styles.zoomedBannerBackLink, pressed && { opacity: 0.7 }]}
+                  accessibilityRole="button"
+                  accessibilityLabel="Make current layer visible"
+                >
+                  <Text style={styles.zoomedBannerBackLinkText}>Make Visible</Text>
                 </Pressable>
               </View>
             )}
