@@ -384,6 +384,39 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
     [activeFileId, persistFiles]
   );
 
+  const updateActiveFileLayerCells = useCallback(
+    (level: number, cellUpdates: Record<number, Tile>) => {
+      if (!activeFileId || Object.keys(cellUpdates).length === 0) return;
+      setFiles((prev) => {
+        const fileIdx = prev.findIndex((f) => f.id === activeFileId);
+        if (fileIdx === -1) return prev;
+        const file = prev[fileIdx]!;
+        let updatedFile: TileFile;
+        if (level === 1) {
+          const currentTiles = file.tiles ? [...file.tiles] : [];
+          for (const [idxStr, tile] of Object.entries(cellUpdates)) {
+            currentTiles[parseInt(idxStr, 10)] = tile;
+          }
+          updatedFile = { ...file, tiles: currentTiles, updatedAt: Date.now() };
+        } else {
+          const currentTiles = file.layers?.[level] ? [...file.layers[level]!] : [];
+          for (const [idxStr, tile] of Object.entries(cellUpdates)) {
+            currentTiles[parseInt(idxStr, 10)] = tile;
+          }
+          updatedFile = {
+            ...file,
+            layers: { ...(file.layers ?? {}), [level]: currentTiles },
+            updatedAt: Date.now(),
+          };
+        }
+        const next = prev.map((f, i) => (i === fileIdx ? updatedFile : f));
+        void persistFiles(next, activeFileId);
+        return next;
+      });
+    },
+    [activeFileId, persistFiles]
+  );
+
   const updateActiveFileLayer = useCallback(
     (level: number, tiles: Tile[]) => {
       if (!activeFileId || level < 2) {
@@ -887,6 +920,7 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
     upsertActiveFile,
     updateActiveFileLockedCells,
     updateActiveFileLockedCellsForLayer,
+    updateActiveFileLayerCells,
     updateActiveFileLayer,
     updateActiveFileTilesL1,
     updateActiveFileLayerVisibility,

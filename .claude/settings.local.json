@@ -7,7 +7,11 @@
       "Bash(tail:*)",
       "Bash(node:*)",
       "Bash(cd:*)",
-      "Bash(grep hookCanvasSelection\\\\|selectionBounds\\\\|canvasSelection:*)"
+      "Bash(grep hookCanvasSelection\\\\|selectionBounds\\\\|canvasSelection:*)",
+      "Bash(grep:*)",
+      "Bash(wc:*)",
+      "Bash(grep error TS:*)",
+      "Bash(cd \"C:\\\\Users\\\\lilli\\\\Documents\\\\GitHub\\\\ExpoTest\" && git stash && npx tsc --noEmit --skipLibCheck 2>&1 | grep \"error TS\" | wc -l && git stash pop)"
     ]
   }
 }

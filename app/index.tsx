@@ -114,6 +114,8 @@ import {
     type LevelGridInfo,
     type Tile,
 } from '@/utils/tile-grid';
+import { displayToPatternCell, getRotatedDimensions } from '@/utils/pattern-transform';
+import { applyGroupRotationToTile, normalizeRotationCW } from '@/utils/tile-group-rotate';
 import { deserializePattern, deserializeTileSet, serializePattern } from '@/utils/tile-ugc-format';
 import JSZip from 'jszip';
 
@@ -752,6 +754,69 @@ const TileCell = memo(
     prev.isCloneCursor === next.isCloneCursor
 );
 
+/**
+ * Computes the coordinate offset from level-N (coarser) cells to level-M (finer) cells.
+ * Level-N cell (j, i) maps to level-M cells at rows [j*scale+C_row .. j*scale+C_row+scale-1]
+ * and cols [i*scale+C_col .. i*scale+C_col+scale-1].
+ */
+function getLevelNtoMOffsets(
+  columns: number,
+  rows: number,
+  levelN: number,
+  levelM: number
+): { scale: number; C_row: number; C_col: number } | null {
+  if (levelN <= levelM || levelN < 2 || levelM < 1) return null;
+  const cellTilesN = Math.pow(2, levelN - 1);
+  const cellTilesM = Math.pow(2, levelM - 1);
+  const scale = Math.round(cellTilesN / cellTilesM);
+  const centerCol = Math.floor(columns / 2);
+  const centerRow = Math.floor(rows / 2);
+  const kMinV_N = Math.ceil(-centerCol / cellTilesN);
+  const kMinV_M = Math.ceil(-centerCol / cellTilesM);
+  const kMinH_N = Math.ceil(-centerRow / cellTilesN);
+  const kMinH_M = Math.ceil(-centerRow / cellTilesM);
+  return {
+    scale,
+    C_row: kMinH_N * scale - kMinH_M,
+    C_col: kMinV_N * scale - kMinV_M,
+  };
+}
+
+/**
+ * Compute a pattern tile at (row, col) using explicit pattern data.
+ * Mirrors the hook's getPatternTileForPosition; row/col can be absolute (flood fill)
+ * or anchor-relative (single-cell painting).
+ */
+function computePatternTileFromData(
+  row: number,
+  col: number,
+  patternTiles: Tile[],
+  patternWidth: number,
+  patternHeight: number,
+  rotationDeg: number,
+  mirrorX: boolean
+): { imageIndex: number; rotation: number; mirrorX: boolean; mirrorY: boolean; name?: string } | null {
+  if (patternTiles.length === 0 || patternWidth <= 0 || patternHeight <= 0) return null;
+  const rotationCW = ((rotationDeg % 360) + 360) % 360;
+  const { rotW, rotH } = getRotatedDimensions(rotationCW, patternWidth, patternHeight);
+  const localRow = ((row % rotH) + rotH) % rotH;
+  const localCol = ((col % rotW) + rotW) % rotW;
+  const mapped = displayToPatternCell(localRow, localCol, patternWidth, patternHeight, rotationCW, mirrorX);
+  if (!mapped) return null;
+  const { sourceRow, sourceCol } = mapped;
+  const patternTile = patternTiles[sourceRow * patternWidth + sourceCol];
+  if (!patternTile) return null;
+  const rot = normalizeRotationCW(rotationCW);
+  const transformed = applyGroupRotationToTile(patternTile.rotation, patternTile.mirrorX, patternTile.mirrorY, rot);
+  return {
+    imageIndex: patternTile.imageIndex,
+    rotation: transformed.rotation,
+    mirrorX: transformed.mirrorX,
+    mirrorY: transformed.mirrorY,
+    ...(patternTile.name !== undefined && { name: patternTile.name }),
+  };
+}
+
 export default function TestScreen() {
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
@@ -906,6 +971,9 @@ export default function TestScreen() {
   const [pendingMoveOffset, setPendingMoveOffset] = useState<{ dRow: number; dCol: number } | null>(null);
   const moveDragStartRef = useRef<{ x: number; y: number } | null>(null);
   const [patternAnchorIndex, setPatternAnchorIndex] = useState<number | null>(null);
+  /** Accumulated finer-layer cell updates during pattern painting. Flushed on debounce timer. */
+  const finerLayerPendingRef = useRef<Record<number, Record<number, Tile>>>({});
+  const finerLayerFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [showPatternSaveModal, setShowPatternSaveModal] = useState(false);
   const [showPatternExportMenu, setShowPatternExportMenu] = useState(false);
   const [selectedPatternIdsForExport, setSelectedPatternIdsForExport] = useState<string[]>([]);
@@ -1009,6 +1077,7 @@ export default function TestScreen() {
     upsertActiveFile,
     updateActiveFileLockedCells,
     updateActiveFileLockedCellsForLayer,
+    updateActiveFileLayerCells,
     updateActiveFileLayer,
     updateActiveFileTilesL1,
     updateActiveFileLayerVisibility,
@@ -1500,6 +1569,55 @@ export default function TestScreen() {
     [maxDisplayLevel, editingLevel]
   );
 
+  /**
+   * Pattern data to pass to useTileGrid, selected for the current editing level.
+   * For patterns with createdAtLevel: use layerTiles[editingLevel] if editing a finer level,
+   * use tiles if same level, null if no data for current level.
+   * For legacy patterns (no createdAtLevel): always use tiles (backward compat).
+   */
+  const effectivePatternForHook = useMemo(() => {
+    if (!selectedPattern) return null;
+    const createdAtLevel = selectedPattern.createdAtLevel;
+    let tileData: { tiles: Tile[]; width: number; height: number } | null = null;
+    if (createdAtLevel == null) {
+      tileData = { tiles: selectedPattern.tiles, width: selectedPattern.width, height: selectedPattern.height };
+    } else if (editingLevel === createdAtLevel) {
+      tileData = { tiles: selectedPattern.tiles, width: selectedPattern.width, height: selectedPattern.height };
+    } else if (editingLevel < createdAtLevel) {
+      tileData = selectedPattern.layerTiles?.[editingLevel] ?? null;
+    }
+    // editingLevel > createdAtLevel → null (no data for this coarser level)
+    if (!tileData) return null;
+    return {
+      tiles: tileData.tiles,
+      width: tileData.width,
+      height: tileData.height,
+      rotation: patternRotations[selectedPattern.id] ?? 0,
+      mirrorX: patternMirrors[selectedPattern.id] ?? false,
+    };
+  }, [selectedPattern, editingLevel, patternRotations, patternMirrors]);
+
+  /** Flush accumulated finer-layer pattern cell updates to file state. */
+  const flushFinerLayerPending = useCallback(() => {
+    const pending = finerLayerPendingRef.current;
+    if (Object.keys(pending).length === 0) return;
+    finerLayerPendingRef.current = {};
+    for (const [levelStr, cellUpdates] of Object.entries(pending)) {
+      updateActiveFileLayerCells(parseInt(levelStr, 10), cellUpdates);
+    }
+  }, [updateActiveFileLayerCells]);
+
+  /** Schedule a debounced flush of finer-layer pending updates (150 ms). */
+  const scheduleFinerLayerFlush = useCallback(() => {
+    if (finerLayerFlushTimerRef.current) {
+      clearTimeout(finerLayerFlushTimerRef.current);
+    }
+    finerLayerFlushTimerRef.current = setTimeout(() => {
+      finerLayerFlushTimerRef.current = null;
+      flushFinerLayerPending();
+    }, 150);
+  }, [flushFinerLayerPending]);
+
   /** Layer is visible (default true). Hidden layers are excluded from canvas, exports, and thumbnails. */
   const isLayerVisible = useCallback(
     (file: { layerVisibility?: Record<number, boolean> } | null, level: number) =>
@@ -1697,15 +1815,7 @@ export default function TestScreen() {
     brush,
     mirrorHorizontal: settings.mirrorHorizontal,
     mirrorVertical: settings.mirrorVertical,
-    pattern: selectedPattern
-      ? {
-          tiles: selectedPattern.tiles,
-          width: selectedPattern.width,
-          height: selectedPattern.height,
-          rotation: patternRotations[selectedPattern.id] ?? 0,
-          mirrorX: patternMirrors[selectedPattern.id] ?? false,
-        }
-      : null,
+    pattern: effectivePatternForHook ?? null,
     patternAnchorKey: selectedPattern?.id ?? null,
     getFixedBrushSourceName: () => fixedBrushSourceNameRef.current,
     canvasSelection: viewMode === 'modify' ? hookCanvasSelection : null,
@@ -1904,8 +2014,12 @@ export default function TestScreen() {
   useEffect(() => {
     if (pendingPaletteFloodRef.current) {
       pendingPaletteFloodRef.current = false;
-      if (canEditCurrentLayer) floodFill();
+      if (canEditCurrentLayer) {
+        floodFill();
+        applyPatternFloodToFinerLayers(false);
+      }
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [brush, floodFill, canEditCurrentLayer]);
   useEffect(() => {
     if (prevTileSourcesKeyRef.current === tileSourcesKey) {
@@ -4090,16 +4204,81 @@ export default function TestScreen() {
       setPatternAnchorIndex(cellIndex);
     }
     paintCellIndex(cellIndex);
+    // Apply pattern to finer layers when painting at a higher internal level
+    if (
+      brush.mode === 'pattern' &&
+      !isPatternCreationMode &&
+      isEditingHigherLayer &&
+      levelGridInfo &&
+      selectedPattern?.createdAtLevel != null &&
+      selectedPattern.layerTiles &&
+      activeFile
+    ) {
+      const cols = gridLayout.columns; // = levelGridInfo.levelCols
+      const anchor = patternAnchorIndex ?? cellIndex;
+      const destRow_N = Math.floor(cellIndex / cols);
+      const destCol_N = cellIndex % cols;
+      const anchorRow_N = Math.floor(anchor / cols);
+      const anchorCol_N = anchor % cols;
+      const gridCols = activeFile.grid.columns;
+      const gridRows = activeFile.grid.rows;
+      const patternRotation = patternRotations[selectedPattern.id] ?? 0;
+      const patternMirrorX = patternMirrors[selectedPattern.id] ?? false;
+      for (let M = 1; M < editingLevel; M++) {
+        const patternDataM = selectedPattern.layerTiles[M];
+        if (!patternDataM) continue;
+        const mInfo = getLevelGridInfo(gridCols, gridRows, M);
+        if (!mInfo) continue;
+        const offsets = getLevelNtoMOffsets(gridCols, gridRows, editingLevel, M);
+        if (!offsets) continue;
+        const { scale, C_row, C_col } = offsets;
+        const mLevelCols = mInfo.levelCols;
+        const mCellRowStart = destRow_N * scale + C_row;
+        const mCellColStart = destCol_N * scale + C_col;
+        const mAnchorRowStart = anchorRow_N * scale + C_row;
+        const mAnchorColStart = anchorCol_N * scale + C_col;
+        const cellUpdates: Record<number, Tile> = {};
+        for (let dr = 0; dr < scale; dr++) {
+          for (let dc = 0; dc < scale; dc++) {
+            const mr = mCellRowStart + dr;
+            const mc = mCellColStart + dc;
+            if (mr < 0 || mr >= mInfo.levelRows || mc < 0 || mc >= mLevelCols) continue;
+            const tile = computePatternTileFromData(
+              mr - mAnchorRowStart, mc - mAnchorColStart,
+              patternDataM.tiles, patternDataM.width, patternDataM.height,
+              patternRotation, patternMirrorX
+            );
+            if (tile) {
+              cellUpdates[mr * mLevelCols + mc] = {
+                imageIndex: tile.imageIndex, rotation: tile.rotation,
+                mirrorX: tile.mirrorX, mirrorY: tile.mirrorY,
+              };
+            }
+          }
+        }
+        if (Object.keys(cellUpdates).length > 0) {
+          if (!finerLayerPendingRef.current[M]) finerLayerPendingRef.current[M] = {};
+          Object.assign(finerLayerPendingRef.current[M], cellUpdates);
+        }
+      }
+      scheduleFinerLayerFlush();
+    }
   };
 
   const patternSelectionRect = useMemo(() => {
     if (!patternSelection || gridLayout.columns === 0) {
       return null;
     }
-    const { minRow, maxRow, minCol, maxCol } = getSelectionBounds(
-      patternSelection.start,
-      patternSelection.end
-    );
+    // patternSelection is in layer-N space; use gridLayout.columns (not fullGridColumnsForMapping)
+    const pCols = gridLayout.columns;
+    const psStartRow = Math.floor(patternSelection.start / pCols);
+    const psStartCol = patternSelection.start % pCols;
+    const psEndRow = Math.floor(patternSelection.end / pCols);
+    const psEndCol = patternSelection.end % pCols;
+    const minRow = Math.min(psStartRow, psEndRow);
+    const maxRow = Math.max(psStartRow, psEndRow);
+    const minCol = Math.min(psStartCol, psEndCol);
+    const maxCol = Math.max(psStartCol, psEndCol);
     const tileStride = gridLayout.tileSize + GRID_GAP;
     const width =
       (maxCol - minCol + 1) * tileStride - (GRID_GAP > 0 ? GRID_GAP : 0);
@@ -4285,6 +4464,7 @@ export default function TestScreen() {
       brush.mode !== 'pattern' ||
       isPatternCreationMode ||
       !selectedPattern ||
+      !effectivePatternForHook ||
       patternAnchorIndex === null ||
       gridLayout.columns === 0
     ) {
@@ -4293,9 +4473,9 @@ export default function TestScreen() {
     const rotationCW =
       ((patternRotations[selectedPattern.id] ?? 0) + 360) % 360;
     const widthCells =
-      rotationCW % 180 === 0 ? selectedPattern.width : selectedPattern.height;
+      rotationCW % 180 === 0 ? effectivePatternForHook.width : effectivePatternForHook.height;
     const heightCells =
-      rotationCW % 180 === 0 ? selectedPattern.height : selectedPattern.width;
+      rotationCW % 180 === 0 ? effectivePatternForHook.height : effectivePatternForHook.width;
     if (widthCells <= 0 || heightCells <= 0) {
       return null;
     }
@@ -4314,6 +4494,7 @@ export default function TestScreen() {
     brush.mode,
     isPatternCreationMode,
     selectedPattern,
+    effectivePatternForHook,
     patternAnchorIndex,
     patternRotations,
     gridLayout.columns,
@@ -4325,10 +4506,16 @@ export default function TestScreen() {
       setShowPatternSaveModal(false);
       return;
     }
-    const { minRow, maxRow, minCol, maxCol } = getSelectionBounds(
-      patternSelection.start,
-      patternSelection.end
-    );
+    // patternSelection is in layer-N space; use gridLayout.columns (not fullGridColumnsForMapping)
+    const pCols = gridLayout.columns;
+    const psStartRow = Math.floor(patternSelection.start / pCols);
+    const psStartCol = patternSelection.start % pCols;
+    const psEndRow = Math.floor(patternSelection.end / pCols);
+    const psEndCol = patternSelection.end % pCols;
+    const minRow = Math.min(psStartRow, psEndRow);
+    const maxRow = Math.max(psStartRow, psEndRow);
+    const minCol = Math.min(psStartCol, psEndCol);
+    const maxCol = Math.max(psStartCol, psEndCol);
     const width = maxCol - minCol + 1;
     const height = maxRow - minRow + 1;
     if (width <= 0 || height <= 0) {
@@ -4348,11 +4535,67 @@ export default function TestScreen() {
         nextTiles.push({ ...tile });
       }
     }
+    // Capture finer layer tiles when editing at a higher (coarser) internal level
+    let finerLayerCaptures: Record<number, { tiles: Tile[]; width: number; height: number }> | undefined;
+    if (isEditingHigherLayer && levelGridInfo && activeFile) {
+      const gridCols = activeFile.grid.columns;
+      const gridRows = activeFile.grid.rows;
+      // Compute the level-1 bounding box of the current selection
+      let l1MinRow = Infinity, l1MaxRow = -Infinity, l1MinCol = Infinity, l1MaxCol = -Infinity;
+      for (let j = minRow; j <= maxRow; j++) {
+        for (let i = minCol; i <= maxCol; i++) {
+          const cellIdx = j * levelGridInfo.levelCols + i;
+          const cell = levelGridInfo.cells[cellIdx];
+          if (!cell) continue;
+          if (cell.minRow < l1MinRow) l1MinRow = cell.minRow;
+          if (cell.maxRow > l1MaxRow) l1MaxRow = cell.maxRow;
+          if (cell.minCol < l1MinCol) l1MinCol = cell.minCol;
+          if (cell.maxCol > l1MaxCol) l1MaxCol = cell.maxCol;
+        }
+      }
+      if (l1MinRow !== Infinity) {
+        finerLayerCaptures = {};
+        for (let M = 1; M < editingLevel; M++) {
+          const mInfo = getLevelGridInfo(gridCols, gridRows, M);
+          if (!mInfo) continue;
+          const mLevelCols = mInfo.levelCols;
+          let mMinRow = Infinity, mMaxRow = -Infinity, mMinCol = Infinity, mMaxCol = -Infinity;
+          mInfo.cells.forEach((cell, idx) => {
+            if (
+              cell.minRow >= l1MinRow && cell.maxRow <= l1MaxRow &&
+              cell.minCol >= l1MinCol && cell.maxCol <= l1MaxCol
+            ) {
+              const mr = Math.floor(idx / mLevelCols);
+              const mc = idx % mLevelCols;
+              if (mr < mMinRow) mMinRow = mr;
+              if (mr > mMaxRow) mMaxRow = mr;
+              if (mc < mMinCol) mMinCol = mc;
+              if (mc > mMaxCol) mMaxCol = mc;
+            }
+          });
+          if (mMinRow === Infinity) continue;
+          const mW = mMaxCol - mMinCol + 1;
+          const mH = mMaxRow - mMinRow + 1;
+          const sourceTiles = M === 1 ? (activeFile.tiles ?? []) : (activeFile.layers?.[M] ?? []);
+          const mTiles: Tile[] = [];
+          for (let mr = mMinRow; mr <= mMaxRow; mr++) {
+            for (let mc = mMinCol; mc <= mMaxCol; mc++) {
+              const src = sourceTiles[mr * mLevelCols + mc];
+              mTiles.push(src ? { ...src } : { imageIndex: -1, rotation: 0, mirrorX: false, mirrorY: false });
+            }
+          }
+          finerLayerCaptures[M] = { tiles: mTiles, width: mW, height: mH };
+        }
+        if (Object.keys(finerLayerCaptures).length === 0) finerLayerCaptures = undefined;
+      }
+    }
     const patternId = createPattern({
       category: primaryCategory,
       width,
       height,
       tiles: nextTiles,
+      ...(isEditingHigherLayer && { createdAtLevel: editingLevel }),
+      ...(finerLayerCaptures && { layerTiles: finerLayerCaptures }),
       ...(saveTileSetIds.length > 0 && { tileSetIds: saveTileSetIds }),
     });
     setSelectedPatternId(patternId);
@@ -4367,6 +4610,74 @@ export default function TestScreen() {
     setPatternSelection(null);
     setIsPatternCreationMode(false);
     setBrush({ mode: 'pattern' });
+  };
+
+  /**
+   * Apply pattern data to finer layers (levels 1..editingLevel-1) for flood fill operations.
+   * @param isFloodComplete - if true, only fill cells where imageIndex === -1 (flood complete mode).
+   */
+  const applyPatternFloodToFinerLayers = (isFloodComplete: boolean) => {
+    if (!isEditingHigherLayer || !levelGridInfo || !selectedPattern || !activeFile) return;
+    if (selectedPattern.createdAtLevel == null || editingLevel > selectedPattern.createdAtLevel) return;
+    if (!selectedPattern.layerTiles) return;
+    const gridCols = activeFile.grid.columns;
+    const gridRows = activeFile.grid.rows;
+    const patternRotation = patternRotations[selectedPattern.id] ?? 0;
+    const patternMirrorX = patternMirrors[selectedPattern.id] ?? false;
+    // Get selection bounds in level-N space (null = entire grid)
+    let selMinRow_N: number, selMaxRow_N: number, selMinCol_N: number, selMaxCol_N: number;
+    if (hookCanvasSelection) {
+      const lc = levelGridInfo.levelCols;
+      const sMinRow = Math.floor(hookCanvasSelection.start / lc);
+      const sMinCol = hookCanvasSelection.start % lc;
+      const sMaxRow = Math.floor(hookCanvasSelection.end / lc);
+      const sMaxCol = hookCanvasSelection.end % lc;
+      selMinRow_N = Math.min(sMinRow, sMaxRow);
+      selMaxRow_N = Math.max(sMinRow, sMaxRow);
+      selMinCol_N = Math.min(sMinCol, sMaxCol);
+      selMaxCol_N = Math.max(sMinCol, sMaxCol);
+    } else {
+      selMinRow_N = 0; selMaxRow_N = levelGridInfo.levelRows - 1;
+      selMinCol_N = 0; selMaxCol_N = levelGridInfo.levelCols - 1;
+    }
+    for (let M = 1; M < editingLevel; M++) {
+      const patternDataM = selectedPattern.layerTiles[M];
+      if (!patternDataM) continue;
+      const mInfo = getLevelGridInfo(gridCols, gridRows, M);
+      if (!mInfo) continue;
+      const offsets = getLevelNtoMOffsets(gridCols, gridRows, editingLevel, M);
+      if (!offsets) continue;
+      const { scale, C_row, C_col } = offsets;
+      const mLevelCols = mInfo.levelCols;
+      const mMinRow = Math.max(0, selMinRow_N * scale + C_row);
+      const mMaxRow = Math.min(mInfo.levelRows - 1, (selMaxRow_N + 1) * scale + C_row - 1);
+      const mMinCol = Math.max(0, selMinCol_N * scale + C_col);
+      const mMaxCol = Math.min(mLevelCols - 1, (selMaxCol_N + 1) * scale + C_col - 1);
+      if (mMinRow > mMaxRow || mMinCol > mMaxCol) continue;
+      const sourceTiles = M === 1 ? (activeFile.tiles ?? []) : (activeFile.layers?.[M] ?? []);
+      const newMTiles = [...sourceTiles];
+      while (newMTiles.length < mInfo.cells.length) {
+        newMTiles.push({ imageIndex: -1, rotation: 0, mirrorX: false, mirrorY: false });
+      }
+      for (let mr = mMinRow; mr <= mMaxRow; mr++) {
+        for (let mc = mMinCol; mc <= mMaxCol; mc++) {
+          const mIdx = mr * mLevelCols + mc;
+          if (isFloodComplete && (newMTiles[mIdx]?.imageIndex ?? -1) !== -1) continue;
+          const tile = computePatternTileFromData(
+            mr, mc, patternDataM.tiles, patternDataM.width, patternDataM.height,
+            patternRotation, patternMirrorX
+          );
+          if (tile) {
+            newMTiles[mIdx] = { imageIndex: tile.imageIndex, rotation: tile.rotation, mirrorX: tile.mirrorX, mirrorY: tile.mirrorY };
+          }
+        }
+      }
+      if (M === 1) {
+        updateActiveFileTilesL1(newMTiles);
+      } else {
+        updateActiveFileLayer(M, newMTiles);
+      }
+    }
   };
 
   const pendingPatternPreview = useMemo(() => {
@@ -6792,6 +7103,7 @@ export default function TestScreen() {
                 pendingFloodCompleteRef.current = setTimeout(() => {
                   pendingFloodCompleteRef.current = null;
                   floodFill();
+                  applyPatternFloodToFinerLayers(false);
                 }, 0);
               }}
               onLongPress={() => {
@@ -6803,6 +7115,7 @@ export default function TestScreen() {
                   pendingFloodCompleteRef.current = null;
                 }
                 floodComplete();
+                applyPatternFloodToFinerLayers(true);
               }}
             />
             <ToolbarButton

@@ -14,6 +14,10 @@ export type TilePattern = {
   /** UGC tile set IDs this pattern uses; required to resolve tile names when displaying. */
   tileSetIds?: string[];
   createdAt: number;
+  /** Internal grid level at which tiles/width/height were captured (1 = finest). Absent for legacy patterns. */
+  createdAtLevel?: number;
+  /** Finer-layer tile data keyed by internal level (level < createdAtLevel). */
+  layerTiles?: Record<number, { tiles: Tile[]; width: number; height: number }>;
 };
 
 const STORAGE_KEY = 'tile-patterns-v1';
@@ -60,6 +64,8 @@ export const useTilePatterns = () => {
       height: number;
       tiles: Tile[];
       tileSetIds?: string[];
+      createdAtLevel?: number;
+      layerTiles?: Record<number, { tiles: Tile[]; width: number; height: number }>;
     }) => {
       const nextPattern: TilePattern = {
         id: createId(),
@@ -71,6 +77,9 @@ export const useTilePatterns = () => {
         ...(Array.isArray(payload.tileSetIds) &&
           payload.tileSetIds.length > 0 && { tileSetIds: payload.tileSetIds }),
         createdAt: Date.now(),
+        ...(payload.createdAtLevel != null && { createdAtLevel: payload.createdAtLevel }),
+        ...(payload.layerTiles &&
+          Object.keys(payload.layerTiles).length > 0 && { layerTiles: payload.layerTiles }),
       };
       setPatterns((prev) => {
         const next = [nextPattern, ...prev];
