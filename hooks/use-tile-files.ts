@@ -12,7 +12,7 @@ import {
     serializeTileFile,
     type TileFilePayload
 } from '@/utils/tile-format';
-import { type GridLayout, type Tile } from '@/utils/tile-grid';
+import { buildInitialTiles, getLevelGridInfo, type GridLayout, type Tile } from '@/utils/tile-grid';
 
 export type TileFile = {
   id: string;
@@ -393,13 +393,22 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
         const file = prev[fileIdx]!;
         let updatedFile: TileFile;
         if (level === 1) {
-          const currentTiles = file.tiles ? [...file.tiles] : [];
+          const fullSize = file.grid.columns * file.grid.rows;
+          const currentTiles: Tile[] = file.tiles
+            ? [...file.tiles]
+            : buildInitialTiles(fullSize);
           for (const [idxStr, tile] of Object.entries(cellUpdates)) {
             currentTiles[parseInt(idxStr, 10)] = tile;
           }
           updatedFile = { ...file, tiles: currentTiles, updatedAt: Date.now() };
         } else {
-          const currentTiles = file.layers?.[level] ? [...file.layers[level]!] : [];
+          const levelInfo = getLevelGridInfo(file.grid.columns, file.grid.rows, level);
+          const fullSize = levelInfo ? levelInfo.cells.length : 0;
+          const existing = file.layers?.[level];
+          const currentTiles: Tile[] =
+            existing && existing.length > 0
+              ? [...existing]
+              : buildInitialTiles(fullSize);
           for (const [idxStr, tile] of Object.entries(cellUpdates)) {
             currentTiles[parseInt(idxStr, 10)] = tile;
           }

@@ -964,6 +964,18 @@ export default function TestScreen() {
   const [pendingMoveOffset, setPendingMoveOffset] = useState<{ dRow: number; dCol: number } | null>(null);
   const moveDragStartRef = useRef<{ x: number; y: number } | null>(null);
   const [patternAnchorIndex, setPatternAnchorIndex] = useState<number | null>(null);
+  const [stampDragPatternId, setStampDragPatternId] = useState<string | null>(null);
+  const [stampDropCell, setStampDropCell] = useState<{ row: number; col: number } | null>(null);
+  const [showStampConfirmDialog, setShowStampConfirmDialog] = useState(false);
+  const [pendingStampCell, setPendingStampCell] = useState<{ row: number; col: number } | null>(null);
+  const stampDragTransformRef = useRef<{ rotation: number; mirrorX: boolean }>({ rotation: 0, mirrorX: false });
+  const stampDragPatternIdRef = useRef<string | null>(null);
+  const isStampDraggingRef = useRef(false);
+  const [pendingStampPatternId, setPendingStampPatternId] = useState<string | null>(null);
+  // Absolute screen position of the canvas, captured at drag start for coordinate conversion.
+  const canvasScreenOffsetRef = useRef({ x: 0, y: 0 });
+  // File grid (L1) dimensions cached at drag start, used to scale pattern level dimensions.
+  const stampGridDimsRef = useRef({ cols: 0, rows: 0 });
   /** Accumulated finer-layer cell updates during pattern painting. Flushed on debounce timer. */
   const finerLayerPendingRef = useRef<Record<number, Record<number, Tile>>>({});
   const finerLayerFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1798,6 +1810,7 @@ export default function TestScreen() {
     fullGridRowsForZoom,
     moveRegion,
     rotateRegion,
+    placeStamp,
     fullTilesForSave,
     fullGridLayoutForSave,
     mirrorZoomRegionToRestOfGrid,
@@ -4440,6 +4453,190 @@ export default function TestScreen() {
       height,
     };
   }, [isMoveMode, canvasSelection, moveDragOffset, selectionBoundsFullGrid, selectionBoundsLayerGrid, isEditingHigherLayer, gridLayout, zoomRegion, level1DisplayLayout.tileSize]);
+
+  const handlePatternStampDragStart = useCallback((patternId: string, rotation: number, mirrorX: boolean) => {
+    isStampDraggingRef.current = true;
+    stampDragPatternIdRef.current = patternId;
+    setStampDragPatternId(patternId);
+    stampDragTransformRef.current = { rotation, mirrorX };
+    setStampDropCell(null);
+    stampGridDimsRef.current = {
+      cols: activeFile?.grid.columns ?? 0,
+      rows: activeFile?.grid.rows ?? 0,
+    };
+    // Capture the canvas's absolute screen position for screen→canvas coordinate conversion.
+    // On web getBoundingClientRect gives client coords; on native measure() gives page coords.
+    if (isWeb) {
+      const el = gridTouchRef.current as any;
+      if (el?.getBoundingClientRect) {
+        const rect = el.getBoundingClientRect();
+        canvasScreenOffsetRef.current = { x: rect.left, y: rect.top };
+      }
+    } else {
+      (gridTouchRef.current as any)?.measure?.(
+        (_fx: number, _fy: number, _w: number, _h: number, px: number, py: number) => {
+          canvasScreenOffsetRef.current = { x: px, y: py };
+        }
+      );
+    }
+  }, [isWeb, activeFile?.grid.columns, activeFile?.grid.rows]);
+
+  const handlePatternStampDragMove = useCallback((screenX: number, screenY: number) => {
+    if (!stampDragPatternId) return;
+    const pattern = patterns.find((p) => p.id === stampDragPatternId);
+    if (!pattern) return;
+    const { rotation, mirrorX } = stampDragTransformRef.current;
+    const rotCW = ((rotation % 360) + 360) % 360;
+    // Scale pattern dimensions from createdAtLevel units to L1 display units.
+    const { rotW: rotW_native, rotH: rotH_native } = getRotatedDimensions(rotCW, pattern.width, pattern.height);
+    const mainLevel = pattern.createdAtLevel ?? 1;
+    let displayW = rotW_native;
+    let displayH = rotH_native;
+    if (mainLevel > 1) {
+      const { cols: gc, rows: gr } = stampGridDimsRef.current;
+      const offsets = getLevelNtoMOffsets(gc, gr, mainLevel, 1);
+      if (offsets) { displayW = rotW_native * offsets.scale; displayH = rotH_native * offsets.scale; }
+    }
+    const canvasX = screenX - canvasScreenOffsetRef.current.x;
+    const canvasY = screenY - canvasScreenOffsetRef.current.y;
+    const tileStride = effectiveTileSize + GRID_GAP;
+    const col = Math.max(0, Math.min(effectiveCols - displayW, Math.floor(canvasX / tileStride) - Math.floor(displayW / 2)));
+    const row = Math.max(0, Math.min(effectiveRows - displayH, Math.floor(canvasY / tileStride) - Math.floor(displayH / 2)));
+    if (
+      canvasX >= 0 &&
+      canvasY >= 0 &&
+      canvasX < effectiveCols * tileStride &&
+      canvasY < effectiveRows * tileStride
+    ) {
+      setStampDropCell({ row, col });
+    } else {
+      setStampDropCell(null);
+    }
+  }, [stampDragPatternId, patterns, effectiveTileSize, effectiveCols, effectiveRows]);
+
+  const handlePatternStampDragEnd = useCallback((screenX: number, screenY: number) => {
+    isStampDraggingRef.current = false;
+    const patternId = stampDragPatternIdRef.current;
+    stampDragPatternIdRef.current = null;
+    if (patternId) {
+      const pattern = patterns.find((p) => p.id === patternId);
+      if (pattern) {
+        const { rotation, mirrorX } = stampDragTransformRef.current;
+        const rotCW = ((rotation % 360) + 360) % 360;
+        const { rotW: rotW_native, rotH: rotH_native } = getRotatedDimensions(rotCW, pattern.width, pattern.height);
+        const mainLevel = pattern.createdAtLevel ?? 1;
+        let displayW = rotW_native;
+        let displayH = rotH_native;
+        if (mainLevel > 1) {
+          const { cols: gc, rows: gr } = stampGridDimsRef.current;
+          const offsets = getLevelNtoMOffsets(gc, gr, mainLevel, 1);
+          if (offsets) { displayW = rotW_native * offsets.scale; displayH = rotH_native * offsets.scale; }
+        }
+        const canvasX = screenX - canvasScreenOffsetRef.current.x;
+        const canvasY = screenY - canvasScreenOffsetRef.current.y;
+        const tileStride = effectiveTileSize + GRID_GAP;
+        if (canvasX >= 0 && canvasY >= 0 && canvasX < effectiveCols * tileStride && canvasY < effectiveRows * tileStride) {
+          const col = Math.max(0, Math.min(effectiveCols - displayW, Math.floor(canvasX / tileStride) - Math.floor(displayW / 2)));
+          const row = Math.max(0, Math.min(effectiveRows - displayH, Math.floor(canvasY / tileStride) - Math.floor(displayH / 2)));
+          setPendingStampCell({ row, col });
+          setPendingStampPatternId(patternId);
+          setShowStampConfirmDialog(true);
+        }
+      }
+    }
+    setStampDragPatternId(null);
+    setStampDropCell(null);
+  }, [patterns, effectiveTileSize, effectiveCols, effectiveRows]);
+
+  const handlePatternStampDragCancel = useCallback(() => {
+    isStampDraggingRef.current = false;
+    stampDragPatternIdRef.current = null;
+    setStampDragPatternId(null);
+    setStampDropCell(null);
+  }, []);
+
+  /**
+   * Write stamp tiles directly to the file at a specific level.
+   * anchorRow_L1 / anchorCol_L1 are always in L1 (finest, internal level 1) coordinates.
+   */
+  const applyStampToFileLevel = useCallback(
+    (
+      targetLevel: number,
+      anchorRow_L1: number,
+      anchorCol_L1: number,
+      patternTiles: Tile[],
+      patternWidth: number,
+      patternHeight: number,
+      rotation: number,
+      mirrorX: boolean
+    ) => {
+      const gridCols = activeFile?.grid.columns ?? 0;
+      const gridRows = activeFile?.grid.rows ?? 0;
+      const mInfo = getLevelGridInfo(gridCols, gridRows, targetLevel);
+      if (!mInfo) return;
+
+      // Anchor is in L1 units; contract to targetLevel if it is coarser than L1.
+      let anchorRow_M = anchorRow_L1;
+      let anchorCol_M = anchorCol_L1;
+      if (targetLevel > 1) {
+        const offsets = getLevelNtoMOffsets(gridCols, gridRows, targetLevel, 1);
+        if (!offsets) return;
+        anchorRow_M = Math.floor((anchorRow_L1 - offsets.C_row) / offsets.scale);
+        anchorCol_M = Math.floor((anchorCol_L1 - offsets.C_col) / offsets.scale);
+      }
+
+      const rotCW = ((rotation % 360) + 360) % 360;
+      const { rotW, rotH } = getRotatedDimensions(rotCW, patternWidth, patternHeight);
+      const { levelCols: mCols, levelRows: mRows } = mInfo;
+      const rot = normalizeRotationCW(rotCW);
+      const cellUpdates: Record<number, Tile> = {};
+      for (let dr = 0; dr < rotH; dr++) {
+        for (let dc = 0; dc < rotW; dc++) {
+          const mr = anchorRow_M + dr;
+          const mc = anchorCol_M + dc;
+          if (mr < 0 || mr >= mRows || mc < 0 || mc >= mCols) continue;
+          const mapped = displayToPatternCell(dr, dc, patternWidth, patternHeight, rotCW, mirrorX);
+          if (!mapped) continue;
+          const srcTile = patternTiles[mapped.sourceRow * patternWidth + mapped.sourceCol];
+          if (!srcTile) continue;
+          const tr = applyGroupRotationToTile(srcTile.rotation, srcTile.mirrorX, srcTile.mirrorY, rot);
+          cellUpdates[mr * mCols + mc] = {
+            imageIndex: srcTile.imageIndex,
+            rotation: tr.rotation,
+            mirrorX: mirrorX ? !tr.mirrorX : tr.mirrorX,
+            mirrorY: tr.mirrorY,
+            name: srcTile.name,
+          };
+        }
+      }
+      if (Object.keys(cellUpdates).length > 0) {
+        updateActiveFileLayerCells(targetLevel, cellUpdates);
+      }
+    },
+    [activeFile?.grid.columns, activeFile?.grid.rows, updateActiveFileLayerCells]
+  );
+
+  const stampPreviewRect = useMemo(() => {
+    if (!stampDragPatternId || !stampDropCell) return null;
+    const pattern = patterns.find((p) => p.id === stampDragPatternId);
+    if (!pattern) return null;
+    const rotCW = ((stampDragTransformRef.current.rotation % 360) + 360) % 360;
+    const { rotW: rotW_native, rotH: rotH_native } = getRotatedDimensions(rotCW, pattern.width, pattern.height);
+    const mainLevel = pattern.createdAtLevel ?? 1;
+    let displayW = rotW_native;
+    let displayH = rotH_native;
+    if (mainLevel > 1) {
+      const offsets = getLevelNtoMOffsets(stampGridDimsRef.current.cols, stampGridDimsRef.current.rows, mainLevel, 1);
+      if (offsets) { displayW = rotW_native * offsets.scale; displayH = rotH_native * offsets.scale; }
+    }
+    const tileStride = effectiveTileSize + GRID_GAP;
+    return {
+      left: stampDropCell.col * tileStride,
+      top: stampDropCell.row * tileStride,
+      width: displayW * tileStride - (GRID_GAP > 0 ? GRID_GAP : 0),
+      height: displayH * tileStride - (GRID_GAP > 0 ? GRID_GAP : 0),
+    };
+  }, [stampDragPatternId, stampDropCell, patterns, effectiveTileSize]);
 
   const lockedCellIndicesSet = useMemo(() => {
     const cells = activeLayerLockedCells ?? [];
@@ -7385,6 +7582,9 @@ export default function TestScreen() {
           {movePreviewRect && (
             <View pointerEvents="none" style={[styles.movePreviewBox, movePreviewRect]} />
           )}
+          {stampPreviewRect && (
+            <View pointerEvents="none" style={[styles.movePreviewBox, stampPreviewRect]} />
+          )}
           {lockedBoundaryEdges.map((rect, idx) => (
             <View
               key={`locked-edge-${idx}`}
@@ -7418,6 +7618,9 @@ export default function TestScreen() {
               }}
                 onMouseDown={(event: any) => {
                   if (isWeb && ignoreNextMouseRef.current) {
+                    return;
+                  }
+                  if (isStampDraggingRef.current) {
                     return;
                   }
                   canvasMouseDidMoveRef.current = false;
@@ -7463,6 +7666,9 @@ export default function TestScreen() {
               }}
               onMouseMove={(event: any) => {
                 if (event.buttons === 1) {
+                  if (isStampDraggingRef.current) {
+                    return;
+                  }
                   canvasMouseDidMoveRef.current = true;
                   const point = getRelativePoint(event);
                   if (point) {
@@ -7565,6 +7771,9 @@ export default function TestScreen() {
                 // Use capture phase so we receive touchstart even when the target is a child
                 // (e.g. tile image). Otherwise on mobile web, starting a drag on an initialized
                 // tile only fires tap and touchmove never runs.
+                if (isStampDraggingRef.current) {
+                  return;
+                }
                 const touchCount = event?.touches?.length ?? 0;
                 if (isWeb && isMobileWeb && touchCount >= 2) {
                   pendingSingleTouchPointRef.current = null;
@@ -7663,6 +7872,9 @@ export default function TestScreen() {
               }}
               onTouchMoveCapture={(event: any) => {
                 if (!isTouchDragActiveRef.current) {
+                  return;
+                }
+                if (isStampDraggingRef.current) {
                   return;
                 }
                 canvasTouchDidMoveRef.current = true;
@@ -8694,6 +8906,85 @@ export default function TestScreen() {
               </View>
             </>
           )}
+          {showStampConfirmDialog && pendingStampCell && pendingStampPatternId && (
+            <>
+              <Pressable
+                style={StyleSheet.absoluteFill}
+                onPress={() => {
+                  setShowStampConfirmDialog(false);
+                  setPendingStampCell(null);
+                  setPendingStampPatternId(null);
+                }}
+                accessibilityRole="button"
+                accessibilityLabel="Cancel stamp"
+              />
+              <View style={styles.moveConfirmPanelWrap} pointerEvents="box-none">
+                <ThemedView style={styles.moveConfirmPanel}>
+                  <ThemedText type="defaultSemiBold" style={styles.moveConfirmTitle}>
+                    Place Stamp?
+                  </ThemedText>
+                  <View style={styles.moveConfirmButtons}>
+                    <Pressable
+                      onPress={() => {
+                        setShowStampConfirmDialog(false);
+                        setPendingStampCell(null);
+                        setPendingStampPatternId(null);
+                      }}
+                      style={styles.moveConfirmButton}
+                      accessibilityRole="button"
+                      accessibilityLabel="Cancel"
+                    >
+                      <ThemedText type="defaultSemiBold">Cancel</ThemedText>
+                    </Pressable>
+                    <Pressable
+                      onPress={() => {
+                        const p = patterns.find((x) => x.id === pendingStampPatternId);
+                        const { rotation, mirrorX } = stampDragTransformRef.current;
+                        if (p && pendingStampCell) {
+                          // pendingStampCell is always in L1 (finest, internal level 1) coordinates.
+                          const { row: anchorRow_L1, col: anchorCol_L1 } = pendingStampCell;
+                          const mainLevel = p.createdAtLevel ?? 1;
+                          const gridCols = activeFile?.grid.columns ?? 0;
+                          const gridRows = activeFile?.grid.rows ?? 0;
+                          if (mainLevel === 1) {
+                            // L1 pattern: hook's placeStamp handles undo + live state update.
+                            placeStamp(anchorRow_L1, anchorCol_L1, p.tiles, p.width, p.height, rotation, mirrorX);
+                          } else if (mainLevel === editingLevel) {
+                            // Coarser pattern at same level as editing: convert L1 anchor to editingLevel
+                            // units and use hook's placeStamp for undo + live state update.
+                            const offsets = getLevelNtoMOffsets(gridCols, gridRows, mainLevel, 1);
+                            const aRow = offsets ? Math.floor((anchorRow_L1 - offsets.C_row) / offsets.scale) : anchorRow_L1;
+                            const aCol = offsets ? Math.floor((anchorCol_L1 - offsets.C_col) / offsets.scale) : anchorCol_L1;
+                            placeStamp(aRow, aCol, p.tiles, p.width, p.height, rotation, mirrorX);
+                          } else {
+                            // Different level: write directly to file state (L1 anchor).
+                            applyStampToFileLevel(mainLevel, anchorRow_L1, anchorCol_L1, p.tiles, p.width, p.height, rotation, mirrorX);
+                          }
+                          // Apply any sub-layer (finer) tiles stored in the pattern (L1 anchor).
+                          if (p.layerTiles) {
+                            for (const [levelStr, layerData] of Object.entries(p.layerTiles)) {
+                              const M = parseInt(levelStr, 10);
+                              applyStampToFileLevel(M, anchorRow_L1, anchorCol_L1, layerData.tiles, layerData.width, layerData.height, rotation, mirrorX);
+                            }
+                          }
+                        }
+                        setShowStampConfirmDialog(false);
+                        setPendingStampCell(null);
+                        setPendingStampPatternId(null);
+                      }}
+                      style={[styles.moveConfirmButton, styles.moveConfirmButtonPrimary]}
+                      accessibilityRole="button"
+                      accessibilityLabel="Place"
+                    >
+                      <ThemedText type="defaultSemiBold" style={styles.moveConfirmButtonPrimaryText}>
+                        Place
+                      </ThemedText>
+                    </Pressable>
+                  </View>
+                </ThemedView>
+              </View>
+            </>
+          )}
           {showModifyTileSetBanner && (
             <>
               <Pressable
@@ -9115,6 +9406,10 @@ export default function TestScreen() {
             dismissModifyBanner();
             setShowTileSetChooser(true);
           }}
+          onPatternStampDragStart={handlePatternStampDragStart}
+          onPatternStampDragMove={handlePatternStampDragMove}
+          onPatternStampDragEnd={handlePatternStampDragEnd}
+          onPatternStampDragCancel={handlePatternStampDragCancel}
         />
         {showPatternExportMenu && (
           <ThemedView style={[styles.overlay, { zIndex: 40 }]} accessibilityRole="dialog">

@@ -109,6 +109,10 @@ export type ModifyPaletteProps = {
     patternRotations: Record<string, number>;
     patternMirrors: Record<string, boolean>;
   }) => void;
+  onPatternStampDragStart?: (patternId: string, rotation: number, mirrorX: boolean) => void;
+  onPatternStampDragMove?: (screenX: number, screenY: number) => void;
+  onPatternStampDragEnd?: (screenX: number, screenY: number) => void;
+  onPatternStampDragCancel?: () => void;
 };
 
 function ModifyPaletteInner({
@@ -155,6 +159,10 @@ function ModifyPaletteInner({
   onPatternRotationsChange,
   onPatternMirrorsChange,
   onPatternChange,
+  onPatternStampDragStart,
+  onPatternStampDragMove,
+  onPatternStampDragEnd,
+  onPatternStampDragCancel,
 }: ModifyPaletteProps) {
   const modifyPaletteRenderCountRef = useRef(0);
   const lastModifyPaletteLogRef = useRef(0);
@@ -395,6 +403,10 @@ function ModifyPaletteInner({
         }}
         onRandomLongPress={onRandomLongPress}
         onRandomDoubleTap={onRandomDoubleTap}
+        onPatternStampDragStart={onPatternStampDragStart}
+        onPatternStampDragMove={onPatternStampDragMove}
+        onPatternStampDragEnd={onPatternStampDragEnd}
+        onPatternStampDragCancel={onPatternStampDragCancel}
       />
       {showPatternModal && (
         <View style={styles.patternModal} accessibilityRole="dialog">

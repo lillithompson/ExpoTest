@@ -5,6 +5,7 @@ import type { ReactNode } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
     Modal,
+    PanResponder,
     PixelRatio,
     Platform,
     Pressable,
@@ -99,6 +100,10 @@ type Props = {
   rowGap: number;
   rows?: number;
   showPattern?: boolean;
+  onPatternStampDragStart?: (patternId: string, rotation: number, mirrorX: boolean) => void;
+  onPatternStampDragMove?: (screenX: number, screenY: number) => void;
+  onPatternStampDragEnd?: (screenX: number, screenY: number) => void;
+  onPatternStampDragCancel?: () => void;
 };
 
 type FavoritesState = {
@@ -252,6 +257,10 @@ export function TileBrushPanel({
   rowGap,
   rows = 2,
   showPattern = true,
+  onPatternStampDragStart,
+  onPatternStampDragMove,
+  onPatternStampDragEnd,
+  onPatternStampDragCancel,
 }: Props) {
   const [containerWidth, setContainerWidth] = useState(0);
   const [contentWidth, setContentWidth] = useState(0);
@@ -269,6 +278,10 @@ export function TileBrushPanel({
   const rowCount = Math.max(1, rows);
   const columnHeight = itemSize * rowCount + rowGap * Math.max(0, rowCount - 1);
   const lastTapRef = useRef<{ time: number; index: number } | null>(null);
+  type PanResponderInstance = ReturnType<typeof PanResponder.create>;
+  const panResponderMapRef = useRef<Map<string, PanResponderInstance>>(new Map());
+  const stampDragCallbacksRef = useRef({ onPatternStampDragStart, onPatternStampDragMove, onPatternStampDragEnd, onPatternStampDragCancel });
+  stampDragCallbacksRef.current = { onPatternStampDragStart, onPatternStampDragMove, onPatternStampDragEnd, onPatternStampDragCancel };
   const [favorites, setFavorites] = useState<Record<string, string>>(
     defaultFavoritesState.favorites
   );
@@ -754,25 +767,54 @@ export function TileBrushPanel({
               isTile ? favorites[entry.tile.name] : null;
             const tileScale =
               isTile ? strokeScaleByName?.get(entry.tile.name) ?? 1 : 1;
-            return (
-              <Pressable
-                key={
-                  isRandom
-                    ? 'random'
-                    : isDraw
-                      ? 'draw'
-                      : isErase
-                        ? 'erase'
-                        : isClone
-                          ? 'clone'
-                          : isPatternNew
-                            ? 'pattern-new'
-                            : isPatternThumb
-                              ? `pattern-thumb-${entry.id}`
-                              : isTile
-                                ? `palette-${idx}`
-                                : 'tile'
+            // Pattern stamp drag: build/cache a PanResponder per pattern thumb
+            let stampPanResponder: ReturnType<typeof PanResponder.create> | null = null;
+            if (isPatternThumb) {
+              const panKey = `${entry.id}:${entry.rotation}:${entry.mirrorX ? 1 : 0}`;
+              if (!panResponderMapRef.current.has(panKey)) {
+                for (const k of [...panResponderMapRef.current.keys()]) {
+                  if (k.startsWith(`${entry.id}:`)) panResponderMapRef.current.delete(k);
                 }
+                const cId = entry.id;
+                const cRot = entry.rotation;
+                const cMX = entry.mirrorX;
+                panResponderMapRef.current.set(panKey, PanResponder.create({
+                  onStartShouldSetPanResponder: () => false,
+                  onMoveShouldSetPanResponder: (_, gs) => gs.dx * gs.dx + gs.dy * gs.dy > 64,
+                  onPanResponderGrant: () => {
+                    stampDragCallbacksRef.current.onPatternStampDragStart?.(cId, cRot, cMX);
+                  },
+                  onPanResponderMove: (_, gs) => {
+                    stampDragCallbacksRef.current.onPatternStampDragMove?.(gs.moveX, gs.moveY);
+                  },
+                  onPanResponderRelease: (_, gs) => {
+                    stampDragCallbacksRef.current.onPatternStampDragEnd?.(gs.moveX, gs.moveY);
+                  },
+                  onPanResponderTerminate: () => {
+                    stampDragCallbacksRef.current.onPatternStampDragCancel?.();
+                  },
+                }));
+              }
+              stampPanResponder = panResponderMapRef.current.get(panKey)!;
+            }
+            const entryKey = isRandom
+              ? 'random'
+              : isDraw
+                ? 'draw'
+                : isErase
+                  ? 'erase'
+                  : isClone
+                    ? 'clone'
+                    : isPatternNew
+                      ? 'pattern-new'
+                      : isPatternThumb
+                        ? `pattern-thumb-${entry.id}`
+                        : isTile
+                          ? `palette-${idx}`
+                          : 'tile';
+            const pressableEl = (
+              <Pressable
+                key={stampPanResponder ? undefined : entryKey}
                 onPressIn={() => {
                   if (isPatternNew) {
                     onPatternCreatePress?.();
@@ -1052,6 +1094,14 @@ export function TileBrushPanel({
                 )}
               </Pressable>
             );
+            if (stampPanResponder) {
+              return (
+                <View key={entryKey} {...stampPanResponder.panHandlers}>
+                  {pressableEl}
+                </View>
+              );
+            }
+            return pressableEl;
           })}
         </View>
       </ScrollView>

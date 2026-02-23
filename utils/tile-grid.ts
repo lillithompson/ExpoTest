@@ -148,13 +148,23 @@ export const normalizeTiles = (
   if (currentTiles.length === 0) {
     return buildInitialTiles(cellCount);
   }
-  if (currentTiles.length === cellCount) {
-    return currentTiles;
+  // Densify sparse arrays (holes from direct index assignment on a previously-empty array).
+  // Object.keys only counts actually-set indices; if fewer than .length, there are holes.
+  const tiles: Tile[] =
+    Object.keys(currentTiles).length < currentTiles.length
+      ? Array.from({ length: currentTiles.length }, (_, i) =>
+          i in currentTiles
+            ? currentTiles[i]!
+            : ({ imageIndex: -1, rotation: 0, mirrorX: false, mirrorY: false } as Tile)
+        )
+      : currentTiles;
+  if (tiles.length === cellCount) {
+    return tiles;
   }
-  if (currentTiles.length < cellCount) {
-    const next = [...currentTiles];
-    for (let i = currentTiles.length; i < cellCount; i += 1) {
-      const source = currentTiles[i % currentTiles.length];
+  if (tiles.length < cellCount) {
+    const next = [...tiles];
+    for (let i = tiles.length; i < cellCount; i += 1) {
+      const source = tiles[i % tiles.length];
       next.push({
         imageIndex: source.imageIndex,
         rotation: source.rotation,
@@ -166,7 +176,7 @@ export const normalizeTiles = (
     }
     return next;
   }
-  return currentTiles.slice(0, cellCount);
+  return tiles.slice(0, cellCount);
 };
 
 /**
