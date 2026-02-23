@@ -16,7 +16,7 @@ export type TilePattern = {
   createdAt: number;
   /** Internal grid level at which tiles/width/height were captured (1 = finest). Absent for legacy patterns. */
   createdAtLevel?: number;
-  /** Finer-layer tile data keyed by internal level (level < createdAtLevel). */
+  /** Tile data for other resolution levels keyed by level number. May hold both finer (< createdAtLevel) and coarser (> createdAtLevel) levels. */
   layerTiles?: Record<number, { tiles: Tile[]; width: number; height: number }>;
 };
 
