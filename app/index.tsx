@@ -117,6 +117,7 @@ import {
 } from '@/utils/tile-grid';
 import { displayToPatternCell, getRotatedDimensions } from '@/utils/pattern-transform';
 import { applyGroupRotationToTile, normalizeRotationCW } from '@/utils/tile-group-rotate';
+import type { CrossLayerContext } from '@/utils/cross-layer-compat';
 import { deserializePattern, deserializeTileSet, serializePattern } from '@/utils/tile-ugc-format';
 import JSZip from 'jszip';
 
@@ -1795,6 +1796,55 @@ export default function TestScreen() {
     return { start: layerMinRow * levelCols + layerMinCol, end: layerMaxRow * levelCols + layerMaxCol };
   }, [canvasSelection, isEditingHigherLayer, levelGridInfo, activeFile?.grid.columns]);
 
+  /** Cross-layer context: tiles from other layers for connectivity checking. */
+  const crossLayerContext: CrossLayerContext | null = useMemo(() => {
+    if (!settings.crossLayerConnectivity) return null;
+    if (!activeFile) return null;
+    const baseCols = activeFile.grid.columns ?? 0;
+    const baseRows = activeFile.grid.rows ?? 0;
+    if (baseCols <= 0 || baseRows <= 0) return null;
+
+    const otherLayers: CrossLayerContext['otherLayers'] = {};
+
+    // Include level 1 if we're not editing it and it's visible
+    if (editingLevel !== 1 && activeFile.layerVisibility?.[1] !== false) {
+      const l1Tiles = activeFile.tiles;
+      if (l1Tiles && l1Tiles.length > 0) {
+        const l1GridInfo = getLevelGridInfo(baseCols, baseRows, 1);
+        if (l1GridInfo) {
+          otherLayers[1] = { tiles: l1Tiles, gridInfo: l1GridInfo };
+        }
+      }
+    }
+
+    // Include other populated layers (2+) that are visible
+    if (activeFile.layers) {
+      for (const levelStr of Object.keys(activeFile.layers)) {
+        const level = Number(levelStr);
+        if (level === editingLevel || level < 2) continue;
+        if (activeFile.layerVisibility?.[level] === false) continue;
+        const layerTiles = activeFile.layers[level];
+        if (!layerTiles || layerTiles.length === 0) continue;
+        // Check if any tile is initialized
+        const hasAny = layerTiles.some((t: Tile) => t && t.imageIndex >= 0);
+        if (!hasAny) continue;
+        const layerGridInfo = getLevelGridInfo(baseCols, baseRows, level);
+        if (layerGridInfo) {
+          otherLayers[level] = { tiles: layerTiles, gridInfo: layerGridInfo };
+        }
+      }
+    }
+
+    if (Object.keys(otherLayers).length === 0) return null;
+
+    return {
+      editingLevel,
+      baseColumns: baseCols,
+      baseRows: baseRows,
+      otherLayers,
+    };
+  }, [activeFile, editingLevel, settings.crossLayerConnectivity]);
+
   const {
     gridLayout,
     tiles,
@@ -1853,6 +1903,7 @@ export default function TestScreen() {
       viewMode === 'modify' && !isEditingHigherLayer ? zoomRegionForGrid : null,
     fullGridColumns: viewMode === 'modify' && zoomRegion ? (activeFile?.grid.columns ?? undefined) : undefined,
     fullGridRows: viewMode === 'modify' && zoomRegion ? (activeFile?.grid.rows ?? undefined) : undefined,
+    crossLayerContext,
   });
   /** When switching resolution layer or file, load that layer's tiles into the grid hook. */
   const lastLayerLoadRef = useRef({ editingLevel: 0, fileId: '' });
@@ -9494,6 +9545,16 @@ export default function TestScreen() {
                     setSettings((prev) => ({ ...prev, allowEdgeConnections: value }))
                   }
                   accessibilityLabel="Toggle edge connections"
+                />
+              </ThemedView>
+              <ThemedView style={styles.toggleRow}>
+                <ThemedText type="defaultSemiBold">Cross-Layer Connectivity</ThemedText>
+                <Switch
+                  value={settings.crossLayerConnectivity}
+                  onValueChange={(value) =>
+                    setSettings((prev) => ({ ...prev, crossLayerConnectivity: value }))
+                  }
+                  accessibilityLabel="Toggle cross-layer connectivity"
                 />
               </ThemedView>
               <ScrollView

@@ -8,6 +8,11 @@ import {
     getRotatedDimensions,
 } from '@/utils/pattern-transform';
 import {
+    buildCrossLayerEdgeMap,
+    type CrossLayerContext,
+    type CrossLayerEdgeMap,
+} from '@/utils/cross-layer-compat';
+import {
     applyGroupRotationToTile,
     normalizeRotationCW,
     rotateCell,
@@ -77,6 +82,8 @@ type Params = {
   isPartOfDragRef?: MutableRefObject<boolean>;
   /** When set, the canvas displays only this region (zoom in). Bounds are in full-grid row/col. All edits apply to full grid; mirror is within zoom region. */
   zoomRegion?: { minRow: number; maxRow: number; minCol: number; maxCol: number } | null;
+  /** Cross-layer context for checking tile connectivity across resolution layers. */
+  crossLayerContext?: CrossLayerContext | null;
   /** @deprecated Unused; zoom uses bounds and fullGridLayout. */
   fullGridColumns?: number;
   /** @deprecated Unused; zoom uses bounds and fullGridLayout. */
@@ -156,6 +163,7 @@ export const useTileGrid = ({
   zoomRegion = null,
   fullGridColumns,
   fullGridRows,
+  crossLayerContext = null,
 }: Params): Result => {
   const clearLogRef = useRef<{ clearId: number } | null>(null);
   const previousTileSourcesRef = useRef<TileSource[] | null>(null);
@@ -822,6 +830,25 @@ export const useTileGrid = ({
   const placementCols = fullGridLayout.columns;
   const placementRows = fullGridLayout.rows;
 
+  const crossLayerEdgeMap: CrossLayerEdgeMap | null = useMemo(() => {
+    if (!crossLayerContext) return null;
+    return buildCrossLayerEdgeMap(
+      crossLayerContext.editingLevel,
+      placementCols,
+      placementRows,
+      crossLayerContext.baseColumns,
+      crossLayerContext.baseRows,
+      crossLayerContext.otherLayers,
+      (tile: Tile) => {
+        const idx = getEffectiveConnectionIndex(tile);
+        if (idx < 0) return null;
+        return compatTables.getConnectionsForPlacement(
+          idx, tile.rotation, tile.mirrorX, tile.mirrorY
+        ) as (boolean | null)[] | null;
+      }
+    );
+  }, [crossLayerContext, placementCols, placementRows, compatTables]);
+
   const buildCompatibleCandidates = (
     cellIndex: number,
     tilesState: Tile[],
@@ -894,6 +921,8 @@ export const useTileGrid = ({
           Boolean(value)
       );
 
+    const crossConstraints = crossLayerEdgeMap?.get(cellIndex) ?? null;
+
     const candidates: Array<Tile> = [];
 
     connectionsByIndex.forEach((connections, index) => {
@@ -901,6 +930,12 @@ export const useTileGrid = ({
         return;
       }
       if (!connections) {
+        // Tile has no connection info — only add if cross-layer doesn't block it
+        // (tiles without connections are treated as all-false connections for cross-layer)
+        if (crossConstraints) {
+          const blocked = crossConstraints.some((c) => c === true);
+          if (blocked) return; // cross-layer requires a connection but tile has none
+        }
         candidates.push({
           imageIndex: index,
           rotation: 0,
@@ -919,15 +954,21 @@ export const useTileGrid = ({
               constraint.connections[neighborIndex]
           )
         );
-        if (matches) {
-          candidates.push({
-            imageIndex: index,
-            rotation: variant.rotation,
-            mirrorX: variant.mirrorX,
-            mirrorY: variant.mirrorY,
-            name: tileSources[index]?.name,
-          });
+        if (!matches) return;
+        // Check cross-layer constraints (only false/wall blocks; true is permissive)
+        if (crossConstraints) {
+          for (let d = 0; d < 8; d++) {
+            const cc = crossConstraints[d];
+            if (cc === false && variant.connections[d] !== false) return;
+          }
         }
+        candidates.push({
+          imageIndex: index,
+          rotation: variant.rotation,
+          mirrorX: variant.mirrorX,
+          mirrorY: variant.mirrorY,
+          name: tileSources[index]?.name,
+        });
       });
     });
 
@@ -1043,7 +1084,7 @@ export const useTileGrid = ({
       { dr: -1, dc: -1 },
     ];
 
-    return directions.every((dir, index) => {
+    const sameLayerOk = directions.every((dir, index) => {
       const r = row + dir.dr;
       const c = col + dir.dc;
       if (r < 0 || c < 0 || r >= placementRows || c >= placementCols) {
@@ -1097,6 +1138,19 @@ export const useTileGrid = ({
           transformed[candidateIndex] === neighborTransformed[neighborIndexValue]
       );
     });
+
+    if (!sameLayerOk) return false;
+
+    // Cross-layer constraint check (only false/wall blocks; true is permissive)
+    const crossConstraints = crossLayerEdgeMap?.get(cellIndex);
+    if (crossConstraints) {
+      for (let d = 0; d < 8; d++) {
+        const cc = crossConstraints[d];
+        if (cc === false && transformed[d] !== false) return false;
+      }
+    }
+
+    return true;
   };
 
   useEffect(() => {

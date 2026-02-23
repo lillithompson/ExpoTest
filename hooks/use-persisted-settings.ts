@@ -6,6 +6,7 @@ export type AppSettings = {
   showDebug: boolean;
   developerMode: boolean;
   allowEdgeConnections: boolean;
+  crossLayerConnectivity: boolean;
   mirrorHorizontal: boolean;
   mirrorVertical: boolean;
   backgroundColor: string;
@@ -25,6 +26,7 @@ export const getDefaultSettings = (): AppSettings => ({
   showDebug: false,
   developerMode: false,
   allowEdgeConnections: true,
+  crossLayerConnectivity: true,
   mirrorHorizontal: false,
   mirrorVertical: false,
   backgroundColor: '#050408',
