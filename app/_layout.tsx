@@ -7,12 +7,7 @@ import 'react-native-reanimated';
 
 import { MobileTabBar } from '@/components/mobile-tab-bar';
 import { TabBarVisibleProvider } from '@/contexts/tab-bar-visible';
-import { useIsMobileWeb } from '@/hooks/use-is-mobile-web';
-
-function useShowMobileTabBar(): boolean {
-  const isMobileWeb = useIsMobileWeb();
-  return Platform.OS === 'ios' || isMobileWeb;
-}
+import { useShowMobileTabBar } from '@/hooks/use-show-mobile-tab-bar';
 
 export default function RootLayout() {
   useEffect(() => {
@@ -35,16 +30,13 @@ export default function RootLayout() {
         setHideTabBarOverOverlay={setHideTabBarOverOverlay}
       >
         <View style={{ flex: 1 }}>
-          <View style={{ flex: 1 }}>
-            <Stack>
-              <Stack.Screen name="index" options={{ headerShown: false }} />
-              <Stack.Screen name="tileSetCreator/index" options={{ headerShown: false }} />
-              <Stack.Screen name="tileSetCreator/editor" options={{ headerShown: false }} />
-              <Stack.Screen name="tileSetCreator/modifyTile" options={{ headerShown: false }} />
-              <Stack.Screen name="manual" options={{ title: 'Manual' }} />
-              <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
-            </Stack>
-          </View>
+          <Stack>
+            <Stack.Screen name="index" options={{ headerShown: false }} />
+            <Stack.Screen name="tileSetCreator/index" options={{ headerShown: false }} />
+            <Stack.Screen name="tileSetCreator/editor" options={{ headerShown: false }} />
+            <Stack.Screen name="tileSetCreator/modifyTile" options={{ headerShown: false }} />
+            <Stack.Screen name="manual" options={{ title: 'Manual' }} />
+          </Stack>
           {showMobileTabBar && (
             <View style={{ position: 'absolute', bottom: 0, left: 0, right: 0 }}>
               <MobileTabBar />

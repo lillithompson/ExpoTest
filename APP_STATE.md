@@ -5,7 +5,7 @@ This document is the single source of truth for reconstructing the app from scra
 **Structure**
 
 Root Layout (app/_layout.tsx)
-- Mobile web banner is not shown. The component and hooks (`getIsMobileWebForWindow`, `useIsMobileWeb`, `MobileWebBanner`) remain in the codebase but are not rendered in the layout.
+- Mobile web banner is not shown. The hook `getIsMobileWebForWindow` (utils/is-mobile-web.ts) and `useIsMobileWeb` (hooks/use-is-mobile-web) remain in active use. The `MobileWebBanner` component has been removed from the codebase.
 - On **mobile web** and **iOS** only: an iOS-style bottom tab bar (components/mobile-tab-bar.tsx) is shown when the current route is `/` or `/tileSetCreator` and no overlay is open. It has two tabs: "Files" (navigates to `/`) and "Tile Sets" (navigates to `/tileSetCreator`). The tab bar is hidden on editor, modifyTile, manual, and modal; it is also hidden when the Settings overlay (or any overlay signaled via setHideTabBarOverOverlay) is open on the Files or Tile Set Creator views so it does not render over modals. Desktop web and Android use the existing header-based navigation (tap "File" or "Tile Sets" in the header to switch). Tab bar visibility is provided via TabBarVisibleProvider (tabBarVisible, hideTabBarOverModify, hideTabBarOverOverlay); File and Tile Set Creator list screens add bottom padding (TAB_BAR_HEIGHT + safe area bottom) when the tab bar is visible so content is not obscured.
 
 Main Routes
@@ -14,7 +14,7 @@ Main Routes
 - `/tileSetCreator` (app/tileSetCreator/index.tsx): Tile Set list and management.
 - `/tileSetCreator/editor` (app/tileSetCreator/editor.tsx): Tile Set details and tile list.
 - `/tileSetCreator/modifyTile` (app/tileSetCreator/modifyTile.tsx): Tile editor for a single tile template.
-- `/modal` (app/modal.tsx): Example modal route, not used by core flows.
+- `/modal` (app/modal.tsx): Removed — was an example modal route from the Expo template, not used by any core flows.
 
 File View (viewMode = "file")
 - Status bar background strip at the top (white).

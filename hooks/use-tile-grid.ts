@@ -622,6 +622,12 @@ export const useTileGrid = ({
   }, [internalTotalCells, tileSourcesLength]);
 
   useEffect(() => {
+    // Cancel any in-flight debounce so an empty-grid intermediate state
+    // (from structural resize) is not persisted to the file before loadTiles fires.
+    if (persistTilesTimeoutRef.current) {
+      clearTimeout(persistTilesTimeoutRef.current);
+      persistTilesTimeoutRef.current = null;
+    }
     setTiles((prev) => (prev.length === internalTotalCells ? prev : buildInitialTiles(internalTotalCells)));
   }, [internalTotalCells]);
 

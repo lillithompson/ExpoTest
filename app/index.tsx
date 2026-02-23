@@ -1662,7 +1662,11 @@ export default function TestScreen() {
     fullGridRows: viewMode === 'modify' && zoomRegion ? (activeFile?.grid.rows ?? undefined) : undefined,
   });
   /** When switching resolution layer or file, load that layer’s tiles into the grid hook. */
-  const lastLayerLoadRef = useRef({ editingLevel: 0, fileId: '' });
+  const lastLayerLoadRef = useRef({ editingLevel: 0, fileId: ‘’ });
+  // Reset the guard on each new load so returning to the same file/layer always re-runs the load.
+  useEffect(() => {
+    lastLayerLoadRef.current = { editingLevel: 0, fileId: ‘’ };
+  }, [loadToken]);
   useEffect(() => {
     if (!activeFile || viewMode !== 'modify') return;
     const key = { editingLevel, fileId: activeFile.id };
@@ -3337,7 +3341,7 @@ export default function TestScreen() {
             : activeFileSourceNames;
         // Load the current editing layer's data so we don't overwrite L2/L3 with L1 (race with layer-sync effect).
         let tilesToLoad: Tile[];
-        if (editingLevel >= 2 && activeFile?.layers?.[editingLevel] != null) {
+        if (editingLevel >= 2 && activeFile?.layers?.[editingLevel] != null && (activeFile.layers[editingLevel]?.length ?? 0) > 0) {
           const levelInfo = getLevelGridInfo(
             pending.rows,
             pending.columns,

@@ -80,12 +80,12 @@ export default function ManualScreen() {
 
         <ThemedText type="defaultSemiBold" style={styles.subsection}>File view</ThemedText>
         <ThemedText type="default" style={styles.para}>
-          The File view is your home screen. It shows all your saved designs as a grid of cards. Tap a card to open that design in the Modify view. Long press a card for the file options menu: Download, Download SVG (web), Duplicate, or Delete. New File (＋) creates a new design (you choose a tile size 25–200 px). Select Mode lets you select multiple files to delete. Settings (gear) opens app settings. The File title at the top is tappable and takes you to the Tile Sets area.
+          The File view is your home screen. It shows all your saved designs as a grid of cards. Tap a card to open that design in the Modify view. Long press a card for the file options menu: Download, Download SVG (web), Duplicate, or Delete. New File (＋) creates a new design at maximum resolution. Select Mode lets you select multiple files to delete or export. Settings (gear) opens app settings. The File title at the top is tappable and takes you to the Tile Sets area.
         </ThemedText>
 
         <ThemedText type="defaultSemiBold" style={styles.subsection}>Modify view</ThemedText>
         <ThemedText type="default" style={styles.para}>
-          Where you edit a single design. &lt; Modify (top left) saves and returns to the File view. The toolbar has Reset, Flood, Reconcile, and Mirror (cycling button). The brush panel at the bottom shows the tile palette and brush modes: Random, palette tiles, Clone, Erase, and Pattern. Double tap or long press the Random tile to open the Tile Set chooser. Settings (gear) opens Modify-view settings including Download PNG.
+          Where you edit a single design. &lt; Back (top left) saves and returns to the File view. The toolbar has Reset, Flood, Reconcile, and Mirror (cycling button). The brush panel at the bottom shows the tile palette and brush modes: Random, palette tiles, Clone, Erase, and Pattern. Double tap or long press the Random tile to open the Tile Set chooser. Settings (gear) opens Modify-view settings including Download PNG.
         </ThemedText>
 
         <ThemedText type="defaultSemiBold" style={styles.subsection}>Tile Sets list</ThemedText>
