@@ -31,8 +31,10 @@ export type TileFile = {
   thumbnailUri: string | null;
   previewUri: string | null;
   updatedAt: number;
-  /** Cell indices that are locked (cannot be modified by any tool). */
+  /** Cell indices that are locked (cannot be modified by any tool). Level-1 (finest grid) only. */
   lockedCells?: number[];
+  /** Per-layer locked cells for level 2+. Key = internal level; values are cell indices in that layer's coordinate space. */
+  lockedCellsPerLayer?: Record<number, number[]>;
   /** Per-layer visibility (level 1 = base grid). If false, layer is hidden from canvas, exports, and thumbnails. Default true. */
   layerVisibility?: Record<number, boolean>;
   /** Per-layer lock. If true, layer cannot be edited. Default false. */
@@ -155,6 +157,22 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
                 }
                 if (Object.keys(layers).length === 0) layers = undefined;
               }
+              let lockedCellsPerLayer: Record<number, number[]> | undefined;
+              const rawLockedPerLayer = (file as { lockedCellsPerLayer?: Record<string, unknown> }).lockedCellsPerLayer;
+              if (rawLockedPerLayer != null && typeof rawLockedPerLayer === 'object' && !Array.isArray(rawLockedPerLayer)) {
+                lockedCellsPerLayer = {};
+                for (const key of Object.keys(rawLockedPerLayer)) {
+                  const level = parseInt(key, 10);
+                  if (!Number.isInteger(level) || level < 2) continue;
+                  const arr = rawLockedPerLayer[key];
+                  if (!Array.isArray(arr)) continue;
+                  const cells = (arr as unknown[]).filter(
+                    (i): i is number => typeof i === 'number' && Number.isInteger(i) && i >= 0
+                  );
+                  if (cells.length > 0) lockedCellsPerLayer[level] = cells;
+                }
+                if (Object.keys(lockedCellsPerLayer).length === 0) lockedCellsPerLayer = undefined;
+              }
               let layerVisibility: Record<number, boolean> | undefined;
               const rawVis = (file as { layerVisibility?: Record<string, unknown> }).layerVisibility;
               if (rawVis != null && typeof rawVis === 'object' && !Array.isArray(rawVis)) {
@@ -212,6 +230,7 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
                 previewUri: file.previewUri ?? null,
                 updatedAt: file.updatedAt ?? Date.now(),
                 lockedCells,
+                ...(lockedCellsPerLayer && { lockedCellsPerLayer }),
                 ...(layerVisibility && { layerVisibility }),
                 ...(layerLocked && { layerLocked }),
                 ...(layerEmphasized && { layerEmphasized }),
@@ -333,6 +352,29 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
         const next = prev.map((file) =>
           file.id === activeFileId
             ? { ...file, lockedCells, updatedAt: Date.now() }
+            : file
+        );
+        void persistFiles(next, activeFileId);
+        return next;
+      });
+    },
+    [activeFileId, persistFiles]
+  );
+
+  const updateActiveFileLockedCellsForLayer = useCallback(
+    (level: number, cells: number[]) => {
+      if (!activeFileId || level < 2) return;
+      setFiles((prev) => {
+        const next = prev.map((file) =>
+          file.id === activeFileId
+            ? {
+                ...file,
+                lockedCellsPerLayer: {
+                  ...(file.lockedCellsPerLayer ?? {}),
+                  [level]: cells,
+                },
+                updatedAt: Date.now(),
+              }
             : file
         );
         void persistFiles(next, activeFileId);
@@ -537,6 +579,14 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
           lockedCells: Array.isArray(source.lockedCells)
             ? [...source.lockedCells]
             : [],
+          lockedCellsPerLayer: source.lockedCellsPerLayer
+            ? Object.fromEntries(
+                Object.entries(source.lockedCellsPerLayer).map(([k, v]) => [
+                  parseInt(k, 10),
+                  [...v],
+                ])
+              )
+            : undefined,
           layerVisibility: source.layerVisibility
             ? { ...source.layerVisibility }
             : undefined,
@@ -590,6 +640,10 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
           Array.isArray(payload.lockedCells) && payload.lockedCells.length > 0
             ? payload.lockedCells
             : undefined,
+        ...(payload.lockedCellsPerLayer &&
+          Object.keys(payload.lockedCellsPerLayer).length > 0 && {
+            lockedCellsPerLayer: payload.lockedCellsPerLayer,
+          }),
         ...(payload.layerVisibility &&
           Object.keys(payload.layerVisibility).length > 0 && {
             layerVisibility: payload.layerVisibility,
@@ -832,6 +886,7 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
     clearAllFiles,
     upsertActiveFile,
     updateActiveFileLockedCells,
+    updateActiveFileLockedCellsForLayer,
     updateActiveFileLayer,
     updateActiveFileTilesL1,
     updateActiveFileLayerVisibility,

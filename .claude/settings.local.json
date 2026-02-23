@@ -6,7 +6,8 @@
       "Bash(cd \"C:\\\\Users\\\\lilli\\\\Documents\\\\GitHub\\\\ExpoTest\" && npm test 2>&1)",
       "Bash(tail:*)",
       "Bash(node:*)",
-      "Bash(cd:*)"
+      "Bash(cd:*)",
+      "Bash(grep hookCanvasSelection\\\\|selectionBounds\\\\|canvasSelection:*)"
     ]
   }
 }

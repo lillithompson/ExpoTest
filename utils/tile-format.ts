@@ -23,6 +23,8 @@ export type TileFilePayload = {
   category: TileCategory;
   categories: TileCategory[];
   lockedCells?: number[];
+  /** Per-layer locked cells (level 2+, in that layer's coordinate space). */
+  lockedCellsPerLayer?: Record<number, number[]>;
   /** Per-layer visibility (level 1 = base). Omitted = visible. */
   layerVisibility?: Record<number, boolean>;
   /** Per-layer lock. Omitted = unlocked. */
@@ -86,6 +88,7 @@ export function serializeTileFile(file: {
   category: TileCategory;
   categories: TileCategory[];
   lockedCells?: number[];
+  lockedCellsPerLayer?: Record<number, number[]>;
   layerVisibility?: Record<number, boolean>;
   layerLocked?: Record<number, boolean>;
   layerEmphasized?: Record<number, boolean>;
@@ -111,6 +114,12 @@ export function serializeTileFile(file: {
     categories: file.categories ?? [file.category],
     ...(Array.isArray(file.lockedCells) &&
       file.lockedCells.length > 0 && { lockedCells: file.lockedCells }),
+    ...(file.lockedCellsPerLayer &&
+      Object.keys(file.lockedCellsPerLayer).length > 0 && {
+        lockedCellsPerLayer: Object.fromEntries(
+          Object.entries(file.lockedCellsPerLayer).map(([k, v]) => [String(k), v])
+        ),
+      }),
     ...(file.layerVisibility &&
       Object.keys(file.layerVisibility).length > 0 && {
         layerVisibility: Object.fromEntries(
@@ -224,6 +233,22 @@ export function deserializeTileFile(json: string): DeserializeResult {
       )
       .slice(0, totalCells);
   }
+  let lockedCellsPerLayer: Record<number, number[]> | undefined;
+  if (o.lockedCellsPerLayer != null && typeof o.lockedCellsPerLayer === 'object' && !Array.isArray(o.lockedCellsPerLayer)) {
+    const raw = o.lockedCellsPerLayer as Record<string, unknown>;
+    lockedCellsPerLayer = {};
+    for (const key of Object.keys(raw)) {
+      const level = parseInt(key, 10);
+      if (!Number.isInteger(level) || level < 2) continue;
+      const arr = raw[key];
+      if (!Array.isArray(arr)) continue;
+      const cells = (arr as unknown[]).filter(
+        (i): i is number => typeof i === 'number' && Number.isInteger(i) && i >= 0
+      );
+      if (cells.length > 0) lockedCellsPerLayer[level] = cells;
+    }
+    if (Object.keys(lockedCellsPerLayer).length === 0) lockedCellsPerLayer = undefined;
+  }
   let layers: Record<number, Tile[]> | undefined;
   if (o.layers != null && typeof o.layers === 'object' && !Array.isArray(o.layers)) {
     const raw = o.layers as Record<string, unknown>;
@@ -290,6 +315,7 @@ export function deserializeTileFile(json: string): DeserializeResult {
     category: finalCategories[0] ?? fallbackCategory,
     categories: finalCategories,
     ...(lockedCells.length > 0 && { lockedCells }),
+    ...(lockedCellsPerLayer && Object.keys(lockedCellsPerLayer).length > 0 && { lockedCellsPerLayer }),
     ...(layerVisibility && Object.keys(layerVisibility).length > 0 && { layerVisibility }),
     ...(layerLocked && Object.keys(layerLocked).length > 0 && { layerLocked }),
     ...(layerEmphasized && Object.keys(layerEmphasized).length > 0 && { layerEmphasized }),

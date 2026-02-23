@@ -1008,6 +1008,7 @@ export default function TestScreen() {
     clearAllFiles,
     upsertActiveFile,
     updateActiveFileLockedCells,
+    updateActiveFileLockedCellsForLayer,
     updateActiveFileLayer,
     updateActiveFileTilesL1,
     updateActiveFileLayerVisibility,
@@ -1553,6 +1554,17 @@ export default function TestScreen() {
 
   const isEditingHigherLayer = editingLevel >= 2 && levelGridInfo != null && level1LayoutForPersist != null;
 
+  /** Locked cells for the active editing layer, in that layer's coordinate space. */
+  const activeLayerLockedCells = useMemo(() => {
+    if (!activeFile) return null;
+    if (isEditingHigherLayer) {
+      const cells = activeFile.lockedCellsPerLayer?.[editingLevel];
+      return cells && cells.length > 0 ? cells : null;
+    }
+    const cells = activeFile.lockedCells;
+    return cells && cells.length > 0 ? cells : null;
+  }, [activeFile, isEditingHigherLayer, editingLevel]);
+
   /** Level-2 grid info for drawing the level-2 overlay (all layers composited). */
   const level2GridInfo = useMemo(
     () =>
@@ -1597,6 +1609,45 @@ export default function TestScreen() {
 
   /** Deferred so the grid and zoomed tile slice update together, avoiding one frame of junk tiles. */
   const zoomRegionForGrid = useDeferredValue(zoomRegion);
+
+  /**
+   * canvasSelection.start/end are always level-1 (finest grid) indices.
+   * useTileGrid interprets them using its own gridLayout.columns (= levelCols for higher layers),
+   * so translate to layer-N cell indices before passing the selection in.
+   */
+  const hookCanvasSelection = useMemo(() => {
+    if (!canvasSelection || !isEditingHigherLayer || !levelGridInfo) return canvasSelection;
+    const fullCols = activeFile?.grid.columns ?? 0;
+    if (fullCols <= 0) return null;
+    const startRow = Math.floor(canvasSelection.start / fullCols);
+    const startCol = canvasSelection.start % fullCols;
+    const endRow = Math.floor(canvasSelection.end / fullCols);
+    const endCol = canvasSelection.end % fullCols;
+    const minRow = Math.min(startRow, endRow);
+    const maxRow = Math.max(startRow, endRow);
+    const minCol = Math.min(startCol, endCol);
+    const maxCol = Math.max(startCol, endCol);
+    const { levelCols } = levelGridInfo;
+    let layerMinRow = Infinity;
+    let layerMaxRow = -Infinity;
+    let layerMinCol = Infinity;
+    let layerMaxCol = -Infinity;
+    levelGridInfo.cells.forEach((cell, idx) => {
+      if (
+        cell.minRow >= minRow && cell.maxRow <= maxRow &&
+        cell.minCol >= minCol && cell.maxCol <= maxCol
+      ) {
+        const layerRow = Math.floor(idx / levelCols);
+        const layerCol = idx % levelCols;
+        if (layerRow < layerMinRow) layerMinRow = layerRow;
+        if (layerRow > layerMaxRow) layerMaxRow = layerRow;
+        if (layerCol < layerMinCol) layerMinCol = layerCol;
+        if (layerCol > layerMaxCol) layerMaxCol = layerCol;
+      }
+    });
+    if (layerMinRow === Infinity) return null;
+    return { start: layerMinRow * levelCols + layerMinCol, end: layerMaxRow * levelCols + layerMaxCol };
+  }, [canvasSelection, isEditingHigherLayer, levelGridInfo, activeFile?.grid.columns]);
 
   const {
     gridLayout,
@@ -1657,9 +1708,8 @@ export default function TestScreen() {
       : null,
     patternAnchorKey: selectedPattern?.id ?? null,
     getFixedBrushSourceName: () => fixedBrushSourceNameRef.current,
-    canvasSelection: viewMode === 'modify' ? canvasSelection : null,
-    lockedCells:
-      viewMode === 'modify' ? (activeFile?.lockedCells ?? null) : null,
+    canvasSelection: viewMode === 'modify' ? hookCanvasSelection : null,
+    lockedCells: viewMode === 'modify' ? activeLayerLockedCells : null,
     isPartOfDragRef: viewMode === 'modify' ? isPartOfDragRef : undefined,
     zoomRegion:
       viewMode === 'modify' && !isEditingHigherLayer ? zoomRegionForGrid : null,
@@ -1705,6 +1755,14 @@ export default function TestScreen() {
     loadTiles,
     tileSources.length,
   ]);
+
+  /** Clear canvas selection and deactivate region tool when switching layers. */
+  useEffect(() => {
+    setCanvasSelection(null);
+    setIsSelectionMode(false);
+    setIsMoveMode(false);
+    setMoveDragOffset(null);
+  }, [editingLevel]);
 
   const fullGridColumnsForMapping =
     zoomRegion && fullGridColumnsForZoom != null
@@ -4194,18 +4252,18 @@ export default function TestScreen() {
   }, [isMoveMode, canvasSelection, moveDragOffset, selectionBoundsFullGrid, selectionBoundsLayerGrid, isEditingHigherLayer, gridLayout, zoomRegion, level1DisplayLayout.tileSize]);
 
   const lockedCellIndicesSet = useMemo(() => {
-    const cells = activeFile?.lockedCells ?? [];
+    const cells = activeLayerLockedCells ?? [];
     if (cells.length === 0) {
       return null;
     }
     return new Set(cells);
-  }, [activeFile?.lockedCells]);
+  }, [activeLayerLockedCells]);
   const lockedCellIndicesArray = useMemo(
     () => (lockedCellIndicesSet ? Array.from(lockedCellIndicesSet) : null),
     [lockedCellIndicesSet]
   );
   const lockedBoundaryEdges = useMemo(() => {
-    const cells = activeFile?.lockedCells ?? [];
+    const cells = activeLayerLockedCells ?? [];
     if (cells.length === 0 || gridLayout.columns <= 0 || gridLayout.rows <= 0) {
       return [];
     }
@@ -4217,7 +4275,7 @@ export default function TestScreen() {
       GRID_GAP
     );
   }, [
-    activeFile?.lockedCells,
+    activeLayerLockedCells,
     gridLayout.columns,
     gridLayout.rows,
     gridLayout.tileSize,
@@ -6567,14 +6625,26 @@ export default function TestScreen() {
                 >
                   <View style={styles.regionToolsBarInner}>
                   {showLockButton && (() => {
-                    const selectionIndices =
-                      canvasSelection && fullGridColumnsForMapping > 0
-                        ? getCellIndicesInRegion(
-                            canvasSelection.start,
-                            canvasSelection.end,
-                            fullGridColumnsForMapping
-                          )
-                        : [];
+                    // canvasSelection.start/end are always level-1 indices.
+                    // For higher layers use selectionBoundsLayerGrid (layer-N row/col space).
+                    const selectionIndices = (() => {
+                      if (!canvasSelection) return [];
+                      if (isEditingHigherLayer && levelGridInfo && selectionBoundsLayerGrid) {
+                        const { minRow, maxRow, minCol, maxCol } = selectionBoundsLayerGrid;
+                        const lCols = levelGridInfo.levelCols;
+                        return getCellIndicesInRegion(
+                          minRow * lCols + minCol,
+                          maxRow * lCols + maxCol,
+                          lCols
+                        );
+                      }
+                      if (fullGridColumnsForMapping <= 0) return [];
+                      return getCellIndicesInRegion(
+                        canvasSelection.start,
+                        canvasSelection.end,
+                        fullGridColumnsForMapping
+                      );
+                    })();
                     const allSelectedLocked =
                       selectionIndices.length > 0 &&
                       (lockedCellIndicesSet
@@ -6588,20 +6658,24 @@ export default function TestScreen() {
                         color={allSelectedLocked ? '#dc2626' : undefined}
                         onPress={() => {
                           dismissModifyBanner();
-                          if (!canvasSelection || fullGridColumnsForMapping === 0) return;
-                          const indices = getCellIndicesInRegion(
-                            canvasSelection.start,
-                            canvasSelection.end,
-                            fullGridColumnsForMapping
-                          );
-                          if (lockedCellIndicesSet && indices.every((i) => lockedCellIndicesSet.has(i))) {
-                            const next = (activeFile?.lockedCells ?? []).filter(
-                              (i) => !indices.includes(i)
-                            );
-                            updateActiveFileLockedCells(next);
+                          if (selectionIndices.length === 0) return;
+                          const currentLocked = isEditingHigherLayer
+                            ? (activeFile?.lockedCellsPerLayer?.[editingLevel] ?? [])
+                            : (activeFile?.lockedCells ?? []);
+                          if (lockedCellIndicesSet && selectionIndices.every((i) => lockedCellIndicesSet.has(i))) {
+                            const next = currentLocked.filter((i) => !selectionIndices.includes(i));
+                            if (isEditingHigherLayer) {
+                              updateActiveFileLockedCellsForLayer(editingLevel, next);
+                            } else {
+                              updateActiveFileLockedCells(next);
+                            }
                           } else {
-                            const next = [...new Set([...(activeFile?.lockedCells ?? []), ...indices])];
-                            updateActiveFileLockedCells(next);
+                            const next = [...new Set([...currentLocked, ...selectionIndices])];
+                            if (isEditingHigherLayer) {
+                              updateActiveFileLockedCellsForLayer(editingLevel, next);
+                            } else {
+                              updateActiveFileLockedCells(next);
+                            }
                           }
                         }}
                       />
