@@ -9158,6 +9158,10 @@ export default function TestScreen() {
                           // Step 1: Write the current editing level via placeStamp so the hook's
                           // live state is updated (and undo is pushed). The hook's autosave will
                           // persist this; writing it any other way would be overwritten by autosave.
+                          // For editingLevel >= 2 we ALSO write directly to the file immediately
+                          // to close the 120ms onTilesChange debounce window: if the layer-sync
+                          // effect ever reads activeFile.layers[editingLevel] during that window,
+                          // it will see the already-stamped tiles rather than the stale pre-stamp ones.
                           if (editingLevelTileData) {
                             if (editingLevel === 1) {
                               placeStamp(anchorRow_L1, anchorCol_L1, editingLevelTileData.tiles, editingLevelTileData.width, editingLevelTileData.height, rotation, mirrorX);
@@ -9166,6 +9170,8 @@ export default function TestScreen() {
                               const aRow = offsets ? Math.floor((anchorRow_L1 - offsets.C_row) / offsets.scale) : anchorRow_L1;
                               const aCol = offsets ? Math.floor((anchorCol_L1 - offsets.C_col) / offsets.scale) : anchorCol_L1;
                               placeStamp(aRow, aCol, editingLevelTileData.tiles, editingLevelTileData.width, editingLevelTileData.height, rotation, mirrorX);
+                              // Eagerly write to file so activeFile.layers[editingLevel] is up-to-date.
+                              applyStampToFileLevel(editingLevel, anchorRow_L1, anchorCol_L1, editingLevelTileData.tiles, editingLevelTileData.width, editingLevelTileData.height, rotation, mirrorX);
                             }
                           }
 
@@ -9177,7 +9183,7 @@ export default function TestScreen() {
                           if (p.layerTiles) {
                             for (const [levelStr, layerData] of Object.entries(p.layerTiles)) {
                               const M = parseInt(levelStr, 10);
-                              if (M === editingLevel) continue; // Already handled via placeStamp above
+                              if (M === editingLevel) continue; // Already handled above
                               applyStampToFileLevel(M, anchorRow_L1, anchorCol_L1, layerData.tiles, layerData.width, layerData.height, rotation, mirrorX);
                             }
                           }
