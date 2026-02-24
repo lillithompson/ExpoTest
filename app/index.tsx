@@ -9147,24 +9147,37 @@ export default function TestScreen() {
                           const mainLevel = p.createdAtLevel ?? 1;
                           const gridCols = activeFile?.grid.columns ?? 0;
                           const gridRows = activeFile?.grid.rows ?? 0;
-                          if (mainLevel === 1) {
-                            // L1 pattern: hook's placeStamp handles undo + live state update.
-                            placeStamp(anchorRow_L1, anchorCol_L1, p.tiles, p.width, p.height, rotation, mirrorX);
-                          } else if (mainLevel === editingLevel) {
-                            // Coarser pattern at same level as editing: convert L1 anchor to editingLevel
-                            // units and use hook's placeStamp for undo + live state update.
-                            const offsets = getLevelNtoMOffsets(gridCols, gridRows, mainLevel, 1);
-                            const aRow = offsets ? Math.floor((anchorRow_L1 - offsets.C_row) / offsets.scale) : anchorRow_L1;
-                            const aCol = offsets ? Math.floor((anchorCol_L1 - offsets.C_col) / offsets.scale) : anchorCol_L1;
-                            placeStamp(aRow, aCol, p.tiles, p.width, p.height, rotation, mirrorX);
-                          } else {
-                            // Different level: write directly to file state (L1 anchor).
+
+                          // Find the tile data for the currently active editing level.
+                          // It lives in p.tiles if the pattern was created at editingLevel, otherwise in p.layerTiles[editingLevel].
+                          const editingLevelTileData: { tiles: typeof p.tiles; width: number; height: number } | null =
+                            mainLevel === editingLevel
+                              ? { tiles: p.tiles, width: p.width, height: p.height }
+                              : (p.layerTiles?.[editingLevel] ?? null);
+
+                          // Step 1: Write the current editing level via placeStamp so the hook's
+                          // live state is updated (and undo is pushed). The hook's autosave will
+                          // persist this; writing it any other way would be overwritten by autosave.
+                          if (editingLevelTileData) {
+                            if (editingLevel === 1) {
+                              placeStamp(anchorRow_L1, anchorCol_L1, editingLevelTileData.tiles, editingLevelTileData.width, editingLevelTileData.height, rotation, mirrorX);
+                            } else {
+                              const offsets = getLevelNtoMOffsets(gridCols, gridRows, editingLevel, 1);
+                              const aRow = offsets ? Math.floor((anchorRow_L1 - offsets.C_row) / offsets.scale) : anchorRow_L1;
+                              const aCol = offsets ? Math.floor((anchorCol_L1 - offsets.C_col) / offsets.scale) : anchorCol_L1;
+                              placeStamp(aRow, aCol, editingLevelTileData.tiles, editingLevelTileData.width, editingLevelTileData.height, rotation, mirrorX);
+                            }
+                          }
+
+                          // Step 2: Write all OTHER levels directly to the file.
+                          // The hook only autosaves editingLevel, so these writes are safe.
+                          if (mainLevel !== editingLevel) {
                             applyStampToFileLevel(mainLevel, anchorRow_L1, anchorCol_L1, p.tiles, p.width, p.height, rotation, mirrorX);
                           }
-                          // Apply any sub-layer (finer) tiles stored in the pattern (L1 anchor).
                           if (p.layerTiles) {
                             for (const [levelStr, layerData] of Object.entries(p.layerTiles)) {
                               const M = parseInt(levelStr, 10);
+                              if (M === editingLevel) continue; // Already handled via placeStamp above
                               applyStampToFileLevel(M, anchorRow_L1, anchorCol_L1, layerData.tiles, layerData.width, layerData.height, rotation, mirrorX);
                             }
                           }
@@ -9611,6 +9624,7 @@ export default function TestScreen() {
           onPatternStampDragMove={handlePatternStampDragMove}
           onPatternStampDragEnd={handlePatternStampDragEnd}
           onPatternStampDragCancel={handlePatternStampDragCancel}
+          isStampDragging={stampDragPatternId !== null}
         />
         {showPatternExportMenu && (
           <ThemedView style={[styles.overlay, { zIndex: 40 }]} accessibilityRole="dialog">

@@ -113,6 +113,7 @@ export type ModifyPaletteProps = {
   onPatternStampDragMove?: (screenX: number, screenY: number) => void;
   onPatternStampDragEnd?: (screenX: number, screenY: number) => void;
   onPatternStampDragCancel?: () => void;
+  isStampDragging?: boolean;
 };
 
 function ModifyPaletteInner({
@@ -163,6 +164,7 @@ function ModifyPaletteInner({
   onPatternStampDragMove,
   onPatternStampDragEnd,
   onPatternStampDragCancel,
+  isStampDragging,
 }: ModifyPaletteProps) {
   const modifyPaletteRenderCountRef = useRef(0);
   const lastModifyPaletteLogRef = useRef(0);
@@ -413,6 +415,7 @@ function ModifyPaletteInner({
         onPatternStampDragMove={onPatternStampDragMove}
         onPatternStampDragEnd={onPatternStampDragEnd}
         onPatternStampDragCancel={onPatternStampDragCancel}
+        isStampDragging={isStampDragging}
       />
       {showPatternModal && (
         <View style={styles.patternModal} accessibilityRole="dialog">

@@ -104,6 +104,8 @@ type Props = {
   onPatternStampDragMove?: (screenX: number, screenY: number) => void;
   onPatternStampDragEnd?: (screenX: number, screenY: number) => void;
   onPatternStampDragCancel?: () => void;
+  /** When true, disables horizontal ScrollView scrolling so it doesn't fire during stamp drag. */
+  isStampDragging?: boolean;
 };
 
 type FavoritesState = {
@@ -261,6 +263,7 @@ export function TileBrushPanel({
   onPatternStampDragMove,
   onPatternStampDragEnd,
   onPatternStampDragCancel,
+  isStampDragging = false,
 }: Props) {
   const [containerWidth, setContainerWidth] = useState(0);
   const [contentWidth, setContentWidth] = useState(0);
@@ -281,6 +284,8 @@ export function TileBrushPanel({
   type PanResponderInstance = ReturnType<typeof PanResponder.create>;
   const panResponderMapRef = useRef<Map<string, PanResponderInstance>>(new Map());
   const stampDragCallbacksRef = useRef({ onPatternStampDragStart, onPatternStampDragMove, onPatternStampDragEnd, onPatternStampDragCancel });
+  /** Set to true when any finger movement is detected on a pattern thumb press; reset on each new press. Used to suppress onLongPress during drag. */
+  const thumbMovingRef = useRef(false);
   stampDragCallbacksRef.current = { onPatternStampDragStart, onPatternStampDragMove, onPatternStampDragEnd, onPatternStampDragCancel };
   const [favorites, setFavorites] = useState<Record<string, string>>(
     defaultFavoritesState.favorites
@@ -615,6 +620,7 @@ export function TileBrushPanel({
     >
       <ScrollView
         horizontal
+        scrollEnabled={!isStampDragging}
         showsHorizontalScrollIndicator={showIndicator}
         onContentSizeChange={(width) => {
           setContentWidth((prev) => {
@@ -782,9 +788,12 @@ export function TileBrushPanel({
                   onStartShouldSetPanResponder: () => false,
                   // Only claim when movement is more vertical than horizontal.
                   // Horizontal swipes should scroll the palette, not start a stamp drag.
-                  onMoveShouldSetPanResponder: (_, gs) =>
-                    gs.dx * gs.dx + gs.dy * gs.dy > 64 &&
-                    Math.abs(gs.dy) > Math.abs(gs.dx),
+                  // Also track any movement so onLongPress can be suppressed during a drag.
+                  onMoveShouldSetPanResponder: (_, gs) => {
+                    const dist2 = gs.dx * gs.dx + gs.dy * gs.dy;
+                    if (dist2 > 16) thumbMovingRef.current = true;
+                    return dist2 > 64 && Math.abs(gs.dy) > Math.abs(gs.dx);
+                  },
                   onPanResponderGrant: (e) => {
                     // Prevent the browser from firing native scroll on the same touch.
                     if (e.preventDefault) e.preventDefault();
@@ -828,6 +837,7 @@ export function TileBrushPanel({
                     return;
                   }
                   if (isPatternThumb) {
+                    thumbMovingRef.current = false;
                     onSelectPattern?.(entry.id);
                     onSelect({ mode: 'pattern' });
                     return;
@@ -899,7 +909,9 @@ export function TileBrushPanel({
                     return;
                   }
                   if (isPatternThumb) {
-                    onPatternThumbLongPress?.(entry.id);
+                    if (!thumbMovingRef.current) {
+                      onPatternThumbLongPress?.(entry.id);
+                    }
                     return;
                   }
                   if (isTile) {
