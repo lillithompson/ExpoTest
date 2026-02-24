@@ -778,6 +778,29 @@ function getLevelNtoMOffsets(
 }
 
 /**
+ * Returns the pattern tiling origin for flood fill at `editingLevel`, expressed in
+ * editingLevel coordinate space. The origin is the cell in editingLevel that corresponds
+ * to the coarsest-level grid's (row=0, col=0), ensuring all levels tile in lockstep.
+ */
+function getPatternFloodOrigin(
+  gridCols: number,
+  gridRows: number,
+  pat: { createdAtLevel?: number; layerTiles?: Record<number, unknown> },
+  editingLevel: number
+): { row: number; col: number } {
+  const createdAt = pat.createdAtLevel ?? 1;
+  const allLevels = [
+    createdAt,
+    ...Object.keys(pat.layerTiles ?? {}).map(Number),
+  ];
+  const coarsestLevel = Math.max(...allLevels);
+  if (coarsestLevel <= editingLevel) return { row: 0, col: 0 };
+  const offsets = getLevelNtoMOffsets(gridCols, gridRows, coarsestLevel, editingLevel);
+  if (!offsets) return { row: 0, col: 0 };
+  return { row: offsets.C_row, col: offsets.C_col };
+}
+
+/**
  * Compute a pattern tile at (row, col) using explicit pattern data.
  * Mirrors the hook's getPatternTileForPosition; row/col can be absolute (flood fill)
  * or anchor-relative (single-cell painting).
@@ -806,7 +829,7 @@ function computePatternTileFromData(
   return {
     imageIndex: patternTile.imageIndex,
     rotation: transformed.rotation,
-    mirrorX: transformed.mirrorX,
+    mirrorX: mirrorX ? !transformed.mirrorX : transformed.mirrorX,
     mirrorY: transformed.mirrorY,
     ...(patternTile.name !== undefined && { name: patternTile.name }),
   };
@@ -2249,7 +2272,14 @@ export default function TestScreen() {
     if (pendingPaletteFloodRef.current) {
       pendingPaletteFloodRef.current = false;
       if (canEditCurrentLayer) {
-        floodFill();
+        const _pfOrigin =
+          brush.mode === 'pattern' && selectedPattern && activeFile
+            ? getPatternFloodOrigin(
+                activeFile.grid.columns, activeFile.grid.rows,
+                selectedPattern, editingLevel
+              )
+            : null;
+        floodFill(_pfOrigin?.row, _pfOrigin?.col);
         applyPatternFloodToAllLayers(false);
       }
     }
@@ -5305,6 +5335,7 @@ export default function TestScreen() {
         if (!allPatternLevels.includes(lv)) allPatternLevels.push(lv);
       });
     }
+    const coarsestPatternLevel = Math.max(...allPatternLevels);
 
     for (const M of allPatternLevels) {
       if (M === editingLevel) continue; // already handled by hook's floodFill
@@ -5341,7 +5372,30 @@ export default function TestScreen() {
         mMaxCol = Math.min(mLevelCols - 1, Math.floor((selMaxCol_N + 1 - C_col) / scale) - 1);
       }
 
+      // Full-grid flood: fill ALL cells at level M.
+      // The coordinate transform from editingLevel can miss edge cells
+      // due to center-out grid construction. Pattern tiling via
+      // alignedOriginRow/Col + modulo wrapping handles all positions.
+      if (!hookCanvasSelection) {
+        mMinRow = 0;
+        mMaxRow = mLevelRows - 1;
+        mMinCol = 0;
+        mMaxCol = mLevelCols - 1;
+      }
+
       if (mMinRow > mMaxRow || mMinCol > mMaxCol) continue;
+
+      // Compute the pattern tiling origin in level-M space that corresponds to the
+      // coarsest-level grid's (row=0, col=0), so all levels tile in lockstep.
+      let alignedOriginRow = 0;
+      let alignedOriginCol = 0;
+      if (M !== coarsestPatternLevel) {
+        const originOffsets = getLevelNtoMOffsets(gridCols, gridRows, coarsestPatternLevel, M);
+        if (originOffsets) {
+          alignedOriginRow = originOffsets.C_row;
+          alignedOriginCol = originOffsets.C_col;
+        }
+      }
 
       const sourceTiles = M === 1 ? (activeFile.tiles ?? []) : (activeFile.layers?.[M] ?? []);
       const newMTiles = [...sourceTiles];
@@ -5353,7 +5407,7 @@ export default function TestScreen() {
           const mIdx = mr * mLevelCols + mc;
           if (isFloodComplete && (newMTiles[mIdx]?.imageIndex ?? -1) !== -1) continue;
           const tile = computePatternTileFromData(
-            mr - mMinRow, mc - mMinCol, patternDataM.tiles, patternDataM.width, patternDataM.height,
+            mr - alignedOriginRow, mc - alignedOriginCol, patternDataM.tiles, patternDataM.width, patternDataM.height,
             patternRotation, patternMirrorX
           );
           if (tile) {
@@ -8237,7 +8291,14 @@ export default function TestScreen() {
                 }
                 pendingFloodCompleteRef.current = setTimeout(() => {
                   pendingFloodCompleteRef.current = null;
-                  floodFill();
+                  const _pfOrigin =
+                    brush.mode === 'pattern' && selectedPattern && activeFile
+                      ? getPatternFloodOrigin(
+                          activeFile.grid.columns, activeFile.grid.rows,
+                          selectedPattern, editingLevel
+                        )
+                      : null;
+                  floodFill(_pfOrigin?.row, _pfOrigin?.col);
                   applyPatternFloodToAllLayers(false);
                 }, 0);
               }}
@@ -8249,7 +8310,14 @@ export default function TestScreen() {
                   clearTimeout(pendingFloodCompleteRef.current);
                   pendingFloodCompleteRef.current = null;
                 }
-                floodComplete();
+                const _pfOriginC =
+                  brush.mode === 'pattern' && selectedPattern && activeFile
+                    ? getPatternFloodOrigin(
+                        activeFile.grid.columns, activeFile.grid.rows,
+                        selectedPattern, editingLevel
+                      )
+                    : null;
+                floodComplete(_pfOriginC?.row, _pfOriginC?.col);
                 applyPatternFloodToAllLayers(true);
               }}
             />
