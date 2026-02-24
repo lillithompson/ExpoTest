@@ -7826,9 +7826,8 @@ export default function TestScreen() {
                     const samplePatternNames = loadSamplePatternNames();
                     const samplesOnly = files.filter((f) => f.isSample);
                     let count = 0;
-                    // Generate thumbnails for sample files, matching by import order
-                    for (let i = 0; i < Math.min(samplesOnly.length, sampleFileNames.length); i++) {
-                      const file = samplesOnly[i];
+                    // Generate thumbnails for sample files using the file's actual name
+                    for (const file of samplesOnly) {
                       const sources = getSourcesForFile(file);
                       const overlayLayers = getOverlayLayersForFile(file);
                       const dataUrl = await renderTileCanvasToDataUrl({
@@ -7851,7 +7850,7 @@ export default function TestScreen() {
                       if (dataUrl && typeof document !== 'undefined') {
                         const link = document.createElement('a');
                         link.href = dataUrl;
-                        link.download = `${sampleFileNames[i]}.png`;
+                        link.download = `${file.name}.png`;
                         document.body.appendChild(link);
                         link.click();
                         link.remove();
