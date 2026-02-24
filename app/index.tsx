@@ -7905,13 +7905,12 @@ export default function TestScreen() {
               </ThemedText>
             </Pressable>
             <NavButton
-              label="Tiles"
+              label="Modify"
               onPress={() => {
-                if (showModifyTileSetBanner) {
-                  dismissModifyBanner();
-                } else {
-                  setShowModifyTileSetBanner(true);
-                }
+                void (async () => {
+                  await persistActiveFileNow();
+                  setViewMode('file');
+                })();
               }}
             />
             <ThemedView
