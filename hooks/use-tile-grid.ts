@@ -141,6 +141,28 @@ type Result = {
   fullGridLayoutForSave: GridLayout;
   /** When zoomed and mirror is on: copy zoom region to mirror targets on the full grid (one undo step). No-op if not zoomed or no mirror. */
   mirrorZoomRegionToRestOfGrid: () => void;
+  /**
+   * Set this ref before calling resetTiles() (or any other operation that calls pushUndo) to
+   * attach side-effect data to the undo entry. The hook stores it and replays it on undo/redo
+   * so callers can restore data outside the hook (e.g. other resolution layers).
+   */
+  pendingUndoSideEffectRef: MutableRefObject<UndoSideEffect | null>;
+  /** After an undo applies an entry that had side-effect data, this ref holds that data and
+   *  undoSideEffectVersion is incremented. Read the ref inside a useEffect on that version. */
+  lastUndoSideEffectRef: MutableRefObject<UndoSideEffect | null>;
+  /** After a redo applies an entry that had side-effect data, this ref holds that data and
+   *  redoSideEffectVersion is incremented. Read the ref inside a useEffect on that version. */
+  lastRedoSideEffectRef: MutableRefObject<UndoSideEffect | null>;
+  undoSideEffectVersion: number;
+  redoSideEffectVersion: number;
+};
+
+/** Data attached to an undo/redo entry so callers can restore data outside the hook. */
+export type UndoSideEffect = {
+  /** State of other layers before the operation (restore on undo). Keyed by internal level. */
+  preClear: { [level: number]: Tile[] };
+  /** State of other layers after the operation (restore on redo). Keyed by internal level. */
+  postClear: { [level: number]: Tile[] };
 };
 
 const toConnectionKey = (connections: boolean[] | null) =>
@@ -466,11 +488,17 @@ export const useTileGrid = ({
   const lastTilesRef = useRef<Tile[]>(renderTiles);
   lastTilesRef.current = renderTiles;
 
-  const undoStackRef = useRef<Tile[][]>([]);
-  const redoStackRef = useRef<Tile[][]>([]);
+  type UndoEntry = { tiles: Tile[]; sideEffect?: UndoSideEffect };
+  const undoStackRef = useRef<UndoEntry[]>([]);
+  const redoStackRef = useRef<UndoEntry[]>([]);
   const [undoCount, setUndoCount] = useState(0);
   const [redoCount, setRedoCount] = useState(0);
   const isUndoRedoRef = useRef(false);
+  const pendingUndoSideEffectRef = useRef<UndoSideEffect | null>(null);
+  const lastUndoSideEffectRef = useRef<UndoSideEffect | null>(null);
+  const lastRedoSideEffectRef = useRef<UndoSideEffect | null>(null);
+  const [undoSideEffectVersion, setUndoSideEffectVersion] = useState(0);
+  const [redoSideEffectVersion, setRedoSideEffectVersion] = useState(0);
   const bulkUpdateRef = useRef(false);
 
   const withBulkUpdate = (fn: () => void) => {
@@ -526,13 +554,16 @@ export const useTileGrid = ({
     }));
     const stack = undoStackRef.current;
     const top = stack.length > 0 ? stack[stack.length - 1] : null;
-    if (top && tilesEqual(snapshot, top)) {
+    if (top && tilesEqual(snapshot, top.tiles)) {
+      pendingUndoSideEffectRef.current = null;
       return;
     }
     if (stack.length >= MAX_UNDO_STEPS) {
       stack.shift();
     }
-    stack.push(snapshot);
+    const sideEffect = pendingUndoSideEffectRef.current ?? undefined;
+    pendingUndoSideEffectRef.current = null;
+    stack.push({ tiles: snapshot, sideEffect });
     redoStackRef.current = [];
     setUndoCount(stack.length);
     setRedoCount(0);
@@ -585,10 +616,10 @@ export const useTileGrid = ({
     isUndoRedoRef.current = true;
     setTiles((prev) => {
       const prevNorm = normalizeTiles(prev, internalTotalCells, tileSourcesLength);
-      let next: Tile[] | undefined;
+      let next: UndoEntry | undefined;
       while (stack.length > 0) {
         next = stack.pop();
-        if (next && !tilesEqual(prevNorm, next)) {
+        if (next && !tilesEqual(prevNorm, next.tiles)) {
           break;
         }
         next = undefined;
@@ -596,12 +627,17 @@ export const useTileGrid = ({
       if (!next) {
         return prev;
       }
-      redoStackRef.current.push(
-        prevNorm.map((t) => ({ ...t, name: t.name }))
-      );
+      redoStackRef.current.push({
+        tiles: prevNorm.map((t) => ({ ...t, name: t.name })),
+        sideEffect: next.sideEffect,
+      });
       setUndoCount(undoStackRef.current.length);
       setRedoCount(redoStackRef.current.length);
-      return normalizeTiles(next, internalTotalCells, tileSourcesLength);
+      if (next.sideEffect) {
+        lastUndoSideEffectRef.current = next.sideEffect;
+        setUndoSideEffectVersion((v) => v + 1);
+      }
+      return normalizeTiles(next.tiles, internalTotalCells, tileSourcesLength);
     });
     requestAnimationFrame(() => {
       isUndoRedoRef.current = false;
@@ -616,10 +652,10 @@ export const useTileGrid = ({
     isUndoRedoRef.current = true;
     setTiles((prev) => {
       const prevNorm = normalizeTiles(prev, internalTotalCells, tileSourcesLength);
-      let next: Tile[] | undefined;
+      let next: UndoEntry | undefined;
       while (stack.length > 0) {
         next = stack.pop();
-        if (next && !tilesEqual(prevNorm, next)) {
+        if (next && !tilesEqual(prevNorm, next.tiles)) {
           break;
         }
         next = undefined;
@@ -627,12 +663,17 @@ export const useTileGrid = ({
       if (!next) {
         return prev;
       }
-      undoStackRef.current.push(
-        prevNorm.map((t) => ({ ...t, name: t.name }))
-      );
+      undoStackRef.current.push({
+        tiles: prevNorm.map((t) => ({ ...t, name: t.name })),
+        sideEffect: next.sideEffect,
+      });
       setUndoCount(undoStackRef.current.length);
       setRedoCount(redoStackRef.current.length);
-      return normalizeTiles(next, internalTotalCells, tileSourcesLength);
+      if (next.sideEffect) {
+        lastRedoSideEffectRef.current = next.sideEffect;
+        setRedoSideEffectVersion((v) => v + 1);
+      }
+      return normalizeTiles(next.tiles, internalTotalCells, tileSourcesLength);
     });
     requestAnimationFrame(() => {
       isUndoRedoRef.current = false;
@@ -2777,6 +2818,7 @@ export const useTileGrid = ({
     (nextTiles: Tile[]) => {
       undoStackRef.current = [];
       redoStackRef.current = [];
+      pendingUndoSideEffectRef.current = null;
       setUndoCount(0);
       setRedoCount(0);
       applyTilesInternal(nextTiles);
@@ -3072,5 +3114,10 @@ export const useTileGrid = ({
     fullTilesForSave: renderTiles,
     fullGridLayoutForSave: fullGridLayout,
     mirrorZoomRegionToRestOfGrid,
+    pendingUndoSideEffectRef,
+    lastUndoSideEffectRef,
+    lastRedoSideEffectRef,
+    undoSideEffectVersion,
+    redoSideEffectVersion,
   };
 };

@@ -1887,6 +1887,11 @@ export default function TestScreen() {
     fullTilesForSave,
     fullGridLayoutForSave,
     mirrorZoomRegionToRestOfGrid,
+    pendingUndoSideEffectRef,
+    lastUndoSideEffectRef,
+    lastRedoSideEffectRef,
+    undoSideEffectVersion,
+    redoSideEffectVersion,
   } = useTileGrid({
     tileSources,
     availableWidth,
@@ -2091,6 +2096,58 @@ export default function TestScreen() {
       }
     };
   }, []);
+
+  /** Restore other-layer data when undoing a full-canvas clear. */
+  useEffect(() => {
+    const sideEffect = lastUndoSideEffectRef.current;
+    if (!sideEffect || !activeFile) return;
+    const { preClear } = sideEffect;
+    const rows = activeFile.grid?.rows ?? 0;
+    const cols = activeFile.grid?.columns ?? 0;
+    if (preClear[1] !== undefined && editingLevel !== 1) {
+      upsertActiveFile({
+        ...activeFile,
+        tiles: preClear[1],
+        gridLayout: { rows, columns: cols, tileSize: activeFile.preferredTileSize },
+        category: activeFile.category,
+        categories: activeFile.categories,
+        preferredTileSize: activeFile.preferredTileSize,
+      });
+    }
+    if (preClear[2] !== undefined && editingLevel !== 2) {
+      updateActiveFileLayer(2, preClear[2]);
+    }
+    if (preClear[3] !== undefined && editingLevel !== 3) {
+      updateActiveFileLayer(3, preClear[3]);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [undoSideEffectVersion]);
+
+  /** Restore other-layer data when redoing a full-canvas clear. */
+  useEffect(() => {
+    const sideEffect = lastRedoSideEffectRef.current;
+    if (!sideEffect || !activeFile) return;
+    const { postClear } = sideEffect;
+    const rows = activeFile.grid?.rows ?? 0;
+    const cols = activeFile.grid?.columns ?? 0;
+    if (postClear[1] !== undefined && editingLevel !== 1) {
+      upsertActiveFile({
+        ...activeFile,
+        tiles: postClear[1],
+        gridLayout: { rows, columns: cols, tileSize: activeFile.preferredTileSize },
+        category: activeFile.category,
+        categories: activeFile.categories,
+        preferredTileSize: activeFile.preferredTileSize,
+      });
+    }
+    if (postClear[2] !== undefined && editingLevel !== 2) {
+      updateActiveFileLayer(2, postClear[2]);
+    }
+    if (postClear[3] !== undefined && editingLevel !== 3) {
+      updateActiveFileLayer(3, postClear[3]);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [redoSideEffectVersion]);
 
   const tilesSignature = useMemo(
     () =>
@@ -4350,9 +4407,27 @@ export default function TestScreen() {
     }
     if (l2Count > 0) updateActiveFileLayer(2, newL2);
     if (l3Count > 0) updateActiveFileLayer(3, newL3);
-    const tilesForCurrentLayer =
-      editingLevel === 1 ? newTiles : editingLevel === 2 ? newL2 : newL3;
-    loadTiles(tilesForCurrentLayer);
+    // Attach side-effect data to the undo entry so other layers can be restored on undo/redo.
+    {
+      const preClear: { [level: number]: Tile[] } = {};
+      const postClear: { [level: number]: Tile[] } = {};
+      if (editingLevel !== 1 && activeFile && !isLayerLocked(activeFile, 1)) {
+        preClear[1] = activeFile.tiles ?? [];
+        postClear[1] = newTiles;
+      }
+      if (editingLevel !== 2 && l2Count > 0 && activeFile && !isLayerLocked(activeFile, 2)) {
+        preClear[2] = activeFile.layers?.[2] ?? [];
+        postClear[2] = newL2;
+      }
+      if (editingLevel !== 3 && l3Count > 0 && activeFile && !isLayerLocked(activeFile, 3)) {
+        preClear[3] = activeFile.layers?.[3] ?? [];
+        postClear[3] = newL3;
+      }
+      if (Object.keys(preClear).length > 0) {
+        pendingUndoSideEffectRef.current = { preClear, postClear };
+      }
+    }
+    resetTiles();
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
         void (async () => {
