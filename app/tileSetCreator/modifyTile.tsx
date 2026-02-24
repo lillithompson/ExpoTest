@@ -310,7 +310,6 @@ function GridLinesOverlay({
   );
 }
 
-const MODIFY_TILE_FLICKER_DEBUG = typeof __DEV__ !== 'undefined' && __DEV__;
 
 export default function ModifyTileScreen() {
   const { width, height } = useWindowDimensions();
@@ -319,16 +318,6 @@ export default function ModifyTileScreen() {
   const params = useLocalSearchParams<{ setId?: string; tileId?: string }>();
   const setId = params.setId ?? '';
   const tileId = params.tileId ?? '';
-  const modifyTileRenderCountRef = useRef(0);
-  const lastModifyTileLogRef = useRef(0);
-  modifyTileRenderCountRef.current += 1;
-  if (MODIFY_TILE_FLICKER_DEBUG) {
-    const now = Date.now();
-    if (now - lastModifyTileLogRef.current > 2000) {
-      lastModifyTileLogRef.current = now;
-      console.warn('[ModifyTileScreen] render', { renderCount: modifyTileRenderCountRef.current });
-    }
-  }
   const { settings, setSettings } = usePersistedSettings();
   const { replaceTileSourceNames, replaceTileSourceNamesWithError } = useTileFiles(
     TILE_CATEGORIES[0] as TileCategory

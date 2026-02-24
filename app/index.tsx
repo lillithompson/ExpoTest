@@ -73,7 +73,6 @@ import {
     getCellIndicesInRegion,
     getLockedBoundaryEdges,
 } from '@/utils/locked-regions';
-import { paletteProfileLogParent } from '@/utils/palette-profile';
 import {
     buildPreviewPath,
     getFilePreviewUri,
@@ -1164,12 +1163,10 @@ export default function TestScreen() {
     },
     [bakedSourcesBySetId, currentBakedNameSets]
   );
-  const paletteSources = useMemo(() => {
-    const t0 = performance.now();
-    const result = getSourcesForSelection(activeCategories, selectedTileSetIds);
-    paletteProfileLogParent('paletteSources', performance.now() - t0, `sources=${result.length}`);
-    return result;
-  }, [activeCategories, selectedTileSetIds, getSourcesForSelection]);
+  const paletteSources = useMemo(
+    () => getSourcesForSelection(activeCategories, selectedTileSetIds),
+    [activeCategories, selectedTileSetIds, getSourcesForSelection]
+  );
   paletteSourcesRef.current = paletteSources;
   const allSourceLookup = useMemo(() => {
     const map = new Map<string, TileSource>();
@@ -3695,15 +3692,6 @@ export default function TestScreen() {
     const enterNonEmptyBranch =
       shapeForApply &&
       (canApplyNonEmpty || enterViaFileDimensionsOnly);
-    if (typeof __DEV__ !== 'undefined' && __DEV__ && enterViaFileDimensionsOnly) {
-      console.log('[apply effect] Entering non-empty branch via fileDimensionsMatch (empty L1 tiles)', {
-        pendingRows: pending.rows,
-        pendingCols: pending.columns,
-        pendingTilesLength: pending.tiles.length,
-        gridLayoutRows: gridLayout.rows,
-        gridLayoutCols: gridLayout.columns,
-      });
-    }
     if (enterNonEmptyBranch) {
       if (hasZoomedInThisSessionRef.current) {
         pendingRestoreRef.current = null;
@@ -3789,18 +3777,6 @@ export default function TestScreen() {
         });
       }
       return;
-    }
-    if (typeof __DEV__ !== 'undefined' && __DEV__ && pending && activeFileId === pending.fileId) {
-      console.log('[apply effect] Stuck preview: no branch taken', {
-        pendingRows: pending.rows,
-        pendingCols: pending.columns,
-        pendingTilesLength: pending.tiles.length,
-        gridLayoutRows: gridLayout.rows,
-        gridLayoutCols: gridLayout.columns,
-        canApplyNonEmpty,
-        fileDimensionsMatch: Boolean(fileDimensionsMatch),
-        isActuallyNewFile: Boolean(activeFile && activeFile.grid.rows === 0 && activeFile.grid.columns === 0),
-      });
     }
     // Only treat as empty new file when the file itself has 0,0 grid. Prevents wiping content when pending is stale (0,0) but activeFile has real grid.
     const isActuallyNewFile =

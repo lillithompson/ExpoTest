@@ -9,7 +9,6 @@ import { LinearGradient } from 'expo-linear-gradient';
 import type { ReactNode } from 'react';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-const PALETTE_FLICKER_DEBUG = typeof __DEV__ !== 'undefined' && __DEV__;
 import {
   Animated,
   Modal,
@@ -166,16 +165,6 @@ function ModifyPaletteInner({
   onPatternStampDragCancel,
   isStampDragging,
 }: ModifyPaletteProps) {
-  const modifyPaletteRenderCountRef = useRef(0);
-  const lastModifyPaletteLogRef = useRef(0);
-  modifyPaletteRenderCountRef.current += 1;
-  if (PALETTE_FLICKER_DEBUG) {
-    const now = Date.now();
-    if (now - lastModifyPaletteLogRef.current > 2000) {
-      lastModifyPaletteLogRef.current = now;
-      console.warn('[ModifyPalette] render', { renderCount: modifyPaletteRenderCountRef.current });
-    }
-  }
   const [internalSelectedPatternId, setInternalSelectedPatternId] = useState<string | null>(null);
   const [internalPatternRotations, setInternalPatternRotations] = useState<Record<string, number>>({});
   const [internalPatternMirrors, setInternalPatternMirrors] = useState<Record<string, boolean>>({});
