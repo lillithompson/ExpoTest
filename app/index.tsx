@@ -2889,7 +2889,10 @@ export default function TestScreen() {
     if (isHydratingFile || loadedToken !== loadToken) {
       return false;
     }
-    if (!tileSourcesPrefetched) {
+    // Empty files (no filled tiles) can skip the prefetch gate — there are no
+    // tile SVGs to render, so waiting for prefetch just delays an empty grid.
+    const hasFilledTiles = hasActiveFileTiles && tiles.some((t) => t && t.imageIndex >= 0);
+    if (!tileSourcesPrefetched && hasFilledTiles) {
       return false;
     }
     if (!isTileSetSourcesReadyForActiveFile || !areActiveFileSourcesResolved) {
@@ -2905,6 +2908,8 @@ export default function TestScreen() {
     loadedToken,
     loadToken,
     tileSourcesPrefetched,
+    hasActiveFileTiles,
+    tiles,
     isTileSetSourcesReadyForActiveFile,
     areActiveFileSourcesResolved,
     hasMissingTileSources,
