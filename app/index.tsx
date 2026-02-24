@@ -5250,36 +5250,30 @@ export default function TestScreen() {
         nextTiles.push({ ...tile });
       }
     }
-    // Capture tiles from every resolution level where complete cells fall within the selection.
-    // Works regardless of the current editing level — finer and coarser levels are both captured.
+    // Capture tiles from finer resolution levels (internal levels < editingLevel) whose
+    // level-1 footprint falls within the selection. Only finer levels are captured because
+    // the pattern is anchored at the editing level and expands downward in detail.
     let allLayerCaptures: Record<number, { tiles: Tile[]; width: number; height: number }> | undefined;
-    if (activeFile) {
+    if (activeFile && editingLevel > 1) {
       const gridCols = activeFile.grid.columns;
       const gridRows = activeFile.grid.rows;
-      if (gridCols > 0 && gridRows > 0) {
+      if (gridCols > 0 && gridRows > 0 && levelGridInfo) {
         // Convert selection to level-1 bounding box
         let l1MinRow = Infinity, l1MaxRow = -Infinity, l1MinCol = Infinity, l1MaxCol = -Infinity;
-        if (isEditingHigherLayer && levelGridInfo) {
-          for (let j = minRow; j <= maxRow; j++) {
-            for (let i = minCol; i <= maxCol; i++) {
-              const cellIdx = j * levelGridInfo.levelCols + i;
-              const cell = levelGridInfo.cells[cellIdx];
-              if (!cell) continue;
-              if (cell.minRow < l1MinRow) l1MinRow = cell.minRow;
-              if (cell.maxRow > l1MaxRow) l1MaxRow = cell.maxRow;
-              if (cell.minCol < l1MinCol) l1MinCol = cell.minCol;
-              if (cell.maxCol > l1MaxCol) l1MaxCol = cell.maxCol;
-            }
+        for (let j = minRow; j <= maxRow; j++) {
+          for (let i = minCol; i <= maxCol; i++) {
+            const cellIdx = j * levelGridInfo.levelCols + i;
+            const cell = levelGridInfo.cells[cellIdx];
+            if (!cell) continue;
+            if (cell.minRow < l1MinRow) l1MinRow = cell.minRow;
+            if (cell.maxRow > l1MaxRow) l1MaxRow = cell.maxRow;
+            if (cell.minCol < l1MinCol) l1MinCol = cell.minCol;
+            if (cell.maxCol > l1MaxCol) l1MaxCol = cell.maxCol;
           }
-        } else {
-          // At level 1 the selection is already in level-1 space
-          l1MinRow = minRow; l1MaxRow = maxRow; l1MinCol = minCol; l1MaxCol = maxCol;
         }
         if (l1MinRow !== Infinity) {
-          const maxLevel = getMaxGridResolutionLevel(gridCols, gridRows);
           allLayerCaptures = {};
-          for (let M = 1; M <= maxLevel; M++) {
-            if (M === editingLevel) continue; // base layer captured separately
+          for (let M = 1; M < editingLevel; M++) {
             const mInfo = getLevelGridInfo(gridCols, gridRows, M);
             if (!mInfo) continue;
             const mLevelCols = mInfo.levelCols;
@@ -5504,33 +5498,27 @@ export default function TestScreen() {
         );
       }
     }
-    // Capture all other resolution levels (same logic as handleSavePattern)
+    // Capture finer resolution levels (internal levels < editingLevel) — same logic as handleSavePattern.
     let layerTiles: Record<number, { tiles: Tile[]; width: number; height: number }> | undefined;
-    if (activeFile) {
+    if (activeFile && editingLevel > 1) {
       const gridCols = activeFile.grid.columns;
       const gridRows = activeFile.grid.rows;
-      if (gridCols > 0 && gridRows > 0) {
+      if (gridCols > 0 && gridRows > 0 && levelGridInfo) {
         let l1MinRow = Infinity, l1MaxRow = -Infinity, l1MinCol = Infinity, l1MaxCol = -Infinity;
-        if (isEditingHigherLayer && levelGridInfo) {
-          for (let j = minRow; j <= maxRow; j++) {
-            for (let i = minCol; i <= maxCol; i++) {
-              const cellIdx = j * levelGridInfo.levelCols + i;
-              const cell = levelGridInfo.cells[cellIdx];
-              if (!cell) continue;
-              if (cell.minRow < l1MinRow) l1MinRow = cell.minRow;
-              if (cell.maxRow > l1MaxRow) l1MaxRow = cell.maxRow;
-              if (cell.minCol < l1MinCol) l1MinCol = cell.minCol;
-              if (cell.maxCol > l1MaxCol) l1MaxCol = cell.maxCol;
-            }
+        for (let j = minRow; j <= maxRow; j++) {
+          for (let i = minCol; i <= maxCol; i++) {
+            const cellIdx = j * levelGridInfo.levelCols + i;
+            const cell = levelGridInfo.cells[cellIdx];
+            if (!cell) continue;
+            if (cell.minRow < l1MinRow) l1MinRow = cell.minRow;
+            if (cell.maxRow > l1MaxRow) l1MaxRow = cell.maxRow;
+            if (cell.minCol < l1MinCol) l1MinCol = cell.minCol;
+            if (cell.maxCol > l1MaxCol) l1MaxCol = cell.maxCol;
           }
-        } else {
-          l1MinRow = minRow; l1MaxRow = maxRow; l1MinCol = minCol; l1MaxCol = maxCol;
         }
         if (l1MinRow !== Infinity) {
-          const maxLevel = getMaxGridResolutionLevel(gridCols, gridRows);
           layerTiles = {};
-          for (let M = 1; M <= maxLevel; M++) {
-            if (M === editingLevel) continue;
+          for (let M = 1; M < editingLevel; M++) {
             const mInfo = getLevelGridInfo(gridCols, gridRows, M);
             if (!mInfo) continue;
             const mLevelCols = mInfo.levelCols;
@@ -10577,28 +10565,14 @@ export default function TestScreen() {
           )}
         </View>
         {isPatternCreationMode && !showPatternSaveModal && (
-          <View
-            style={[
-              styles.patternCreationOverlay,
-              { top: 0, bottom: brushPanelHeight },
-              { pointerEvents: 'box-none' },
-            ]}
-          >
-            <View style={[styles.patternCreationTop, { pointerEvents: 'auto' }]}>
-              <ThemedText type="defaultSemiBold" style={styles.patternCreationText}>
-                drag select to creat a pattern
-              </ThemedText>
-            </View>
+          <View style={[styles.patternCreationBanner, { pointerEvents: 'auto' }]}>
+            <ThemedText type="defaultSemiBold" style={styles.patternCreationText}>
+              drag select to create a pattern
+            </ThemedText>
+            <Pressable onPress={handleCancelPattern} style={styles.patternCreationCloseBtn} accessibilityRole="button" accessibilityLabel="Cancel pattern creation">
+              <ThemedText style={styles.patternCreationCloseText}>✕</ThemedText>
+            </Pressable>
           </View>
-        )}
-        {isPatternCreationMode && !showPatternSaveModal && (
-          <View
-            style={[
-              styles.patternCreationBottom,
-              { height: brushPanelHeight },
-              { pointerEvents: 'auto' },
-            ]}
-          />
         )}
         <ModifyPalette
           tileSources={paletteSources}
@@ -11813,31 +11787,32 @@ const styles = StyleSheet.create({
     borderColor: '#1f1f1f',
     backgroundColor: '#000',
   },
-  patternCreationOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    zIndex: 50,
-  },
-  patternCreationTop: {
+  patternCreationBanner: {
     position: 'absolute',
     top: 0,
     left: 0,
     right: 0,
     height: HEADER_HEIGHT,
     backgroundColor: '#000',
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     zIndex: 50,
   },
-  patternCreationBottom: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: '#000',
-    zIndex: 50,
-  },
   patternCreationText: {
     color: '#fff',
+  },
+  patternCreationCloseBtn: {
+    position: 'absolute',
+    right: 8,
+    top: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+  },
+  patternCreationCloseText: {
+    color: '#fff',
+    fontSize: 18,
   },
   patternModalClose: {
     paddingHorizontal: 8,
