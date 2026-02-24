@@ -4583,23 +4583,28 @@ export default function TestScreen() {
     if (!stampDragPatternId) return;
     const pattern = patterns.find((p) => p.id === stampDragPatternId);
     if (!pattern) return;
-    const { rotation, mirrorX } = stampDragTransformRef.current;
+    const { rotation } = stampDragTransformRef.current;
     const rotCW = ((rotation % 360) + 360) % 360;
-    // Scale pattern dimensions from createdAtLevel units to L1 display units.
     const { rotW: rotW_native, rotH: rotH_native } = getRotatedDimensions(rotCW, pattern.width, pattern.height);
     const mainLevel = pattern.createdAtLevel ?? 1;
-    let displayW = rotW_native;
-    let displayH = rotH_native;
-    if (mainLevel > 1) {
-      const { cols: gc, rows: gr } = stampGridDimsRef.current;
-      const offsets = getLevelNtoMOffsets(gc, gr, mainLevel, 1);
-      if (offsets) { displayW = rotW_native * offsets.scale; displayH = rotH_native * offsets.scale; }
-    }
+    const { cols: gc, rows: gr } = stampGridDimsRef.current;
+    const offsets = mainLevel > 1 ? getLevelNtoMOffsets(gc, gr, mainLevel, 1) : null;
+    const displayW = offsets ? rotW_native * offsets.scale : rotW_native;
+    const displayH = offsets ? rotH_native * offsets.scale : rotH_native;
     const canvasX = screenX - canvasScreenOffsetRef.current.x;
     const canvasY = screenY - canvasScreenOffsetRef.current.y;
     const tileStride = effectiveTileSize + GRID_GAP;
-    const col = Math.max(0, Math.min(effectiveCols - displayW, Math.floor(canvasX / tileStride) - Math.floor(displayW / 2)));
-    const row = Math.max(0, Math.min(effectiveRows - displayH, Math.floor(canvasY / tileStride) - Math.floor(displayH / 2)));
+    const rawCol = Math.floor(canvasX / tileStride) - Math.floor(displayW / 2);
+    const rawRow = Math.floor(canvasY / tileStride) - Math.floor(displayH / 2);
+    // Snap to the pattern's level cell boundaries so the outline only lands on valid grid positions.
+    const snappedCol = offsets
+      ? Math.round((rawCol - offsets.C_col) / offsets.scale) * offsets.scale + offsets.C_col
+      : rawCol;
+    const snappedRow = offsets
+      ? Math.round((rawRow - offsets.C_row) / offsets.scale) * offsets.scale + offsets.C_row
+      : rawRow;
+    const col = Math.max(0, Math.min(effectiveCols - displayW, snappedCol));
+    const row = Math.max(0, Math.min(effectiveRows - displayH, snappedRow));
     if (
       canvasX >= 0 &&
       canvasY >= 0 &&
@@ -4623,19 +4628,24 @@ export default function TestScreen() {
         const rotCW = ((rotation % 360) + 360) % 360;
         const { rotW: rotW_native, rotH: rotH_native } = getRotatedDimensions(rotCW, pattern.width, pattern.height);
         const mainLevel = pattern.createdAtLevel ?? 1;
-        let displayW = rotW_native;
-        let displayH = rotH_native;
-        if (mainLevel > 1) {
-          const { cols: gc, rows: gr } = stampGridDimsRef.current;
-          const offsets = getLevelNtoMOffsets(gc, gr, mainLevel, 1);
-          if (offsets) { displayW = rotW_native * offsets.scale; displayH = rotH_native * offsets.scale; }
-        }
+        const { cols: gc, rows: gr } = stampGridDimsRef.current;
+        const offsets = mainLevel > 1 ? getLevelNtoMOffsets(gc, gr, mainLevel, 1) : null;
+        const displayW = offsets ? rotW_native * offsets.scale : rotW_native;
+        const displayH = offsets ? rotH_native * offsets.scale : rotH_native;
         const canvasX = screenX - canvasScreenOffsetRef.current.x;
         const canvasY = screenY - canvasScreenOffsetRef.current.y;
         const tileStride = effectiveTileSize + GRID_GAP;
         if (canvasX >= 0 && canvasY >= 0 && canvasX < effectiveCols * tileStride && canvasY < effectiveRows * tileStride) {
-          const col = Math.max(0, Math.min(effectiveCols - displayW, Math.floor(canvasX / tileStride) - Math.floor(displayW / 2)));
-          const row = Math.max(0, Math.min(effectiveRows - displayH, Math.floor(canvasY / tileStride) - Math.floor(displayH / 2)));
+          const rawCol = Math.floor(canvasX / tileStride) - Math.floor(displayW / 2);
+          const rawRow = Math.floor(canvasY / tileStride) - Math.floor(displayH / 2);
+          const snappedCol = offsets
+            ? Math.round((rawCol - offsets.C_col) / offsets.scale) * offsets.scale + offsets.C_col
+            : rawCol;
+          const snappedRow = offsets
+            ? Math.round((rawRow - offsets.C_row) / offsets.scale) * offsets.scale + offsets.C_row
+            : rawRow;
+          const col = Math.max(0, Math.min(effectiveCols - displayW, snappedCol));
+          const row = Math.max(0, Math.min(effectiveRows - displayH, snappedRow));
           setPendingStampCell({ row, col });
           setPendingStampPatternId(patternId);
           setShowStampConfirmDialog(true);
