@@ -1891,6 +1891,58 @@ export default function TestScreen() {
     };
   }, [activeFile, editingLevel, settings.crossLayerConnectivity]);
 
+  const applyCloneToFinerLayers = useCallback((
+    destFullIndex: number,
+    sourceMappedIndex: number,
+  ) => {
+    if (!activeFile || editingLevel <= 1) return;
+    const gridCols = activeFile.grid.columns;
+    const gridRows = activeFile.grid.rows;
+    const editLevelCols = levelGridInfo?.levelCols ?? gridCols;
+    const editLevelRows = levelGridInfo?.levelRows ?? gridRows;
+
+    for (let M = 1; M < editingLevel; M++) {
+      const offsets = getLevelNtoMOffsets(gridCols, gridRows, editingLevel, M);
+      if (!offsets) continue;
+      const { scale, C_row, C_col } = offsets;
+      const mInfo = getLevelGridInfo(gridCols, gridRows, M);
+      if (!mInfo) continue;
+
+      const { levelCols: mCols, levelRows: mRows } = mInfo;
+      const srcRow_N = Math.floor(sourceMappedIndex / editLevelCols);
+      const srcCol_N = sourceMappedIndex % editLevelCols;
+      const dstRow_N = Math.floor(destFullIndex / editLevelCols);
+      const dstCol_N = destFullIndex % editLevelCols;
+
+      const srcStartRow_M = srcRow_N * scale + C_row;
+      const srcStartCol_M = srcCol_N * scale + C_col;
+      const dstStartRow_M = dstRow_N * scale + C_row;
+      const dstStartCol_M = dstCol_N * scale + C_col;
+
+      const sourceTiles = M === 1 ? (activeFile.tiles ?? []) : (activeFile.layers?.[M] ?? []);
+      const cellUpdates: Record<number, Tile> = {};
+
+      for (let dr = 0; dr < scale; dr++) {
+        for (let dc = 0; dc < scale; dc++) {
+          const sRow = srcStartRow_M + dr;
+          const sCol = srcStartCol_M + dc;
+          const dRow = dstStartRow_M + dr;
+          const dCol = dstStartCol_M + dc;
+          if (sRow < 0 || sRow >= mRows || sCol < 0 || sCol >= mCols) continue;
+          if (dRow < 0 || dRow >= mRows || dCol < 0 || dCol >= mCols) continue;
+          const srcTile = sourceTiles[sRow * mCols + sCol];
+          if (srcTile) {
+            cellUpdates[dRow * mCols + dCol] = { ...srcTile };
+          }
+        }
+      }
+
+      if (Object.keys(cellUpdates).length > 0) {
+        updateActiveFileLayerCells(M, cellUpdates);
+      }
+    }
+  }, [activeFile, editingLevel, levelGridInfo, updateActiveFileLayerCells]);
+
   const {
     gridLayout,
     tiles,
@@ -1942,6 +1994,7 @@ export default function TestScreen() {
       editingLevel >= 2
         ? (t: Tile[]) => updateActiveFileLayer(editingLevel, t)
         : undefined,
+    onClonePaint: applyCloneToFinerLayers,
     brush,
     mirrorHorizontal: settings.mirrorHorizontal,
     mirrorVertical: settings.mirrorVertical,
@@ -2197,7 +2250,7 @@ export default function TestScreen() {
       pendingPaletteFloodRef.current = false;
       if (canEditCurrentLayer) {
         floodFill();
-        applyPatternFloodToFinerLayers(false);
+        applyPatternFloodToAllLayers(false);
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -5210,54 +5263,86 @@ export default function TestScreen() {
   };
 
   /**
-   * Apply pattern data to finer layers (levels 1..editingLevel-1) for flood fill operations.
+   * Apply pattern data to all resolution levels for flood fill operations.
+   * Fills all levels that the pattern contains data for, including finer and coarser layers.
    * @param isFloodComplete - if true, only fill cells where imageIndex === -1 (flood complete mode).
    */
-  const applyPatternFloodToFinerLayers = (isFloodComplete: boolean) => {
-    if (brush.mode !== 'pattern' || !isEditingHigherLayer || !levelGridInfo || !selectedPattern || !activeFile) return;
-    const patCreatedAtLevel = selectedPattern.createdAtLevel;
-    // Check if any finer level has data in this pattern
-    const hasFinerData = Array.from({ length: editingLevel - 1 }, (_, i) => i + 1).some(
-      (M) => M === patCreatedAtLevel || !!(selectedPattern.layerTiles?.[M])
-    );
-    if (!hasFinerData) return;
+  const applyPatternFloodToAllLayers = (isFloodComplete: boolean) => {
+    if (brush.mode !== 'pattern' || !selectedPattern || !activeFile) return;
+    const patCreatedAtLevel = selectedPattern.createdAtLevel ?? 1;
+    // Check if the pattern has data at any level other than the current editingLevel
+    const hasOtherLevelData =
+      (patCreatedAtLevel !== editingLevel) ||
+      Object.keys(selectedPattern.layerTiles ?? {}).some((k) => parseInt(k, 10) !== editingLevel);
+    if (!hasOtherLevelData) return;
     const gridCols = activeFile.grid.columns;
     const gridRows = activeFile.grid.rows;
     const patternRotation = patternRotations[selectedPattern.id] ?? 0;
     const patternMirrorX = patternMirrors[selectedPattern.id] ?? false;
-    // Get selection bounds in level-N space (null = entire grid)
+    // Get selection bounds in editing-level space (null = entire grid)
+    const editLevelCols = levelGridInfo?.levelCols ?? gridCols;
+    const editLevelRows = levelGridInfo?.levelRows ?? gridRows;
     let selMinRow_N: number, selMaxRow_N: number, selMinCol_N: number, selMaxCol_N: number;
     if (hookCanvasSelection) {
-      const lc = levelGridInfo.levelCols;
-      const sMinRow = Math.floor(hookCanvasSelection.start / lc);
-      const sMinCol = hookCanvasSelection.start % lc;
-      const sMaxRow = Math.floor(hookCanvasSelection.end / lc);
-      const sMaxCol = hookCanvasSelection.end % lc;
+      const sMinRow = Math.floor(hookCanvasSelection.start / editLevelCols);
+      const sMinCol = hookCanvasSelection.start % editLevelCols;
+      const sMaxRow = Math.floor(hookCanvasSelection.end / editLevelCols);
+      const sMaxCol = hookCanvasSelection.end % editLevelCols;
       selMinRow_N = Math.min(sMinRow, sMaxRow);
       selMaxRow_N = Math.max(sMinRow, sMaxRow);
       selMinCol_N = Math.min(sMinCol, sMaxCol);
       selMaxCol_N = Math.max(sMinCol, sMaxCol);
     } else {
-      selMinRow_N = 0; selMaxRow_N = levelGridInfo.levelRows - 1;
-      selMinCol_N = 0; selMaxCol_N = levelGridInfo.levelCols - 1;
+      selMinRow_N = 0; selMaxRow_N = editLevelRows - 1;
+      selMinCol_N = 0; selMaxCol_N = editLevelCols - 1;
     }
-    for (let M = 1; M < editingLevel; M++) {
-      // Use base tiles when M matches the level the pattern was created at
+    // Collect all levels the pattern has data for, excluding the current editingLevel
+    const allPatternLevels: number[] = [];
+    allPatternLevels.push(patCreatedAtLevel);
+    if (selectedPattern.layerTiles) {
+      Object.keys(selectedPattern.layerTiles).forEach((k) => {
+        const lv = parseInt(k, 10);
+        if (!allPatternLevels.includes(lv)) allPatternLevels.push(lv);
+      });
+    }
+
+    for (const M of allPatternLevels) {
+      if (M === editingLevel) continue; // already handled by hook's floodFill
+
       const patternDataM = M === patCreatedAtLevel
         ? { tiles: selectedPattern.tiles, width: selectedPattern.width, height: selectedPattern.height }
-        : selectedPattern.layerTiles?.[M];
+        : selectedPattern.layerTiles![M];
       if (!patternDataM) continue;
+
       const mInfo = getLevelGridInfo(gridCols, gridRows, M);
       if (!mInfo) continue;
-      const offsets = getLevelNtoMOffsets(gridCols, gridRows, editingLevel, M);
-      if (!offsets) continue;
-      const { scale, C_row, C_col } = offsets;
-      const mLevelCols = mInfo.levelCols;
-      const mMinRow = Math.max(0, selMinRow_N * scale + C_row);
-      const mMaxRow = Math.min(mInfo.levelRows - 1, (selMaxRow_N + 1) * scale + C_row - 1);
-      const mMinCol = Math.max(0, selMinCol_N * scale + C_col);
-      const mMaxCol = Math.min(mLevelCols - 1, (selMaxCol_N + 1) * scale + C_col - 1);
+
+      const { levelCols: mLevelCols, levelRows: mLevelRows } = mInfo;
+      let mMinRow: number, mMaxRow: number, mMinCol: number, mMaxCol: number;
+
+      if (M < editingLevel) {
+        // Finer level: forward transform (editingLevel → M)
+        const offsets = getLevelNtoMOffsets(gridCols, gridRows, editingLevel, M);
+        if (!offsets) continue;
+        const { scale, C_row, C_col } = offsets;
+        mMinRow = Math.max(0, Math.floor(selMinRow_N * scale + C_row));
+        mMaxRow = Math.min(mLevelRows - 1, Math.floor((selMaxRow_N + 1) * scale + C_row - 1));
+        mMinCol = Math.max(0, Math.floor(selMinCol_N * scale + C_col));
+        mMaxCol = Math.min(mLevelCols - 1, Math.floor((selMaxCol_N + 1) * scale + C_col - 1));
+      } else {
+        // Coarser level: inverted transform (M → editingLevel, then invert)
+        const offsets = getLevelNtoMOffsets(gridCols, gridRows, M, editingLevel);
+        if (!offsets) continue;
+        const { scale, C_row, C_col } = offsets;
+        // editLevelRow = coarserRow * scale + C_row  →  coarserRow = (editLevelRow - C_row) / scale
+        mMinRow = Math.max(0, Math.ceil((selMinRow_N - C_row) / scale));
+        mMaxRow = Math.min(mLevelRows - 1, Math.floor((selMaxRow_N + 1 - C_row) / scale) - 1);
+        mMinCol = Math.max(0, Math.ceil((selMinCol_N - C_col) / scale));
+        mMaxCol = Math.min(mLevelCols - 1, Math.floor((selMaxCol_N + 1 - C_col) / scale) - 1);
+      }
+
       if (mMinRow > mMaxRow || mMinCol > mMaxCol) continue;
+
       const sourceTiles = M === 1 ? (activeFile.tiles ?? []) : (activeFile.layers?.[M] ?? []);
       const newMTiles = [...sourceTiles];
       while (newMTiles.length < mInfo.cells.length) {
@@ -8154,7 +8239,7 @@ export default function TestScreen() {
                 pendingFloodCompleteRef.current = setTimeout(() => {
                   pendingFloodCompleteRef.current = null;
                   floodFill();
-                  applyPatternFloodToFinerLayers(false);
+                  applyPatternFloodToAllLayers(false);
                 }, 0);
               }}
               onLongPress={() => {
@@ -8166,7 +8251,7 @@ export default function TestScreen() {
                   pendingFloodCompleteRef.current = null;
                 }
                 floodComplete();
-                applyPatternFloodToFinerLayers(true);
+                applyPatternFloodToAllLayers(true);
               }}
             />
             <ToolbarButton
@@ -8887,16 +8972,16 @@ export default function TestScreen() {
                         resolveUgcSourceFromName={buildUserTileSourceFromName}
                         showOverlays={showOverlays}
                         isCloneSource={
-                          editingLevel === 1 && brush.mode === 'clone' && cloneSourceIndex === cellIndex
+                          !isEditingHigherLayer && brush.mode === 'clone' && cloneSourceIndex === cellIndex
                         }
                         isCloneSample={
-                          editingLevel === 1 && brush.mode === 'clone' && cloneSampleIndex === cellIndex
+                          !isEditingHigherLayer && brush.mode === 'clone' && cloneSampleIndex === cellIndex
                         }
                         isCloneTargetOrigin={
-                          editingLevel === 1 && brush.mode === 'clone' && cloneAnchorIndex === cellIndex
+                          !isEditingHigherLayer && brush.mode === 'clone' && cloneAnchorIndex === cellIndex
                         }
                         isCloneCursor={
-                          editingLevel === 1 && brush.mode === 'clone' && cloneCursorIndex === cellIndex
+                          !isEditingHigherLayer && brush.mode === 'clone' && cloneCursorIndex === cellIndex
                         }
                         isLocked={lockedCellIndicesSet?.has(getFullIndexForCanvas(cellIndex))}
                       />
@@ -9099,6 +9184,57 @@ export default function TestScreen() {
                   })}
                 </View>
               )}
+              {isEditingHigherLayer && brush.mode === 'clone' && levelGridInfo && showOverlays && (
+                <View style={[StyleSheet.absoluteFill, { pointerEvents: 'none' }]}>
+                  {levelGridInfo.cells.map((cell, i) => {
+                    if (zoomRegion && (
+                      cell.minCol > zoomRegion.maxCol ||
+                      cell.maxCol < zoomRegion.minCol ||
+                      cell.minRow > zoomRegion.maxRow ||
+                      cell.maxRow < zoomRegion.minRow
+                    ))
+                      return null;
+                    const isSource = cloneSourceIndex === i;
+                    const isSample = cloneSampleIndex === i;
+                    const isAnchor = cloneAnchorIndex === i;
+                    const isCursor = cloneCursorIndex === i;
+                    if (!isSource && !isSample && !isAnchor && !isCursor) return null;
+                    const stride = zoomRegion
+                      ? effectiveTileSize + GRID_GAP
+                      : level1DisplayLayout.tileSize + GRID_GAP;
+                    const left = zoomRegion
+                      ? (cell.minCol - zoomRegion.minCol) * stride
+                      : cell.minCol * stride;
+                    const top = zoomRegion
+                      ? (cell.minRow - zoomRegion.minRow) * stride
+                      : cell.minRow * stride;
+                    const tileSizeForCell = zoomRegion ? effectiveTileSize : level1DisplayLayout.tileSize;
+                    const w =
+                      (cell.maxCol - cell.minCol + 1) * tileSizeForCell +
+                      (cell.maxCol - cell.minCol) * GRID_GAP;
+                    const h =
+                      (cell.maxRow - cell.minRow + 1) * tileSizeForCell +
+                      (cell.maxRow - cell.minRow) * GRID_GAP;
+                    return (
+                      <View
+                        key={`clone-overlay-${i}`}
+                        style={{
+                          position: 'absolute',
+                          left,
+                          top,
+                          width: w,
+                          height: h,
+                        }}
+                      >
+                        {isSource && <View style={[StyleSheet.absoluteFill, styles.cloneSource]} pointerEvents="none" />}
+                        {isSample && <View style={[StyleSheet.absoluteFill, styles.cloneSample]} pointerEvents="none" />}
+                        {isAnchor && <View style={[StyleSheet.absoluteFill, styles.cloneTargetOrigin]} pointerEvents="none" />}
+                        {isCursor && <View style={[StyleSheet.absoluteFill, styles.cloneCursor]} pointerEvents="none" />}
+                      </View>
+                    );
+                  })}
+                </View>
+              )}
             </View>
           ) : (
             <>
@@ -9129,10 +9265,10 @@ export default function TestScreen() {
                   strokeScaleByName={strokeScaleByName}
                   showDebug={settings.showDebug}
                   showOverlays={showOverlays}
-                  cloneSourceIndex={brush.mode === 'clone' ? cloneSourceIndex : null}
-                  cloneSampleIndex={brush.mode === 'clone' ? cloneSampleIndex : null}
-                  cloneAnchorIndex={brush.mode === 'clone' ? cloneAnchorIndex : null}
-                  cloneCursorIndex={brush.mode === 'clone' ? cloneCursorIndex : null}
+                  cloneSourceIndex={brush.mode === 'clone' && !isEditingHigherLayer ? cloneSourceIndex : null}
+                  cloneSampleIndex={brush.mode === 'clone' && !isEditingHigherLayer ? cloneSampleIndex : null}
+                  cloneAnchorIndex={brush.mode === 'clone' && !isEditingHigherLayer ? cloneAnchorIndex : null}
+                  cloneCursorIndex={brush.mode === 'clone' && !isEditingHigherLayer ? cloneCursorIndex : null}
                   lockedCellIndices={lockedCellIndicesArray}
                   lockedBoundaryEdges={lockedBoundaryEdges}
                   onPaintReady={
@@ -9170,16 +9306,16 @@ export default function TestScreen() {
                           resolveUgcSourceFromName={buildUserTileSourceFromName}
                           showOverlays={showOverlays}
                           isCloneSource={
-                            editingLevel === 1 && brush.mode === 'clone' && cloneSourceIndex === cellIndex
+                            !isEditingHigherLayer && brush.mode === 'clone' && cloneSourceIndex === cellIndex
                           }
                           isCloneSample={
-                            editingLevel === 1 && brush.mode === 'clone' && cloneSampleIndex === cellIndex
+                            !isEditingHigherLayer && brush.mode === 'clone' && cloneSampleIndex === cellIndex
                           }
                           isCloneTargetOrigin={
-                            editingLevel === 1 && brush.mode === 'clone' && cloneAnchorIndex === cellIndex
+                            !isEditingHigherLayer && brush.mode === 'clone' && cloneAnchorIndex === cellIndex
                           }
                           isCloneCursor={
-                            editingLevel === 1 && brush.mode === 'clone' && cloneCursorIndex === cellIndex
+                            !isEditingHigherLayer && brush.mode === 'clone' && cloneCursorIndex === cellIndex
                           }
                           isLocked={lockedCellIndicesSet?.has(getFullIndexForCanvas(cellIndex))}
                         />
@@ -9383,6 +9519,57 @@ export default function TestScreen() {
                     })}
                   </View>
                 )}
+              {isEditingHigherLayer && brush.mode === 'clone' && levelGridInfo && showOverlays && (
+                <View style={[StyleSheet.absoluteFill, { pointerEvents: 'none' }]}>
+                  {levelGridInfo.cells.map((cell, i) => {
+                    if (zoomRegion && (
+                      cell.minCol > zoomRegion.maxCol ||
+                      cell.maxCol < zoomRegion.minCol ||
+                      cell.minRow > zoomRegion.maxRow ||
+                      cell.maxRow < zoomRegion.minRow
+                    ))
+                      return null;
+                    const isSource = cloneSourceIndex === i;
+                    const isSample = cloneSampleIndex === i;
+                    const isAnchor = cloneAnchorIndex === i;
+                    const isCursor = cloneCursorIndex === i;
+                    if (!isSource && !isSample && !isAnchor && !isCursor) return null;
+                    const stride = zoomRegion
+                      ? effectiveTileSize + GRID_GAP
+                      : level1DisplayLayout.tileSize + GRID_GAP;
+                    const left = zoomRegion
+                      ? (cell.minCol - zoomRegion.minCol) * stride
+                      : cell.minCol * stride;
+                    const top = zoomRegion
+                      ? (cell.minRow - zoomRegion.minRow) * stride
+                      : cell.minRow * stride;
+                    const tileSizeForCell = zoomRegion ? effectiveTileSize : level1DisplayLayout.tileSize;
+                    const w =
+                      (cell.maxCol - cell.minCol + 1) * tileSizeForCell +
+                      (cell.maxCol - cell.minCol) * GRID_GAP;
+                    const h =
+                      (cell.maxRow - cell.minRow + 1) * tileSizeForCell +
+                      (cell.maxRow - cell.minRow) * GRID_GAP;
+                    return (
+                      <View
+                        key={`clone-overlay-${i}`}
+                        style={{
+                          position: 'absolute',
+                          left,
+                          top,
+                          width: w,
+                          height: h,
+                        }}
+                      >
+                        {isSource && <View style={[StyleSheet.absoluteFill, styles.cloneSource]} pointerEvents="none" />}
+                        {isSample && <View style={[StyleSheet.absoluteFill, styles.cloneSample]} pointerEvents="none" />}
+                        {isAnchor && <View style={[StyleSheet.absoluteFill, styles.cloneTargetOrigin]} pointerEvents="none" />}
+                        {isCursor && <View style={[StyleSheet.absoluteFill, styles.cloneCursor]} pointerEvents="none" />}
+                      </View>
+                    );
+                  })}
+                </View>
+              )}
               <View
                 ref={gridTouchRef}
                 style={[StyleSheet.absoluteFillObject, { pointerEvents: gridVisible && !isClearing ? 'auto' : 'none' }]}
