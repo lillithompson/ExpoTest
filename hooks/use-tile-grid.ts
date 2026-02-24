@@ -102,8 +102,8 @@ type Result = {
   tiles: Tile[];
   handlePress: (cellIndex: number) => void;
   randomFill: () => void;
-  floodFill: () => void;
-  floodComplete: () => void;
+  floodFill: (patternOriginRow?: number, patternOriginCol?: number) => void;
+  floodComplete: (patternOriginRow?: number, patternOriginCol?: number) => void;
   reconcileTiles: () => void;
   controlledRandomize: () => void;
   resetTiles: () => void;
@@ -2017,7 +2017,7 @@ export const useTileGrid = ({
     });
   };
 
-  const floodFill = () => {
+  const floodFill = (patternOriginRow = 0, patternOriginCol = 0) => {
     if (internalTotalCells <= 0) {
       return;
     }
@@ -2075,7 +2075,7 @@ export const useTileGrid = ({
         modifiableIndicesSet.forEach((index) => {
           const row = Math.floor(index / colsForIndex);
           const col = index % colsForIndex;
-          const tile = getPatternTileForPosition(row, col);
+          const tile = getPatternTileForPosition(row - patternOriginRow, col - patternOriginCol);
           nextTiles[index] = tile
             ? {
                 imageIndex: tile.imageIndex,
@@ -2091,7 +2091,7 @@ export const useTileGrid = ({
         for (const index of modifiableIndicesArray) {
           const row = Math.floor(index / colsForIndex);
           const col = index % colsForIndex;
-          const tile = getPatternTileForPosition(row, col);
+          const tile = getPatternTileForPosition(row - patternOriginRow, col - patternOriginCol);
           if (!tile) {
             continue;
           }
@@ -2101,7 +2101,7 @@ export const useTileGrid = ({
         for (const index of modifiableIndicesArray) {
           const row = Math.floor(index / colsForIndex);
           const col = index % colsForIndex;
-          const tile = getPatternTileForPosition(row, col);
+          const tile = getPatternTileForPosition(row - patternOriginRow, col - patternOriginCol);
           if (tile) {
             nextTiles[index] = {
               imageIndex: tile.imageIndex,
@@ -2460,7 +2460,7 @@ export const useTileGrid = ({
     }
   };
 
-  const floodComplete = () => {
+  const floodComplete = (patternOriginRow = 0, patternOriginCol = 0) => {
     if (internalTotalCells <= 0) {
       return;
     }
@@ -2536,7 +2536,7 @@ export const useTileGrid = ({
           }
           const row = Math.floor(index / colsForIndexComplete);
           const col = index % colsForIndexComplete;
-          const tile = getPatternTileForPosition(row, col);
+          const tile = getPatternTileForPosition(row - patternOriginRow, col - patternOriginCol);
           if (!tile) {
             continue;
           }
@@ -2549,7 +2549,7 @@ export const useTileGrid = ({
           }
           const row = Math.floor(index / colsForIndexComplete);
           const col = index % colsForIndexComplete;
-          const tile = getPatternTileForPosition(row, col);
+          const tile = getPatternTileForPosition(row - patternOriginRow, col - patternOriginCol);
           if (!tile) {
             continue;
           }
