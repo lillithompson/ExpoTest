@@ -1,13 +1,11 @@
 import { DefaultTheme, ThemeProvider } from '@react-navigation/native';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { Platform, View } from 'react-native';
 import 'react-native-reanimated';
 
-import { MobileTabBar } from '@/components/mobile-tab-bar';
 import { TabBarVisibleProvider } from '@/contexts/tab-bar-visible';
-import { useShowMobileTabBar } from '@/hooks/use-show-mobile-tab-bar';
 
 export default function RootLayout() {
   useEffect(() => {
@@ -16,18 +14,14 @@ export default function RootLayout() {
     }
   }, []);
 
-  const showMobileTabBar = useShowMobileTabBar();
-  const [hideTabBarOverModify, setHideTabBarOverModify] = useState(false);
-  const [hideTabBarOverOverlay, setHideTabBarOverOverlay] = useState(false);
-
   return (
     <ThemeProvider value={DefaultTheme}>
       <TabBarVisibleProvider
-        tabBarVisible={showMobileTabBar}
-        hideTabBarOverModify={hideTabBarOverModify}
-        setHideTabBarOverModify={setHideTabBarOverModify}
-        hideTabBarOverOverlay={hideTabBarOverOverlay}
-        setHideTabBarOverOverlay={setHideTabBarOverOverlay}
+        tabBarVisible={false}
+        hideTabBarOverModify={false}
+        setHideTabBarOverModify={() => {}}
+        hideTabBarOverOverlay={false}
+        setHideTabBarOverOverlay={() => {}}
       >
         <View style={{ flex: 1 }}>
           <Stack>
@@ -37,11 +31,6 @@ export default function RootLayout() {
             <Stack.Screen name="tileSetCreator/modifyTile" options={{ headerShown: false }} />
             <Stack.Screen name="manual" options={{ title: 'Manual' }} />
           </Stack>
-          {showMobileTabBar && (
-            <View style={{ position: 'absolute', bottom: 0, left: 0, right: 0 }}>
-              <MobileTabBar />
-            </View>
-          )}
         </View>
       </TabBarVisibleProvider>
       <StatusBar style="dark" />

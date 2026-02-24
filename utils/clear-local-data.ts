@@ -15,6 +15,7 @@ const SETTINGS_KEY = 'tile-settings-v1';
 
 /**
  * Removes all local data from AsyncStorage: saved files, tile sets (and bakes), favorites, patterns, and settings.
+ * Note: callers should preserve specific settings (like developerMode) before calling this if desired.
  * Callers should then reset in-memory state (e.g. clearAllFiles, reloadTileSets, clearFavorites, clearAllPatterns)
  * and reset settings to defaults (e.g. setSettings(getDefaultSettings())).
  */

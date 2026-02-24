@@ -555,20 +555,20 @@ export default function TileSetCreatorScreen() {
         )}
         <ThemedView style={styles.fileHeaderActions}>
           <Pressable
-            onPress={handleImportTileSetPress}
-            style={styles.headerIcon}
-            accessibilityRole="button"
-            accessibilityLabel="Import .tileset file"
-          >
-            <MaterialCommunityIcons name="upload" size={24} color="#fff" />
-          </Pressable>
-          <Pressable
             onPress={openCreateModal}
             style={styles.headerIcon}
             accessibilityRole="button"
             accessibilityLabel="Create new tile set"
           >
             <MaterialCommunityIcons name="plus" size={24} color="#fff" />
+          </Pressable>
+          <Pressable
+            onPress={handleImportTileSetPress}
+            style={styles.headerIcon}
+            accessibilityRole="button"
+            accessibilityLabel="Import .tileset file"
+          >
+            <MaterialCommunityIcons name="upload" size={24} color="#fff" />
           </Pressable>
           <Pressable
             onPress={() => setIsSelectMode(true)}

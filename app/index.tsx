@@ -6521,31 +6521,22 @@ export default function TestScreen() {
         <ThemedView style={styles.fileHeader}>
           {Platform.OS === 'web' && !useIsMobileWeb() ? (
             <DesktopNavTabs />
-          ) : (
-            <Pressable
-              onPress={() => {
-                router.push('/tileSetCreator');
-              }}
-              accessibilityRole="button"
-              accessibilityLabel="Open tile sets"
-            >
-              <ThemedText type="title" style={styles.fileTitle}>
-                Files
-              </ThemedText>
-            </Pressable>
-          )}
+          ) : null}
+          <ThemedText type="title" style={styles.fileTitle}>
+            Files
+          </ThemedText>
           <ThemedView style={styles.fileHeaderActions}>
-            <ToolbarButton
-              label="Import .tile file"
-              icon="upload"
-              color="#fff"
-              onPress={handleImportTileFilePress}
-            />
             <ToolbarButton
               label="Create new tile canvas file"
               icon="plus"
               color="#fff"
               onPress={handleCreateNewFile}
+            />
+            <ToolbarButton
+              label="Import .tile file"
+              icon="upload"
+              color="#fff"
+              onPress={handleImportTileFilePress}
             />
             <ToolbarButton
               label="Select files"
@@ -7304,6 +7295,17 @@ export default function TestScreen() {
               >
                 <ThemedText type="defaultSemiBold">View manual</ThemedText>
               </Pressable>
+              <Pressable
+                style={styles.settingsAction}
+                onPress={() => {
+                  setShowSettingsOverlay(false);
+                  router.push('/tileSetCreator');
+                }}
+                accessibilityRole="button"
+                accessibilityLabel="Manage tile sets"
+              >
+                <ThemedText type="defaultSemiBold">Tile Set Creator</ThemedText>
+              </Pressable>
               <ThemedView style={styles.toggleRow}>
                 <ThemedText type="defaultSemiBold">Developer mode</ThemedText>
                 <Switch
@@ -7330,8 +7332,9 @@ export default function TestScreen() {
                   const message =
                     'Delete all local data? This will permanently delete all saved files, tile sets, patterns, and favorites, and reset all settings to their defaults. This cannot be undone.';
                   const doDelete = async () => {
+                    const preservedDeveloperMode = settings.developerMode;
                     await clearAllLocalData();
-                    setSettings(getDefaultSettings());
+                    setSettings({ ...getDefaultSettings(), developerMode: preservedDeveloperMode });
                     await clearAllFiles();
                     await reloadTileSets();
                     clearBrushFavorites();
@@ -7358,49 +7361,6 @@ export default function TestScreen() {
                   Delete all local data
                 </ThemedText>
               </TouchableOpacity>
-              <HsvColorPicker
-                label="Background Color"
-                color={settings.backgroundColor}
-                onChange={(value) =>
-                  setSettings((prev) => ({
-                    ...prev,
-                    backgroundColor: value,
-                  }))
-                }
-              />
-              <HsvColorPicker
-                label="Background Line Color"
-                color={settings.backgroundLineColor}
-                onChange={(value) =>
-                  setSettings((prev) => ({
-                    ...prev,
-                    backgroundLineColor: value,
-                  }))
-                }
-              />
-              <ThemedView style={styles.sectionGroup}>
-                <ThemedView style={styles.sectionHeader}>
-                  <ThemedText type="defaultSemiBold">Line Width</ThemedText>
-                  <ThemedText type="defaultSemiBold">
-                    {settings.backgroundLineWidth.toFixed(1)}
-                  </ThemedText>
-                </ThemedView>
-                <Slider
-                  minimumValue={0}
-                  maximumValue={4}
-                  step={0.5}
-                  value={settings.backgroundLineWidth}
-                  onValueChange={(value) =>
-                    setSettings((prev) => ({
-                      ...prev,
-                      backgroundLineWidth: value,
-                    }))
-                  }
-                  minimumTrackTintColor="#22c55e"
-                  maximumTrackTintColor="#e5e7eb"
-                  thumbTintColor="#22c55e"
-                />
-              </ThemedView>
               <ThemedView style={styles.settingsPlatformFooter}>
                 <ThemedText style={styles.settingsPlatformLabel}>{platformLabel}</ThemedText>
               </ThemedView>
@@ -8606,6 +8566,15 @@ export default function TestScreen() {
                     const h =
                       (cell.maxRow - cell.minRow + 1) * tileSizeForCell +
                       (cell.maxRow - cell.minRow) * GRID_GAP;
+                    const l2Connections =
+                      settings.showDebug && tile.imageIndex >= 0
+                        ? getTransformedConnectionsForName(
+                            tileName,
+                            tile.rotation,
+                            tile.mirrorX,
+                            tile.mirrorY
+                          )
+                        : null;
                     return (
                       <View
                         key={`l2-web-${i}`}
@@ -8638,6 +8607,7 @@ export default function TestScreen() {
                           ]}
                           displaySize={w}
                         />
+                        {settings.showDebug && <TileDebugOverlay connections={l2Connections} />}
                       </View>
                     );
                   })}
@@ -8693,6 +8663,15 @@ export default function TestScreen() {
                     const h =
                       (cell.maxRow - cell.minRow + 1) * tileSizeForCell +
                       (cell.maxRow - cell.minRow) * GRID_GAP;
+                    const l3Connections =
+                      settings.showDebug && tile.imageIndex >= 0
+                        ? getTransformedConnectionsForName(
+                            tileName,
+                            tile.rotation,
+                            tile.mirrorX,
+                            tile.mirrorY
+                          )
+                        : null;
                     return (
                       <View
                         key={`l3-web-${i}`}
@@ -8725,6 +8704,7 @@ export default function TestScreen() {
                           ]}
                           displaySize={w}
                         />
+                        {settings.showDebug && <TileDebugOverlay connections={l3Connections} />}
                       </View>
                     );
                   })}
@@ -8870,6 +8850,15 @@ export default function TestScreen() {
                       const h =
                         (cell.maxRow - cell.minRow + 1) * tileSizeForCell +
                         (cell.maxRow - cell.minRow) * GRID_GAP;
+                      const l2DebugConnections =
+                        settings.showDebug && tile.imageIndex >= 0
+                          ? getTransformedConnectionsForName(
+                              tileName,
+                              tile.rotation,
+                              tile.mirrorX,
+                              tile.mirrorY
+                            )
+                          : null;
                       return (
                         <View
                           key={`l2-${i}`}
@@ -8902,6 +8891,7 @@ export default function TestScreen() {
                             ]}
                             displaySize={w}
                           />
+                          {settings.showDebug && <TileDebugOverlay connections={l2DebugConnections} />}
                         </View>
                       );
                     })}
@@ -8957,6 +8947,15 @@ export default function TestScreen() {
                       const h =
                         (cell.maxRow - cell.minRow + 1) * tileSizeForCell +
                         (cell.maxRow - cell.minRow) * GRID_GAP;
+                      const l3DebugConnections =
+                        settings.showDebug && tile.imageIndex >= 0
+                          ? getTransformedConnectionsForName(
+                              tileName,
+                              tile.rotation,
+                              tile.mirrorX,
+                              tile.mirrorY
+                            )
+                          : null;
                       return (
                         <View
                           key={`l3-${i}`}
@@ -8989,6 +8988,7 @@ export default function TestScreen() {
                             ]}
                             displaySize={w}
                           />
+                          {settings.showDebug && <TileDebugOverlay connections={l3DebugConnections} />}
                         </View>
                       );
                     })}

@@ -18,53 +18,13 @@ function isTileSetsRoute(pathname: string): boolean {
 }
 
 export function DesktopNavTabs() {
-  const pathname = usePathname();
-  const router = useRouter();
   const isMobileWeb = useIsMobileWeb();
 
   if (Platform.OS !== 'web' || isMobileWeb) {
     return null;
   }
 
-  const filesActive = isFilesRoute(pathname);
-  const tileSetsActive = isTileSetsRoute(pathname);
-
-  return (
-    <View style={styles.container}>
-      <Pressable
-        onPress={() => !filesActive && router.replace(FILES_ROUTE)}
-        style={styles.tab}
-        accessibilityRole="tab"
-        accessibilityLabel="Files"
-        accessibilityState={{ selected: filesActive }}
-      >
-        <ThemedText
-          type="title"
-          style={[styles.tabLabel, filesActive && styles.tabLabelActive]}
-        >
-          Files
-        </ThemedText>
-      </Pressable>
-      <ThemedText type="default" style={styles.separator}>
-        {' '}
-        |{' '}
-      </ThemedText>
-      <Pressable
-        onPress={() => !tileSetsActive && router.replace(TILE_SETS_ROUTE)}
-        style={styles.tab}
-        accessibilityRole="tab"
-        accessibilityLabel="Tile Sets"
-        accessibilityState={{ selected: tileSetsActive }}
-      >
-        <ThemedText
-          type="title"
-          style={[styles.tabLabel, tileSetsActive && styles.tabLabelActive]}
-        >
-          Tile Sets
-        </ThemedText>
-      </Pressable>
-    </View>
-  );
+  return null;
 }
 
 const styles = StyleSheet.create({

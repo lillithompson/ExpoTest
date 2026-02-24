@@ -1143,44 +1143,25 @@ export function TileBrushPanel({
             </ThemedText>
             {(favoriteDialog?.mode === 'add' || favoriteDialog?.mode === 'remove') && (
               <View style={styles.modalSection}>
-                <ThemedText type="defaultSemiBold" style={styles.sectionLabel}>
-                  Favorite
-                </ThemedText>
-                <View style={styles.colorOptions}>
-                  {favoriteColorOptions.map((color) => (
-                    <Pressable
-                      key={color}
-                      onPress={() => {
-                        setFavoriteColorDraft(color);
-                        applyFavoriteColorImmediate(color);
-                      }}
-                      style={[
-                        styles.colorSwatch,
-                        { backgroundColor: color },
-                        favoriteColorDraft === color && styles.colorSwatchSelected,
-                      ]}
-                      accessibilityRole="button"
-                      accessibilityLabel={`Choose ${color}`}
-                    />
-                  ))}
-                  <Pressable
-                    onPress={removeFromFavorites}
-                    style={[
-                      styles.colorSwatch,
-                      styles.unfavoriteSwatch,
-                      favoriteColorDraft === UNFAVORITE_SENTINEL &&
-                        styles.colorSwatchSelected,
-                    ]}
-                    accessibilityRole="button"
-                    accessibilityLabel="Remove from favorites"
-                  >
-                    <MaterialCommunityIcons
-                      name="star-off-outline"
-                      size={20}
-                      color="#6b7280"
-                    />
-                  </Pressable>
-                </View>
+                <Pressable
+                  onPress={() => {
+                    if (favoriteColorDraft === UNFAVORITE_SENTINEL) {
+                      setFavoriteColorDraft(favoritesStore.getState().lastUnfavoritedColor);
+                      applyFavoriteColorImmediate(favoritesStore.getState().lastUnfavoritedColor);
+                    } else {
+                      removeFromFavorites();
+                    }
+                  }}
+                  style={styles.heartButton}
+                  accessibilityRole="button"
+                  accessibilityLabel={favoriteColorDraft === UNFAVORITE_SENTINEL ? 'Add to favorites' : 'Remove from favorites'}
+                >
+                  <MaterialCommunityIcons
+                    name={favoriteColorDraft === UNFAVORITE_SENTINEL ? 'heart-outline' : 'heart'}
+                    size={28}
+                    color={favoriteColorDraft === UNFAVORITE_SENTINEL ? '#d1d5db' : '#ef4444'}
+                  />
+                </Pressable>
               </View>
             )}
             {favoriteDialog != null && onSetOrientation && tileSources[favoriteDialog.index] && (
@@ -1474,6 +1455,13 @@ const styles = StyleSheet.create({
   colorSwatchSelected: {
     borderColor: '#111',
     borderWidth: 2,
+  },
+  heartButton: {
+    width: 48,
+    height: 48,
+    alignSelf: 'center',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   sectionLabel: {
     color: '#111',
