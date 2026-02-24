@@ -194,5 +194,55 @@ describe('tile-ugc-format', () => {
       // Payload has shape expected by createPattern({ name, category, width, height, tiles })
       expect(p.kind).toBe('pattern');
     });
+
+    it('serialized multi-resolution pattern preserves all resolution levels', () => {
+      const pattern = {
+        id: 'p2',
+        name: 'Multi-res Pattern',
+        category: validCategory as PatternExportPayload['category'],
+        width: 4,
+        height: 4,
+        tiles: Array(16).fill({
+          imageIndex: 0,
+          rotation: 0,
+          mirrorX: false,
+          mirrorY: false,
+        }),
+        createdAt: 12345,
+        createdAtLevel: 1,
+        layerTiles: {
+          2: {
+            width: 2,
+            height: 2,
+            tiles: Array(4).fill({
+              imageIndex: 1,
+              rotation: 90,
+              mirrorX: true,
+              mirrorY: false,
+            }),
+          },
+          3: {
+            width: 1,
+            height: 1,
+            tiles: [{ imageIndex: 2, rotation: 180, mirrorX: false, mirrorY: true }],
+          },
+        },
+      };
+      const json = serializePattern(pattern);
+      const parsed = deserializePattern(json);
+      expect(parsed.ok).toBe(true);
+      if (!parsed.ok) return;
+      const p = parsed.payload;
+      expect(p.createdAtLevel).toBe(1);
+      expect(p.layerTiles).toBeDefined();
+      expect(p.layerTiles![2]).toBeDefined();
+      expect(p.layerTiles![2].width).toBe(2);
+      expect(p.layerTiles![2].height).toBe(2);
+      expect(p.layerTiles![2].tiles).toHaveLength(4);
+      expect(p.layerTiles![3]).toBeDefined();
+      expect(p.layerTiles![3].width).toBe(1);
+      expect(p.layerTiles![3].height).toBe(1);
+      expect(p.layerTiles![3].tiles).toHaveLength(1);
+    });
   });
 });

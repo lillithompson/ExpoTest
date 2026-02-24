@@ -107,7 +107,7 @@ export function fileUsesUgc(file: {
  * Include only tile sets that are actually referenced by the pattern.
  */
 export function serializePatternBundle(
-  pattern: { name: string; category: PatternExportPayload['category']; width: number; height: number; tiles: Tile[]; createdAt: number },
+  pattern: { name: string; category: PatternExportPayload['category']; width: number; height: number; tiles: Tile[]; createdAt: number; createdAtLevel?: number; layerTiles?: Record<number, { tiles: Tile[]; width: number; height: number }> },
   tileSetsById: Map<string, TileSet>
 ): string {
   const setIds = getSetIdsFromPatternTiles(pattern.tiles);
@@ -129,6 +129,9 @@ export function serializePatternBundle(
     height: pattern.height,
     tiles: pattern.tiles,
     createdAt: pattern.createdAt,
+    ...(pattern.createdAtLevel != null && { createdAtLevel: pattern.createdAtLevel }),
+    ...(pattern.layerTiles &&
+      Object.keys(pattern.layerTiles).length > 0 && { layerTiles: pattern.layerTiles }),
   };
 
   const bundle: PatternBundlePayload = {
@@ -241,15 +244,8 @@ export function deserializeBundle(json: string): DeserializeBundleResult {
   return { ok: false, error: 'Not a bundle file' };
 }
 
-/**
- * Remap pattern tile names from old set IDs to new set IDs after importing embedded tile sets.
- */
-export function remapPatternTileNames(
-  pattern: PatternExportPayload,
-  oldToNewSetId: Map<string, string>
-): PatternExportPayload {
-  if (oldToNewSetId.size === 0) return pattern;
-  const tiles = pattern.tiles.map((t) => {
+function remapTileList(tiles: Tile[], oldToNewSetId: Map<string, string>): Tile[] {
+  return tiles.map((t) => {
     const name = t.name;
     if (typeof name !== 'string' || !name.includes(':')) return t;
     const colon = name.indexOf(':');
@@ -259,7 +255,30 @@ export function remapPatternTileNames(
     if (!newId) return t;
     return { ...t, name: newId + rest };
   });
-  return { ...pattern, tiles };
+}
+
+/**
+ * Remap pattern tile names from old set IDs to new set IDs after importing embedded tile sets.
+ * Remaps both the main tiles array and all layerTiles entries.
+ */
+export function remapPatternTileNames(
+  pattern: PatternExportPayload,
+  oldToNewSetId: Map<string, string>
+): PatternExportPayload {
+  if (oldToNewSetId.size === 0) return pattern;
+  const tiles = remapTileList(pattern.tiles, oldToNewSetId);
+  let layerTiles = pattern.layerTiles;
+  if (layerTiles) {
+    const remappedLayerTiles: typeof layerTiles = {};
+    for (const [levelStr, levelData] of Object.entries(layerTiles)) {
+      remappedLayerTiles[Number(levelStr)] = {
+        ...levelData,
+        tiles: remapTileList(levelData.tiles, oldToNewSetId),
+      };
+    }
+    layerTiles = remappedLayerTiles;
+  }
+  return { ...pattern, tiles, ...(layerTiles && { layerTiles }) };
 }
 
 function remapQualifiedName(

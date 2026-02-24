@@ -41,6 +41,10 @@ export type PatternExportPayload = {
   height: number;
   tiles: Tile[];
   createdAt: number;
+  /** Internal grid level at which tiles/width/height were captured (1 = finest). Absent for legacy patterns. */
+  createdAtLevel?: number;
+  /** Tile data for other resolution levels keyed by level number. */
+  layerTiles?: Record<number, { tiles: Tile[]; width: number; height: number }>;
 };
 
 function isValidCategory(value: unknown): value is TileCategory {
@@ -135,6 +139,9 @@ export function serializePattern(pattern: TilePattern): string {
     height: pattern.height,
     tiles: pattern.tiles,
     createdAt: pattern.createdAt,
+    ...(pattern.createdAtLevel != null && { createdAtLevel: pattern.createdAtLevel }),
+    ...(pattern.layerTiles &&
+      Object.keys(pattern.layerTiles).length > 0 && { layerTiles: pattern.layerTiles }),
   };
   return JSON.stringify(payload, null, 0);
 }
@@ -284,6 +291,11 @@ export function deserializePattern(json: string): DeserializePatternResult {
     typeof o.createdAt === 'number' && Number.isFinite(o.createdAt)
       ? o.createdAt
       : Date.now();
+  const createdAtLevel =
+    typeof o.createdAtLevel === 'number' && Number.isInteger(o.createdAtLevel) && o.createdAtLevel >= 1
+      ? o.createdAtLevel
+      : undefined;
+
   const rawTiles = o.tiles;
   const totalCells = width * height;
   const tiles: Tile[] = Array.isArray(rawTiles)
@@ -300,6 +312,47 @@ export function deserializePattern(json: string): DeserializePatternResult {
       mirrorY: false,
     });
   }
+
+  // Validate and normalize layerTiles
+  const rawLayerTiles = o.layerTiles;
+  let layerTiles: Record<number, { tiles: Tile[]; width: number; height: number }> | undefined;
+  if (rawLayerTiles && typeof rawLayerTiles === 'object') {
+    layerTiles = {};
+    for (const [levelStr, levelData] of Object.entries(rawLayerTiles)) {
+      const level = Number.parseInt(levelStr, 10);
+      if (!Number.isInteger(level) || level < 1) continue;
+      if (!levelData || typeof levelData !== 'object') continue;
+      const ld = levelData as Record<string, unknown>;
+      const levelWidth = typeof ld.width === 'number' && ld.width > 0 ? ld.width : 0;
+      const levelHeight = typeof ld.height === 'number' && ld.height > 0 ? ld.height : 0;
+      if (levelWidth === 0 || levelHeight === 0) continue;
+      const levelTotalCells = levelWidth * levelHeight;
+      const rawLevelTiles = ld.tiles;
+      const levelTilesList: Tile[] = Array.isArray(rawLevelTiles)
+        ? (rawLevelTiles as unknown[])
+            .slice(0, levelTotalCells)
+            .map((c) => normalizeTile(c))
+            .filter((c): c is Tile => c !== null)
+        : [];
+      while (levelTilesList.length < levelTotalCells) {
+        levelTilesList.push({
+          imageIndex: -1,
+          rotation: 0,
+          mirrorX: false,
+          mirrorY: false,
+        });
+      }
+      layerTiles[level] = {
+        tiles: levelTilesList,
+        width: levelWidth,
+        height: levelHeight,
+      };
+    }
+    if (Object.keys(layerTiles).length === 0) {
+      layerTiles = undefined;
+    }
+  }
+
   const payload: PatternExportPayload = {
     kind: 'pattern',
     v: TILE_UGC_FORMAT_VERSION,
@@ -309,6 +362,8 @@ export function deserializePattern(json: string): DeserializePatternResult {
     height,
     tiles,
     createdAt,
+    ...(createdAtLevel != null && { createdAtLevel }),
+    ...(layerTiles && { layerTiles }),
   };
   return { ok: true, payload };
 }

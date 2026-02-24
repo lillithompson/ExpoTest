@@ -5737,6 +5737,8 @@ export default function TestScreen() {
           height: remapped.height,
           tiles: remapped.tiles,
           ...(patternTileSetIds.length > 0 && { tileSetIds: patternTileSetIds }),
+          ...(remapped.createdAtLevel != null && { createdAtLevel: remapped.createdAtLevel }),
+          ...(remapped.layerTiles && Object.keys(remapped.layerTiles).length > 0 && { layerTiles: remapped.layerTiles }),
         });
         // Auto-select the pattern's UGC sets in the tile set chooser so the pattern
         // thumbnail and painting resolve correctly without the user toggling them on.
@@ -5772,6 +5774,8 @@ export default function TestScreen() {
         width: p.width,
         height: p.height,
         tiles: p.tiles,
+        ...(p.createdAtLevel != null && { createdAtLevel: p.createdAtLevel }),
+        ...(p.layerTiles && Object.keys(p.layerTiles).length > 0 && { layerTiles: p.layerTiles }),
       });
       return { ok: true };
     },
