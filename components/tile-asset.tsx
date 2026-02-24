@@ -198,7 +198,40 @@ const stripOuterBorder = (xml: string) => {
   return xml.replace(/<rect\b[^>]*(x=["']0\.5["']|y=["']0\.5["'])[^>]*\/?>/gi, '');
 };
 
+// Concurrency limiter to avoid ERR_INSUFFICIENT_RESOURCES from too many parallel fetches
+const MAX_CONCURRENT_FETCHES = 6;
+let activeFetchCount = 0;
+const fetchQueue: Array<{ run: () => Promise<void>; resolve: () => void }> = [];
+
+const drainQueue = () => {
+  while (fetchQueue.length > 0 && activeFetchCount < MAX_CONCURRENT_FETCHES) {
+    const next = fetchQueue.shift()!;
+    activeFetchCount++;
+    next.run().finally(() => {
+      activeFetchCount--;
+      drainQueue();
+    }).then(next.resolve);
+  }
+};
+
+const throttledFetch = async (fn: () => Promise<void>) => {
+  if (activeFetchCount < MAX_CONCURRENT_FETCHES) {
+    activeFetchCount++;
+    try {
+      await fn();
+    } finally {
+      activeFetchCount--;
+      drainQueue();
+    }
+    return;
+  }
+  return new Promise<void>((resolve) => {
+    fetchQueue.push({ run: fn, resolve });
+  });
+};
+
 export const prefetchTileAssets = async (sources: unknown[]) => {
+  console.log(`[prefetchTileAssets] starting prefetch for ${sources.length} sources`);
   const tasks = sources.map(async (source) => {
     const uri = resolveSourceUri(source);
     if (!uri || !uri.toLowerCase().includes('.svg')) {
@@ -218,12 +251,18 @@ export const prefetchTileAssets = async (sources: unknown[]) => {
       return;
     }
     await loadSvgXmlOnce(resolvedUri, uri, async () => {
-      return Platform.OS === 'web'
-        ? await fetch(resolvedUri).then((response) => response.text())
-        : await FileSystem.readAsStringAsync(resolvedUri);
+      if (Platform.OS === 'web') {
+        let result = '';
+        await throttledFetch(async () => {
+          result = await fetch(resolvedUri).then((response) => response.text());
+        });
+        return result;
+      }
+      return await FileSystem.readAsStringAsync(resolvedUri);
     });
   });
   await Promise.all(tasks);
+  console.log(`[prefetchTileAssets] finished prefetch for ${sources.length} sources`);
 };
 
 export const getSvgXmlWithOverrides = async (
@@ -289,9 +328,14 @@ export const getSvgXmlWithOverrides = async (
   }
 
   const xml = await loadSvgXmlOnce(resolvedUri, uri, async () => {
-    return Platform.OS === 'web'
-      ? await fetch(resolvedUri).then((response) => response.text())
-      : await FileSystem.readAsStringAsync(resolvedUri);
+    if (Platform.OS === 'web') {
+      let result = '';
+      await throttledFetch(async () => {
+        result = await fetch(resolvedUri).then((response) => response.text());
+      });
+      return result;
+    }
+    return await FileSystem.readAsStringAsync(resolvedUri);
   });
   if (!xml) {
     return null;
@@ -402,9 +446,12 @@ export function TileAsset({
           }
           if (Platform.OS === 'web') {
             try {
-              const response = await fetch(uri);
-              const xml = await response.text();
-              if (!cancelled) {
+              let xml = '';
+              await throttledFetch(async () => {
+                const response = await fetch(uri);
+                xml = await response.text();
+              });
+              if (!cancelled && xml) {
                 cacheSvgXml(uri, xml);
                 setSvgXml((prev) => (prev === xml ? prev : xml));
                 logSvgLoad({ uri, ms: Date.now() - start, cache: false });
@@ -483,9 +530,12 @@ export function TileAsset({
                   logSvgLoad({ uri: resolved, ms: Date.now() - start, cache: true });
                   return;
                 }
-                const response = await fetch(resolved);
-                const xml = await response.text();
-                if (!cancelled) {
+                let xml = '';
+                await throttledFetch(async () => {
+                  const response = await fetch(resolved);
+                  xml = await response.text();
+                });
+                if (!cancelled && xml) {
                   cacheSvgXml(resolved, xml, uri);
                   setSvgXml((prev) => (prev === xml ? prev : xml));
                   logSvgLoad({ uri: resolved, ms: Date.now() - start, cache: false });

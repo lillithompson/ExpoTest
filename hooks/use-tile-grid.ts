@@ -459,9 +459,14 @@ export const useTileGrid = ({
   useEffect(() => {
     if (!onTilesChangeRef.current) return;
     if (persistTilesTimeoutRef.current) clearTimeout(persistTilesTimeoutRef.current);
+    const _snapshotLen = tiles.length;
+    const _snapshotFilled = tiles.filter((t) => t.imageIndex >= 0).length;
     persistTilesTimeoutRef.current = setTimeout(() => {
       persistTilesTimeoutRef.current = null;
-      onTilesChangeRef.current?.(latestTilesForPersistRef.current);
+      const _persistTiles = latestTilesForPersistRef.current;
+      const _pFilled = _persistTiles.filter((t) => t.imageIndex >= 0).length;
+      console.log(`[LAYER-DIAG] onTilesChange DEBOUNCE FIRE | snapshotAtSchedule=${_snapshotLen}(${_snapshotFilled}filled) | persistNow=${_persistTiles.length}(${_pFilled}filled)`);
+      onTilesChangeRef.current?.(_persistTiles);
     }, LAYER_PERSIST_DEBOUNCE_MS);
     return () => {
       if (persistTilesTimeoutRef.current) {
@@ -2816,6 +2821,8 @@ export const useTileGrid = ({
 
   const loadTiles = useCallback(
     (nextTiles: Tile[]) => {
+      const _filled = nextTiles.filter((t) => t.imageIndex >= 0).length;
+      console.log(`[LAYER-DIAG] loadTiles | count=${nextTiles.length} | filled=${_filled}`, new Error().stack?.split('\n').slice(1, 4).join(' <- '));
       undoStackRef.current = [];
       redoStackRef.current = [];
       pendingUndoSideEffectRef.current = null;

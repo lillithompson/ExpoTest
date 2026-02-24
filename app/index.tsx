@@ -1972,19 +1972,22 @@ export default function TestScreen() {
     }
     lastLayerLoadRef.current = key;
     if (editingLevel >= 2 && levelGridInfo) {
-      loadTiles(
-        normalizeTiles(
-          activeFile.layers?.[editingLevel],
-          levelGridInfo.cells.length,
-          tileSources.length
-        )
-      );
+      const _raw = activeFile.layers?.[editingLevel];
+      const _rawLen = _raw?.length ?? 0;
+      const _rawFilled = _raw?.filter((t) => t.imageIndex >= 0).length ?? 0;
+      const _normalized = normalizeTiles(_raw, levelGridInfo.cells.length, tileSources.length);
+      const _normFilled = _normalized.filter((t) => t.imageIndex >= 0).length;
+      console.log(`[LAYER-DIAG] LAYER-SYNC load | file=${activeFile.id.slice(0,8)} | editingLevel=${editingLevel} | rawLayerTiles=${_rawLen}(${_rawFilled}filled) | normalized=${_normalized.length}(${_normFilled}filled) | allLayers=[${Object.keys(activeFile.layers ?? {}).join(',')}]`);
+      loadTiles(_normalized);
     } else {
       const cols = activeFile.grid?.columns ?? 0;
       const rows = activeFile.grid?.rows ?? 0;
       const n = cols * rows;
-      if (n > 0)
+      if (n > 0) {
+        const _filled = activeFile.tiles.filter((t) => t.imageIndex >= 0).length;
+        console.log(`[LAYER-DIAG] LAYER-SYNC load L1 | file=${activeFile.id.slice(0,8)} | tiles=${activeFile.tiles.length}(${_filled}filled) | allLayers=[${Object.keys(activeFile.layers ?? {}).join(',')}]`);
         loadTiles(normalizeTiles(activeFile.tiles, n, tileSources.length));
+      }
     }
     setHookLoadedLevel(editingLevel);
   }, [
@@ -3477,6 +3480,14 @@ export default function TestScreen() {
       resetTiles();
     }
     const fileSourceNames = Array.isArray(file.sourceNames) ? file.sourceNames : [];
+    const _filledL1 = file.tiles.filter((t: { imageIndex: number }) => t.imageIndex >= 0).length;
+    const _layerKeys = file.layers ? Object.keys(file.layers) : [];
+    const _layerDetail = _layerKeys.map((k) => {
+      const arr = file.layers![Number(k)] ?? [];
+      const filled = arr.filter((t: { imageIndex: number }) => t.imageIndex >= 0).length;
+      return `L${k}:${arr.length}(${filled}filled)`;
+    }).join(', ');
+    console.log(`[LAYER-DIAG] LOAD-EFFECT | file=${file.id.slice(0,8)} | L1=${file.tiles.length}(${_filledL1}filled) | layers=[${_layerDetail || 'none'}] | grid=${file.grid.columns}x${file.grid.rows} | token=${nextToken}`);
     pendingRestoreRef.current = {
       fileId: file.id,
       tiles: file.tiles,
@@ -3704,6 +3715,8 @@ export default function TestScreen() {
       // to avoid loading 25 L2 tiles into a 400-cell grid (which would show as data loss).
       let didLoad = false;
       if (fileDimensionsMatch) {
+        const _hasLayerData = editingLevel >= 2 && activeFile?.layers?.[editingLevel] != null && (activeFile.layers[editingLevel]?.length ?? 0) > 0;
+        console.log(`[LAYER-DIAG] RESTORE-EFFECT | file=${pending.fileId.slice(0,8)} | editingLevel=${editingLevel} | hasLayerData=${_hasLayerData} | gridLayout=${gridLayout.columns}x${gridLayout.rows} | pendingGrid=${pending.columns}x${pending.rows}`);
         const nameSource =
           pending.sourceNames && pending.sourceNames.length > 0
             ? pending.sourceNames
@@ -3744,8 +3757,12 @@ export default function TestScreen() {
         const gridCells = gridLayout.rows * gridLayout.columns;
         const expectedCells = tilesToLoad.length;
         if (gridCells === expectedCells) {
+          const _filled = tilesToLoad.filter((t) => t.imageIndex >= 0).length;
+          console.log(`[LAYER-DIAG] RESTORE-EFFECT LOAD | editingLevel=${editingLevel} | tiles=${tilesToLoad.length}(${_filled}filled) | gridCells=${gridCells}`);
           loadTiles(tilesToLoad);
           didLoad = true;
+        } else {
+          console.log(`[LAYER-DIAG] RESTORE-EFFECT SKIP (size mismatch) | gridCells=${gridCells} | expectedCells=${expectedCells} | editingLevel=${editingLevel}`);
         }
       }
       if (didLoad) {
@@ -3891,8 +3908,15 @@ export default function TestScreen() {
         if (fileSourceNames.length === 0 && resolvedSourceNames.length > 0) {
           setFileSourceNames(resolvedSourceNames);
         }
+        const _saveTiles = editingLevel === 1 ? fullTilesForSave : (Array.isArray(activeFile?.tiles) ? activeFile.tiles : []);
+        const _saveFilled = _saveTiles.filter((t) => t.imageIndex >= 0).length;
+        const _activeFileLayers = activeFile?.layers ? Object.keys(activeFile.layers).map((k) => {
+          const arr = activeFile.layers![Number(k)] ?? [];
+          return `L${k}:${arr.length}(${arr.filter((t) => t.imageIndex >= 0).length}filled)`;
+        }).join(', ') : 'none';
+        console.log(`[LAYER-DIAG] AUTOSAVE (150ms) | editingLevel=${editingLevel} | saveTiles=${_saveTiles.length}(${_saveFilled}filled) | activeFileLayers=[${_activeFileLayers}] | isHydrating=${isHydratingFile}`);
         const payload: Parameters<typeof upsertActiveFile>[0] = {
-          tiles: editingLevel === 1 ? fullTilesForSave : (Array.isArray(activeFile?.tiles) ? activeFile.tiles : []),
+          tiles: _saveTiles,
           gridLayout: editingLevel === 1 ? fullGridLayoutForSave : (level1LayoutForPersist ?? fullGridLayoutForSave),
           category: primaryCategory,
           categories: activeCategories,
@@ -3948,8 +3972,11 @@ export default function TestScreen() {
           if (fileSourceNames.length === 0 && resolvedSourceNames.length > 0) {
             setFileSourceNames(resolvedSourceNames);
           }
+          const _saveTiles2 = editingLevel === 1 ? fullTilesForSave : (Array.isArray(activeFile?.tiles) ? activeFile.tiles : []);
+          const _saveFilled2 = _saveTiles2.filter((t) => t.imageIndex >= 0).length;
+          console.log(`[LAYER-DIAG] AUTOSAVE (800ms preview) | editingLevel=${editingLevel} | saveTiles=${_saveTiles2.length}(${_saveFilled2}filled)`);
           const payload: Parameters<typeof upsertActiveFile>[0] = {
-            tiles: editingLevel === 1 ? fullTilesForSave : (Array.isArray(activeFile?.tiles) ? activeFile.tiles : []),
+            tiles: _saveTiles2,
             gridLayout: editingLevel === 1 ? fullGridLayoutForSave : (level1LayoutForPersist ?? fullGridLayoutForSave),
             category: primaryCategory,
             categories: activeCategories,
