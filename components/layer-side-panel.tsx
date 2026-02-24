@@ -11,7 +11,7 @@ const COMPACT_BUTTON_SIZE = Math.round(BUTTON_SIZE * 1.1); // 44
 const SLIDEOUT_DURATION_MS = 250;
 const DOUBLE_TAP_MS = 300;
 const FULL_GAP = 4;
-const COMPACT_GAP = 8;
+const COMPACT_GAP = 16;
 
 interface LayerSidePanelProps {
   maxDisplayLevel: number;
@@ -184,7 +184,7 @@ export function LayerSidePanel({
             textColor = emphColor;
           } else {
             fillColor = 'transparent';
-            borderColor = 'rgba(255,255,255,0.35)';
+            borderColor = 'rgba(255,255,255,0.80)';
             textColor = 'rgba(255,255,255,0.6)';
           }
 
@@ -193,7 +193,7 @@ export function LayerSidePanel({
           const gradientOpacity = isSelected && emphasized ? 0.8
             : isSelected ? 0.65
             : emphasized ? 0.35
-            : 0.18;
+            : 0.40;
 
           const borderRadius = isFullMode ? 8 : COMPACT_BUTTON_SIZE / 2;
           const anim = getAnim(internalLevel);
@@ -272,7 +272,7 @@ export function LayerSidePanel({
                     width: buttonSize,
                     height: buttonSize,
                     borderRadius,
-                    backgroundColor: isFullMode ? fillColor : 'transparent',
+                    backgroundColor: isFullMode ? fillColor : '#111111',
                     borderColor,
                     opacity: disabled ? 0.5 : 1,
                   },
