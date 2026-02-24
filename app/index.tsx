@@ -6331,7 +6331,8 @@ export default function TestScreen() {
           for (let i = 0; i < contents.length; i++) {
             if (cancelled) return;
             const content = contents[i];
-            const thumbnailUri = fileNames[i] ? getSampleThumbnailDataUrl(fileNames[i]) : null;
+            const sampleName = fileNames[i];
+            const thumbnailUri = sampleName ? getSampleThumbnailDataUrl(sampleName) : null;
             const bundleResult = deserializeBundle(content);
             if (bundleResult.ok && bundleResult.kind === 'fileBundle') {
               const oldToNewSetId = new Map<string, string>();
@@ -6343,10 +6344,12 @@ export default function TestScreen() {
                 bundleResult.payload.file,
                 oldToNewSetId
               );
+              remapped.name = sampleName;
               createFileFromTileData(remapped, { isSample: true, thumbnailUri });
             } else {
               const result = deserializeTileFile(content);
               if (result.ok) {
+                result.payload.name = sampleName;
                 createFileFromTileData(result.payload, { isSample: true, thumbnailUri });
               }
             }
@@ -6376,7 +6379,8 @@ export default function TestScreen() {
       const fileNames = loadSampleFileNames();
       for (let i = 0; i < contents.length; i++) {
         const content = contents[i];
-        const thumbnailUri = fileNames[i] ? getSampleThumbnailDataUrl(fileNames[i]) : null;
+        const sampleName = fileNames[i];
+        const thumbnailUri = sampleName ? getSampleThumbnailDataUrl(sampleName) : null;
         const bundleResult = deserializeBundle(content);
         if (bundleResult.ok && bundleResult.kind === 'fileBundle') {
           const oldToNewSetId = new Map<string, string>();
@@ -6388,10 +6392,12 @@ export default function TestScreen() {
             bundleResult.payload.file,
             oldToNewSetId
           );
+          remapped.name = sampleName;
           createFileFromTileData(remapped, { isSample: true, thumbnailUri });
         } else {
           const result = deserializeTileFile(content);
           if (result.ok) {
+            result.payload.name = sampleName;
             createFileFromTileData(result.payload, { isSample: true, thumbnailUri });
           }
         }
