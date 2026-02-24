@@ -4765,8 +4765,13 @@ export default function TestScreen() {
     const rotCW = ((rotation % 360) + 360) % 360;
     const { rotW: rotW_native, rotH: rotH_native } = getRotatedDimensions(rotCW, pattern.width, pattern.height);
     const mainLevel = pattern.createdAtLevel ?? 1;
+    // Snap to the coarsest level that has data in this pattern (layerTiles can hold levels coarser
+    // than createdAtLevel; placement must align with the largest block size present).
+    const allPatternLevels = [mainLevel, ...Object.keys(pattern.layerTiles ?? {}).map(Number).filter((n) => !isNaN(n))];
+    const snapLevel = Math.max(...allPatternLevels);
     const { cols: gc, rows: gr } = stampGridDimsRef.current;
     const offsets = mainLevel > 1 ? getLevelNtoMOffsets(gc, gr, mainLevel, 1) : null;
+    const snapOffsets = snapLevel > 1 ? getLevelNtoMOffsets(gc, gr, snapLevel, 1) : null;
     const displayW = offsets ? rotW_native * offsets.scale : rotW_native;
     const displayH = offsets ? rotH_native * offsets.scale : rotH_native;
     const canvasX = screenX - canvasScreenOffsetRef.current.x;
@@ -4777,17 +4782,19 @@ export default function TestScreen() {
     const cursorTileY = canvasY / tileStride;
     let col: number;
     let row: number;
-    if (offsets) {
-      // Center and clamp in level-N cell-index space so the anchor always lands on a complete cell.
-      const levelInfo = getLevelGridInfo(gc, gr, mainLevel);
-      if (!levelInfo || levelInfo.levelCols < rotW_native || levelInfo.levelRows < rotH_native) {
+    if (snapOffsets) {
+      // Center and clamp in snapLevel cell-index space so the anchor always lands on a valid cell.
+      const levelInfo = getLevelGridInfo(gc, gr, snapLevel);
+      const rotW_snap = displayW / snapOffsets.scale;
+      const rotH_snap = displayH / snapOffsets.scale;
+      if (!levelInfo || levelInfo.levelCols < rotW_snap || levelInfo.levelRows < rotH_snap) {
         setStampDropCell(null);
         return;
       }
-      const rawI = Math.round((cursorTileX - offsets.C_col) / offsets.scale - rotW_native / 2);
-      const rawJ = Math.round((cursorTileY - offsets.C_row) / offsets.scale - rotH_native / 2);
-      col = offsets.C_col + Math.max(0, Math.min(levelInfo.levelCols - rotW_native, rawI)) * offsets.scale;
-      row = offsets.C_row + Math.max(0, Math.min(levelInfo.levelRows - rotH_native, rawJ)) * offsets.scale;
+      const rawI = Math.round((cursorTileX - snapOffsets.C_col) / snapOffsets.scale - rotW_snap / 2);
+      const rawJ = Math.round((cursorTileY - snapOffsets.C_row) / snapOffsets.scale - rotH_snap / 2);
+      col = snapOffsets.C_col + Math.max(0, Math.min(levelInfo.levelCols - rotW_snap, rawI)) * snapOffsets.scale;
+      row = snapOffsets.C_row + Math.max(0, Math.min(levelInfo.levelRows - rotH_snap, rawJ)) * snapOffsets.scale;
     } else {
       col = Math.max(0, Math.min(effectiveCols - displayW, Math.round(cursorTileX - displayW / 2)));
       row = Math.max(0, Math.min(effectiveRows - displayH, Math.round(cursorTileY - displayH / 2)));
@@ -4815,8 +4822,12 @@ export default function TestScreen() {
         const rotCW = ((rotation % 360) + 360) % 360;
         const { rotW: rotW_native, rotH: rotH_native } = getRotatedDimensions(rotCW, pattern.width, pattern.height);
         const mainLevel = pattern.createdAtLevel ?? 1;
+        // Snap to the coarsest level that has data in this pattern (matches drag-move logic).
+        const allPatternLevels = [mainLevel, ...Object.keys(pattern.layerTiles ?? {}).map(Number).filter((n) => !isNaN(n))];
+        const snapLevel = Math.max(...allPatternLevels);
         const { cols: gc, rows: gr } = stampGridDimsRef.current;
         const offsets = mainLevel > 1 ? getLevelNtoMOffsets(gc, gr, mainLevel, 1) : null;
+        const snapOffsets = snapLevel > 1 ? getLevelNtoMOffsets(gc, gr, snapLevel, 1) : null;
         const displayW = offsets ? rotW_native * offsets.scale : rotW_native;
         const displayH = offsets ? rotH_native * offsets.scale : rotH_native;
         const canvasX = screenX - canvasScreenOffsetRef.current.x;
@@ -4827,13 +4838,15 @@ export default function TestScreen() {
           const cursorTileY = canvasY / tileStride;
           let col: number;
           let row: number;
-          if (offsets) {
-            const levelInfo = getLevelGridInfo(gc, gr, mainLevel);
-            if (!levelInfo || levelInfo.levelCols < rotW_native || levelInfo.levelRows < rotH_native) return;
-            const rawI = Math.round((cursorTileX - offsets.C_col) / offsets.scale - rotW_native / 2);
-            const rawJ = Math.round((cursorTileY - offsets.C_row) / offsets.scale - rotH_native / 2);
-            col = offsets.C_col + Math.max(0, Math.min(levelInfo.levelCols - rotW_native, rawI)) * offsets.scale;
-            row = offsets.C_row + Math.max(0, Math.min(levelInfo.levelRows - rotH_native, rawJ)) * offsets.scale;
+          if (snapOffsets) {
+            const levelInfo = getLevelGridInfo(gc, gr, snapLevel);
+            const rotW_snap = displayW / snapOffsets.scale;
+            const rotH_snap = displayH / snapOffsets.scale;
+            if (!levelInfo || levelInfo.levelCols < rotW_snap || levelInfo.levelRows < rotH_snap) return;
+            const rawI = Math.round((cursorTileX - snapOffsets.C_col) / snapOffsets.scale - rotW_snap / 2);
+            const rawJ = Math.round((cursorTileY - snapOffsets.C_row) / snapOffsets.scale - rotH_snap / 2);
+            col = snapOffsets.C_col + Math.max(0, Math.min(levelInfo.levelCols - rotW_snap, rawI)) * snapOffsets.scale;
+            row = snapOffsets.C_row + Math.max(0, Math.min(levelInfo.levelRows - rotH_snap, rawJ)) * snapOffsets.scale;
           } else {
             col = Math.max(0, Math.min(effectiveCols - displayW, Math.round(cursorTileX - displayW / 2)));
             row = Math.max(0, Math.min(effectiveRows - displayH, Math.round(cursorTileY - displayH / 2)));
