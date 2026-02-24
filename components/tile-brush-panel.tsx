@@ -21,11 +21,6 @@ import { TileAsset } from '@/components/tile-asset';
 import { TileAtlasSprite } from '@/components/tile-atlas-sprite';
 import { type TileAtlas } from '@/utils/tile-atlas';
 import { type Tile } from '@/utils/tile-grid';
-import {
-  paletteProfileLog,
-  paletteProfileMeasure,
-  paletteProfileStartRender,
-} from '@/utils/palette-profile';
 import { getConnectionCountFromFileName } from '@/utils/tile-compat';
 
 type Brush =
@@ -268,16 +263,6 @@ export function TileBrushPanel({
   const [containerWidth, setContainerWidth] = useState(0);
   const [contentWidth, setContentWidth] = useState(0);
   const showIndicator = contentWidth > containerWidth;
-  const renderCountRef = useRef(0);
-  const lastLayoutLogRef = useRef(0);
-  renderCountRef.current += 1;
-  if (typeof __DEV__ !== 'undefined' && __DEV__) {
-    const now = Date.now();
-    if (now - lastLayoutLogRef.current > 2000) {
-      lastLayoutLogRef.current = now;
-      console.warn('[TileBrushPanel] render', { renderCount: renderCountRef.current, containerWidth, contentWidth });
-    }
-  }
   const rowCount = Math.max(1, rows);
   const columnHeight = itemSize * rowCount + rowGap * Math.max(0, rowCount - 1);
   const lastTapRef = useRef<{ time: number; index: number } | null>(null);
@@ -328,10 +313,6 @@ export function TileBrushPanel({
   }, [precomputedConnectionCounts]);
 
   const [useFullOrder, setUseFullOrder] = useState(false);
-  const renderIdRef = useRef(0);
-  renderIdRef.current += 1;
-  const renderId = renderIdRef.current;
-  paletteProfileStartRender(tileSources.length, useFullOrder, renderId);
   /** Defer full order (connection grouping) to after first paint, once per mount only. Do not re-run when tileSources/favorites change or we get a visible flicker (simple vs full layout) on every canvas update. */
   useEffect(() => {
     const id = requestAnimationFrame(() => setUseFullOrder(true));
@@ -340,22 +321,18 @@ export function TileBrushPanel({
   /** Connection counts deferred until after first paint to keep initial load fast. */
   const connectionCountByIndex = useMemo(
     () =>
-      paletteProfileMeasure('connectionCountByIndexMs', () =>
-        useFullOrder ? tileSources.map((tile) => getConnectionCount(tile.name)) : []
-      ),
+      useFullOrder ? tileSources.map((tile) => getConnectionCount(tile.name)) : [],
     [tileSources, useFullOrder, getConnectionCount]
   );
   const tileEntries = useMemo(
     () =>
-      paletteProfileMeasure('tileEntriesMs', () =>
-        tileSources.map((tile, index) => ({
-          type: 'fixed' as const,
-          tile,
-          index,
-          isFavorite: Boolean(favorites[tile.name]),
-          connectionCount: connectionCountByIndex[index] ?? 0,
-        }))
-      ),
+      tileSources.map((tile, index) => ({
+        type: 'fixed' as const,
+        tile,
+        index,
+        isFavorite: Boolean(favorites[tile.name]),
+        connectionCount: connectionCountByIndex[index] ?? 0,
+      })),
     [favorites, tileSources, connectionCountByIndex]
   );
   const favoriteColorOptions = useMemo(
@@ -374,51 +351,49 @@ export function TileBrushPanel({
   );
   /** Cheap order for first paint: favorites first, then rest; no connection grouping. */
   const simpleOrderedEntries = useMemo(
-    (): PaletteEntry[] =>
-      paletteProfileMeasure('simpleOrderedEntriesMs', () => {
-        const favoritesList = tileEntries
-          .filter((e) => e.isFavorite)
-          .sort((a, b) => {
-            const rankA = colorRank(favorites[a.tile.name] ?? '');
-            const rankB = colorRank(favorites[b.tile.name] ?? '');
-            if (rankA !== rankB) return rankA - rankB;
-            return a.index - b.index;
-          });
-        const nonFavorites = tileEntries.filter((e) => !e.isFavorite);
-        return [...favoritesList, ...nonFavorites];
-      }),
+    (): PaletteEntry[] => {
+      const favoritesList = tileEntries
+        .filter((e) => e.isFavorite)
+        .sort((a, b) => {
+          const rankA = colorRank(favorites[a.tile.name] ?? '');
+          const rankB = colorRank(favorites[b.tile.name] ?? '');
+          if (rankA !== rankB) return rankA - rankB;
+          return a.index - b.index;
+        });
+      const nonFavorites = tileEntries.filter((e) => !e.isFavorite);
+      return [...favoritesList, ...nonFavorites];
+    },
     [tileEntries, favorites, colorRank]
   );
   const fullOrderedEntries = useMemo(
-    (): PaletteEntry[] =>
-      paletteProfileMeasure('fullOrderedEntriesMs', () => {
-        const favoritesList = tileEntries
-          .filter((e) => e.isFavorite)
-          .sort((a, b) => {
-            const rankA = colorRank(favorites[a.tile.name] ?? '');
-            const rankB = colorRank(favorites[b.tile.name] ?? '');
-            if (rankA !== rankB) return rankA - rankB;
-            return a.index - b.index;
-          });
-        const byConnections = new Map<number, (typeof tileEntries)[number][]>();
-        for (let n = 0; n <= 8; n++) byConnections.set(n, []);
-        for (const e of tileEntries) {
-          byConnections.get(e.connectionCount)!.push(e);
+    (): PaletteEntry[] => {
+      const favoritesList = tileEntries
+        .filter((e) => e.isFavorite)
+        .sort((a, b) => {
+          const rankA = colorRank(favorites[a.tile.name] ?? '');
+          const rankB = colorRank(favorites[b.tile.name] ?? '');
+          if (rankA !== rankB) return rankA - rankB;
+          return a.index - b.index;
+        });
+      const byConnections = new Map<number, (typeof tileEntries)[number][]>();
+      for (let n = 0; n <= 8; n++) byConnections.set(n, []);
+      for (const e of tileEntries) {
+        byConnections.get(e.connectionCount)!.push(e);
+      }
+      const result: PaletteEntry[] = [];
+      if (favoritesList.length > 0) {
+        result.push({ type: 'separator', connectionCount: FAVORITES_SECTION_KEY });
+        result.push(...favoritesList);
+      }
+      for (let n = 0; n <= 8; n++) {
+        const group = byConnections.get(n) ?? [];
+        if (group.length > 0) {
+          result.push({ type: 'separator', connectionCount: n });
+          result.push(...group);
         }
-        const result: PaletteEntry[] = [];
-        if (favoritesList.length > 0) {
-          result.push({ type: 'separator', connectionCount: FAVORITES_SECTION_KEY });
-          result.push(...favoritesList);
-        }
-        for (let n = 0; n <= 8; n++) {
-          const group = byConnections.get(n) ?? [];
-          if (group.length > 0) {
-            result.push({ type: 'separator', connectionCount: n });
-            result.push(...group);
-          }
-        }
-        return result;
-      }),
+      }
+      return result;
+    },
     [tileEntries, favorites, colorRank]
   );
   const orderedTileEntries = useFullOrder ? fullOrderedEntries : simpleOrderedEntries;
@@ -470,44 +445,40 @@ export function TileBrushPanel({
     return [sep, ...thumbs, ...orderedTileEntries];
   }, [orderedTileEntries, patternList, showPattern]);
   const displayOrderedEntries = useMemo(
-    (): (PaletteEntry | PatternSectionEntry)[] =>
-      paletteProfileMeasure('displayOrderedEntriesMs', () => {
-        const result: (PaletteEntry | PatternSectionEntry)[] = [];
-        let i = 0;
-        const list = fullOrderedEntriesWithPatterns;
-        while (i < list.length) {
-          const e = list[i];
-          if (e.type === 'separator') {
-            result.push(e);
-            i++;
-            if (
-              e.connectionCount === PATTERNS_SECTION_KEY &&
-              collapsedFolders.has(PATTERNS_SECTION_KEY)
+    (): (PaletteEntry | PatternSectionEntry)[] => {
+      const result: (PaletteEntry | PatternSectionEntry)[] = [];
+      let i = 0;
+      const list = fullOrderedEntriesWithPatterns;
+      while (i < list.length) {
+        const e = list[i];
+        if (e.type === 'separator') {
+          result.push(e);
+          i++;
+          if (
+            e.connectionCount === PATTERNS_SECTION_KEY &&
+            collapsedFolders.has(PATTERNS_SECTION_KEY)
+          ) {
+            while (
+              i < list.length &&
+              (list[i].type === 'pattern-thumb' || list[i].type === 'pattern-new')
             ) {
-              while (
-                i < list.length &&
-                (list[i].type === 'pattern-thumb' || list[i].type === 'pattern-new')
-              ) {
-                i++;
-              }
-            } else if (
-              e.connectionCount !== PATTERNS_SECTION_KEY &&
-              collapsedFolders.has(e.connectionCount)
-            ) {
-              while (i < list.length && list[i].type !== 'separator') i++;
+              i++;
             }
-          } else {
-            result.push(e);
-            i++;
+          } else if (
+            e.connectionCount !== PATTERNS_SECTION_KEY &&
+            collapsedFolders.has(e.connectionCount)
+          ) {
+            while (i < list.length && list[i].type !== 'separator') i++;
           }
+        } else {
+          result.push(e);
+          i++;
         }
-        return result;
-      }),
+      }
+      return result;
+    },
     [fullOrderedEntriesWithPatterns, collapsedFolders]
   );
-  useEffect(() => {
-    paletteProfileLog();
-  }, [displayOrderedEntries]);
   const toggleFolder = useCallback((connectionCount: number) => {
     setCollapsedFolders((prev) => {
       const next = new Set(prev);
@@ -611,9 +582,6 @@ export function TileBrushPanel({
         const w = event.nativeEvent.layout.width;
         setContainerWidth((prev) => {
           if (prev === w) return prev;
-          if (typeof __DEV__ !== 'undefined' && __DEV__) {
-            console.warn('[TileBrushPanel] onLayout', { width: w, prev });
-          }
           return w;
         });
       }}
@@ -625,9 +593,6 @@ export function TileBrushPanel({
         onContentSizeChange={(width) => {
           setContentWidth((prev) => {
             if (prev === width) return prev;
-            if (typeof __DEV__ !== 'undefined' && __DEV__) {
-              console.warn('[TileBrushPanel] onContentSizeChange', { width, prev });
-            }
             return width;
           });
         }}
