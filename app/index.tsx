@@ -8941,16 +8941,16 @@ export default function TestScreen() {
                         resolveUgcSourceFromName={buildUserTileSourceFromName}
                         showOverlays={showOverlays}
                         isCloneSource={
-                          brush.mode === 'clone' && cloneSourceIndex === cellIndex
+                          !isEditingHigherLayer && brush.mode === 'clone' && cloneSourceIndex === cellIndex
                         }
                         isCloneSample={
-                          brush.mode === 'clone' && cloneSampleIndex === cellIndex
+                          !isEditingHigherLayer && brush.mode === 'clone' && cloneSampleIndex === cellIndex
                         }
                         isCloneTargetOrigin={
-                          brush.mode === 'clone' && cloneAnchorIndex === cellIndex
+                          !isEditingHigherLayer && brush.mode === 'clone' && cloneAnchorIndex === cellIndex
                         }
                         isCloneCursor={
-                          brush.mode === 'clone' && cloneCursorIndex === cellIndex
+                          !isEditingHigherLayer && brush.mode === 'clone' && cloneCursorIndex === cellIndex
                         }
                         isLocked={lockedCellIndicesSet?.has(getFullIndexForCanvas(cellIndex))}
                       />
@@ -9153,6 +9153,57 @@ export default function TestScreen() {
                   })}
                 </View>
               )}
+              {isEditingHigherLayer && brush.mode === 'clone' && levelGridInfo && showOverlays && (
+                <View style={[StyleSheet.absoluteFill, { pointerEvents: 'none' }]}>
+                  {levelGridInfo.cells.map((cell, i) => {
+                    if (zoomRegion && (
+                      cell.minCol > zoomRegion.maxCol ||
+                      cell.maxCol < zoomRegion.minCol ||
+                      cell.minRow > zoomRegion.maxRow ||
+                      cell.maxRow < zoomRegion.minRow
+                    ))
+                      return null;
+                    const isSource = cloneSourceIndex === i;
+                    const isSample = cloneSampleIndex === i;
+                    const isAnchor = cloneAnchorIndex === i;
+                    const isCursor = cloneCursorIndex === i;
+                    if (!isSource && !isSample && !isAnchor && !isCursor) return null;
+                    const stride = zoomRegion
+                      ? effectiveTileSize + GRID_GAP
+                      : level1DisplayLayout.tileSize + GRID_GAP;
+                    const left = zoomRegion
+                      ? (cell.minCol - zoomRegion.minCol) * stride
+                      : cell.minCol * stride;
+                    const top = zoomRegion
+                      ? (cell.minRow - zoomRegion.minRow) * stride
+                      : cell.minRow * stride;
+                    const tileSizeForCell = zoomRegion ? effectiveTileSize : level1DisplayLayout.tileSize;
+                    const w =
+                      (cell.maxCol - cell.minCol + 1) * tileSizeForCell +
+                      (cell.maxCol - cell.minCol) * GRID_GAP;
+                    const h =
+                      (cell.maxRow - cell.minRow + 1) * tileSizeForCell +
+                      (cell.maxRow - cell.minRow) * GRID_GAP;
+                    return (
+                      <View
+                        key={`clone-overlay-${i}`}
+                        style={{
+                          position: 'absolute',
+                          left,
+                          top,
+                          width: w,
+                          height: h,
+                        }}
+                      >
+                        {isSource && <View style={[StyleSheet.absoluteFill, styles.cloneSource]} pointerEvents="none" />}
+                        {isSample && <View style={[StyleSheet.absoluteFill, styles.cloneSample]} pointerEvents="none" />}
+                        {isAnchor && <View style={[StyleSheet.absoluteFill, styles.cloneTargetOrigin]} pointerEvents="none" />}
+                        {isCursor && <View style={[StyleSheet.absoluteFill, styles.cloneCursor]} pointerEvents="none" />}
+                      </View>
+                    );
+                  })}
+                </View>
+              )}
             </View>
           ) : (
             <>
@@ -9183,10 +9234,10 @@ export default function TestScreen() {
                   strokeScaleByName={strokeScaleByName}
                   showDebug={settings.showDebug}
                   showOverlays={showOverlays}
-                  cloneSourceIndex={brush.mode === 'clone' ? cloneSourceIndex : null}
-                  cloneSampleIndex={brush.mode === 'clone' ? cloneSampleIndex : null}
-                  cloneAnchorIndex={brush.mode === 'clone' ? cloneAnchorIndex : null}
-                  cloneCursorIndex={brush.mode === 'clone' ? cloneCursorIndex : null}
+                  cloneSourceIndex={brush.mode === 'clone' && !isEditingHigherLayer ? cloneSourceIndex : null}
+                  cloneSampleIndex={brush.mode === 'clone' && !isEditingHigherLayer ? cloneSampleIndex : null}
+                  cloneAnchorIndex={brush.mode === 'clone' && !isEditingHigherLayer ? cloneAnchorIndex : null}
+                  cloneCursorIndex={brush.mode === 'clone' && !isEditingHigherLayer ? cloneCursorIndex : null}
                   lockedCellIndices={lockedCellIndicesArray}
                   lockedBoundaryEdges={lockedBoundaryEdges}
                   onPaintReady={
@@ -9224,16 +9275,16 @@ export default function TestScreen() {
                           resolveUgcSourceFromName={buildUserTileSourceFromName}
                           showOverlays={showOverlays}
                           isCloneSource={
-                            brush.mode === 'clone' && cloneSourceIndex === cellIndex
+                            !isEditingHigherLayer && brush.mode === 'clone' && cloneSourceIndex === cellIndex
                           }
                           isCloneSample={
-                            brush.mode === 'clone' && cloneSampleIndex === cellIndex
+                            !isEditingHigherLayer && brush.mode === 'clone' && cloneSampleIndex === cellIndex
                           }
                           isCloneTargetOrigin={
-                            brush.mode === 'clone' && cloneAnchorIndex === cellIndex
+                            !isEditingHigherLayer && brush.mode === 'clone' && cloneAnchorIndex === cellIndex
                           }
                           isCloneCursor={
-                            brush.mode === 'clone' && cloneCursorIndex === cellIndex
+                            !isEditingHigherLayer && brush.mode === 'clone' && cloneCursorIndex === cellIndex
                           }
                           isLocked={lockedCellIndicesSet?.has(getFullIndexForCanvas(cellIndex))}
                         />
@@ -9437,6 +9488,57 @@ export default function TestScreen() {
                     })}
                   </View>
                 )}
+              {isEditingHigherLayer && brush.mode === 'clone' && levelGridInfo && showOverlays && (
+                <View style={[StyleSheet.absoluteFill, { pointerEvents: 'none' }]}>
+                  {levelGridInfo.cells.map((cell, i) => {
+                    if (zoomRegion && (
+                      cell.minCol > zoomRegion.maxCol ||
+                      cell.maxCol < zoomRegion.minCol ||
+                      cell.minRow > zoomRegion.maxRow ||
+                      cell.maxRow < zoomRegion.minRow
+                    ))
+                      return null;
+                    const isSource = cloneSourceIndex === i;
+                    const isSample = cloneSampleIndex === i;
+                    const isAnchor = cloneAnchorIndex === i;
+                    const isCursor = cloneCursorIndex === i;
+                    if (!isSource && !isSample && !isAnchor && !isCursor) return null;
+                    const stride = zoomRegion
+                      ? effectiveTileSize + GRID_GAP
+                      : level1DisplayLayout.tileSize + GRID_GAP;
+                    const left = zoomRegion
+                      ? (cell.minCol - zoomRegion.minCol) * stride
+                      : cell.minCol * stride;
+                    const top = zoomRegion
+                      ? (cell.minRow - zoomRegion.minRow) * stride
+                      : cell.minRow * stride;
+                    const tileSizeForCell = zoomRegion ? effectiveTileSize : level1DisplayLayout.tileSize;
+                    const w =
+                      (cell.maxCol - cell.minCol + 1) * tileSizeForCell +
+                      (cell.maxCol - cell.minCol) * GRID_GAP;
+                    const h =
+                      (cell.maxRow - cell.minRow + 1) * tileSizeForCell +
+                      (cell.maxRow - cell.minRow) * GRID_GAP;
+                    return (
+                      <View
+                        key={`clone-overlay-${i}`}
+                        style={{
+                          position: 'absolute',
+                          left,
+                          top,
+                          width: w,
+                          height: h,
+                        }}
+                      >
+                        {isSource && <View style={[StyleSheet.absoluteFill, styles.cloneSource]} pointerEvents="none" />}
+                        {isSample && <View style={[StyleSheet.absoluteFill, styles.cloneSample]} pointerEvents="none" />}
+                        {isAnchor && <View style={[StyleSheet.absoluteFill, styles.cloneTargetOrigin]} pointerEvents="none" />}
+                        {isCursor && <View style={[StyleSheet.absoluteFill, styles.cloneCursor]} pointerEvents="none" />}
+                      </View>
+                    );
+                  })}
+                </View>
+              )}
               <View
                 ref={gridTouchRef}
                 style={[StyleSheet.absoluteFillObject, { pointerEvents: gridVisible && !isClearing ? 'auto' : 'none' }]}
