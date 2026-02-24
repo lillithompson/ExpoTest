@@ -2199,7 +2199,7 @@ export default function TestScreen() {
       pendingPaletteFloodRef.current = false;
       if (canEditCurrentLayer) {
         floodFill();
-        applyPatternFloodToFinerLayers(false);
+        applyPatternFloodToAllLayers(false);
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -5179,54 +5179,86 @@ export default function TestScreen() {
   };
 
   /**
-   * Apply pattern data to finer layers (levels 1..editingLevel-1) for flood fill operations.
+   * Apply pattern data to all resolution levels for flood fill operations.
+   * Fills all levels that the pattern contains data for, including finer and coarser layers.
    * @param isFloodComplete - if true, only fill cells where imageIndex === -1 (flood complete mode).
    */
-  const applyPatternFloodToFinerLayers = (isFloodComplete: boolean) => {
-    if (brush.mode !== 'pattern' || !isEditingHigherLayer || !levelGridInfo || !selectedPattern || !activeFile) return;
-    const patCreatedAtLevel = selectedPattern.createdAtLevel;
-    // Check if any finer level has data in this pattern
-    const hasFinerData = Array.from({ length: editingLevel - 1 }, (_, i) => i + 1).some(
-      (M) => M === patCreatedAtLevel || !!(selectedPattern.layerTiles?.[M])
-    );
-    if (!hasFinerData) return;
+  const applyPatternFloodToAllLayers = (isFloodComplete: boolean) => {
+    if (brush.mode !== 'pattern' || !selectedPattern || !activeFile) return;
+    const patCreatedAtLevel = selectedPattern.createdAtLevel ?? 1;
+    // Check if the pattern has data at any level other than the current editingLevel
+    const hasOtherLevelData =
+      (patCreatedAtLevel !== editingLevel) ||
+      Object.keys(selectedPattern.layerTiles ?? {}).some((k) => parseInt(k, 10) !== editingLevel);
+    if (!hasOtherLevelData) return;
     const gridCols = activeFile.grid.columns;
     const gridRows = activeFile.grid.rows;
     const patternRotation = patternRotations[selectedPattern.id] ?? 0;
     const patternMirrorX = patternMirrors[selectedPattern.id] ?? false;
-    // Get selection bounds in level-N space (null = entire grid)
+    // Get selection bounds in editing-level space (null = entire grid)
+    const editLevelCols = levelGridInfo?.levelCols ?? gridCols;
+    const editLevelRows = levelGridInfo?.levelRows ?? gridRows;
     let selMinRow_N: number, selMaxRow_N: number, selMinCol_N: number, selMaxCol_N: number;
     if (hookCanvasSelection) {
-      const lc = levelGridInfo.levelCols;
-      const sMinRow = Math.floor(hookCanvasSelection.start / lc);
-      const sMinCol = hookCanvasSelection.start % lc;
-      const sMaxRow = Math.floor(hookCanvasSelection.end / lc);
-      const sMaxCol = hookCanvasSelection.end % lc;
+      const sMinRow = Math.floor(hookCanvasSelection.start / editLevelCols);
+      const sMinCol = hookCanvasSelection.start % editLevelCols;
+      const sMaxRow = Math.floor(hookCanvasSelection.end / editLevelCols);
+      const sMaxCol = hookCanvasSelection.end % editLevelCols;
       selMinRow_N = Math.min(sMinRow, sMaxRow);
       selMaxRow_N = Math.max(sMinRow, sMaxRow);
       selMinCol_N = Math.min(sMinCol, sMaxCol);
       selMaxCol_N = Math.max(sMinCol, sMaxCol);
     } else {
-      selMinRow_N = 0; selMaxRow_N = levelGridInfo.levelRows - 1;
-      selMinCol_N = 0; selMaxCol_N = levelGridInfo.levelCols - 1;
+      selMinRow_N = 0; selMaxRow_N = editLevelRows - 1;
+      selMinCol_N = 0; selMaxCol_N = editLevelCols - 1;
     }
-    for (let M = 1; M < editingLevel; M++) {
-      // Use base tiles when M matches the level the pattern was created at
+    // Collect all levels the pattern has data for, excluding the current editingLevel
+    const allPatternLevels: number[] = [];
+    allPatternLevels.push(patCreatedAtLevel);
+    if (selectedPattern.layerTiles) {
+      Object.keys(selectedPattern.layerTiles).forEach((k) => {
+        const lv = parseInt(k, 10);
+        if (!allPatternLevels.includes(lv)) allPatternLevels.push(lv);
+      });
+    }
+
+    for (const M of allPatternLevels) {
+      if (M === editingLevel) continue; // already handled by hook's floodFill
+
       const patternDataM = M === patCreatedAtLevel
         ? { tiles: selectedPattern.tiles, width: selectedPattern.width, height: selectedPattern.height }
-        : selectedPattern.layerTiles?.[M];
+        : selectedPattern.layerTiles![M];
       if (!patternDataM) continue;
+
       const mInfo = getLevelGridInfo(gridCols, gridRows, M);
       if (!mInfo) continue;
-      const offsets = getLevelNtoMOffsets(gridCols, gridRows, editingLevel, M);
-      if (!offsets) continue;
-      const { scale, C_row, C_col } = offsets;
-      const mLevelCols = mInfo.levelCols;
-      const mMinRow = Math.max(0, selMinRow_N * scale + C_row);
-      const mMaxRow = Math.min(mInfo.levelRows - 1, (selMaxRow_N + 1) * scale + C_row - 1);
-      const mMinCol = Math.max(0, selMinCol_N * scale + C_col);
-      const mMaxCol = Math.min(mLevelCols - 1, (selMaxCol_N + 1) * scale + C_col - 1);
+
+      const { levelCols: mLevelCols, levelRows: mLevelRows } = mInfo;
+      let mMinRow: number, mMaxRow: number, mMinCol: number, mMaxCol: number;
+
+      if (M < editingLevel) {
+        // Finer level: forward transform (editingLevel → M)
+        const offsets = getLevelNtoMOffsets(gridCols, gridRows, editingLevel, M);
+        if (!offsets) continue;
+        const { scale, C_row, C_col } = offsets;
+        mMinRow = Math.max(0, Math.floor(selMinRow_N * scale + C_row));
+        mMaxRow = Math.min(mLevelRows - 1, Math.floor((selMaxRow_N + 1) * scale + C_row - 1));
+        mMinCol = Math.max(0, Math.floor(selMinCol_N * scale + C_col));
+        mMaxCol = Math.min(mLevelCols - 1, Math.floor((selMaxCol_N + 1) * scale + C_col - 1));
+      } else {
+        // Coarser level: inverted transform (M → editingLevel, then invert)
+        const offsets = getLevelNtoMOffsets(gridCols, gridRows, M, editingLevel);
+        if (!offsets) continue;
+        const { scale, C_row, C_col } = offsets;
+        // editLevelRow = coarserRow * scale + C_row  →  coarserRow = (editLevelRow - C_row) / scale
+        mMinRow = Math.max(0, Math.ceil((selMinRow_N - C_row) / scale));
+        mMaxRow = Math.min(mLevelRows - 1, Math.floor((selMaxRow_N + 1 - C_row) / scale) - 1);
+        mMinCol = Math.max(0, Math.ceil((selMinCol_N - C_col) / scale));
+        mMaxCol = Math.min(mLevelCols - 1, Math.floor((selMaxCol_N + 1 - C_col) / scale) - 1);
+      }
+
       if (mMinRow > mMaxRow || mMinCol > mMaxCol) continue;
+
       const sourceTiles = M === 1 ? (activeFile.tiles ?? []) : (activeFile.layers?.[M] ?? []);
       const newMTiles = [...sourceTiles];
       while (newMTiles.length < mInfo.cells.length) {
@@ -8123,7 +8155,7 @@ export default function TestScreen() {
                 pendingFloodCompleteRef.current = setTimeout(() => {
                   pendingFloodCompleteRef.current = null;
                   floodFill();
-                  applyPatternFloodToFinerLayers(false);
+                  applyPatternFloodToAllLayers(false);
                 }, 0);
               }}
               onLongPress={() => {
@@ -8135,7 +8167,7 @@ export default function TestScreen() {
                   pendingFloodCompleteRef.current = null;
                 }
                 floodComplete();
-                applyPatternFloodToFinerLayers(true);
+                applyPatternFloodToAllLayers(true);
               }}
             />
             <ToolbarButton
