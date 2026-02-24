@@ -5,7 +5,10 @@
 
 import {
   SAMPLE_FILE_CONTENTS,
+  SAMPLE_FILE_NAMES,
   SAMPLE_PATTERN_CONTENTS,
+  SAMPLE_PATTERN_NAMES,
+  SAMPLE_THUMBNAIL_DATA_URLS,
   SAMPLE_TILESET_CONTENTS,
 } from '@/utils/sample-assets-content';
 
@@ -32,4 +35,16 @@ export async function loadSamplePatternContents(): Promise<string[]> {
 
 export async function loadSampleTileSetContents(): Promise<string[]> {
   return Promise.resolve(SAMPLE_TILESET_CONTENTS);
+}
+
+export function loadSampleFileNames(): string[] {
+  return SAMPLE_FILE_NAMES;
+}
+
+export function loadSamplePatternNames(): string[] {
+  return SAMPLE_PATTERN_NAMES;
+}
+
+export function getSampleThumbnailDataUrl(key: string): string | null {
+  return SAMPLE_THUMBNAIL_DATA_URLS[key] ?? null;
 }

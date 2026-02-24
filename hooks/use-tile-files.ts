@@ -647,7 +647,7 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
   );
 
   const createFileFromTileData = useCallback(
-    (payload: TileFilePayload, options?: { isSample?: boolean }): string => {
+    (payload: TileFilePayload, options?: { isSample?: boolean; thumbnailUri?: string | null }): string => {
       const layersPayload = payload.layers;
       let layers: Record<number, Tile[]> | undefined;
       if (layersPayload && typeof layersPayload === 'object' && !Array.isArray(layersPayload)) {
@@ -675,7 +675,7 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
         preferredTileSize: payload.preferredTileSize,
         lineWidth: payload.lineWidth,
         lineColor: payload.lineColor,
-        thumbnailUri: null,
+        thumbnailUri: options?.thumbnailUri ?? null,
         previewUri: null,
         updatedAt: Date.now(),
         lockedCells:

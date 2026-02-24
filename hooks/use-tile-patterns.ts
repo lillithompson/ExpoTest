@@ -18,6 +18,8 @@ export type TilePattern = {
   createdAtLevel?: number;
   /** Tile data for other resolution levels keyed by level number. May hold both finer (< createdAtLevel) and coarser (> createdAtLevel) levels. */
   layerTiles?: Record<number, { tiles: Tile[]; width: number; height: number }>;
+  /** Pre-embedded thumbnail data URL for sample patterns. */
+  thumbnailUri?: string | null;
 };
 
 const STORAGE_KEY = 'tile-patterns-v1';
@@ -66,6 +68,7 @@ export const useTilePatterns = () => {
       tileSetIds?: string[];
       createdAtLevel?: number;
       layerTiles?: Record<number, { tiles: Tile[]; width: number; height: number }>;
+      thumbnailUri?: string | null;
     }) => {
       const nextPattern: TilePattern = {
         id: createId(),
@@ -80,6 +83,7 @@ export const useTilePatterns = () => {
         ...(payload.createdAtLevel != null && { createdAtLevel: payload.createdAtLevel }),
         ...(payload.layerTiles &&
           Object.keys(payload.layerTiles).length > 0 && { layerTiles: payload.layerTiles }),
+        ...(payload.thumbnailUri != null && { thumbnailUri: payload.thumbnailUri }),
       };
       setPatterns((prev) => {
         const next = [nextPattern, ...prev];

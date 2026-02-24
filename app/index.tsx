@@ -57,8 +57,11 @@ import { useTileSets } from '@/hooks/use-tile-sets';
 import { clearAllLocalData } from '@/utils/clear-local-data';
 import { downloadUgcTileFile } from '@/utils/download-ugc-tile';
 import {
+    getSampleThumbnailDataUrl,
     loadSampleFileContents,
+    loadSampleFileNames,
     loadSamplePatternContents,
+    loadSamplePatternNames,
     loadSampleTileSetContents,
     shouldLoadSamplesThisSession,
 } from '@/utils/load-sample-assets';
@@ -96,8 +99,9 @@ import {
     buildSourceXmlCache,
     exportTileCanvasAsSvg,
     getSourceUri,
+    type OverlayLayerParams,
     renderTileCanvasToDataUrl,
-    renderTileCanvasToSvg
+    renderTileCanvasToSvg,
 } from '@/utils/tile-export';
 import { deserializeTileFile, serializeTileFile } from '@/utils/tile-format';
 import {
@@ -856,7 +860,7 @@ export default function TestScreen() {
   const importTileInputRef = useRef<HTMLInputElement | null>(null);
   const importPatternInputRef = useRef<HTMLInputElement | null>(null);
   const applyImportedPatternRef = useRef<
-    (content: string) => { ok: false; error: string } | { ok: true }
+    (content: string, options?: { thumbnailUri?: string | null }) => { ok: false; error: string } | { ok: true }
   >(() => ({ ok: false, error: 'Not ready' }));
   const applyImportedTileFileRef = useRef<(content: string) => void>(() => {});
   const [downloadTargetId, setDownloadTargetId] = useState<string | null>(null);
@@ -1526,7 +1530,13 @@ export default function TestScreen() {
     () =>
       activePatterns.map((p) => ({
         id: p.id,
-        pattern: { tiles: p.tiles, width: p.width, height: p.height },
+        pattern: {
+          tiles: p.tiles,
+          width: p.width,
+          height: p.height,
+          ...(p.createdAtLevel != null && { createdAtLevel: p.createdAtLevel }),
+          ...(p.layerTiles && Object.keys(p.layerTiles).length > 0 && { layerTiles: p.layerTiles }),
+        },
         rotation: patternRotations[p.id] ?? 0,
         mirrorX: patternMirrors[p.id] ?? false,
         tileSetIds: p.tileSetIds,
@@ -5723,7 +5733,7 @@ export default function TestScreen() {
   }, [activePatterns, selectedPatternIdsForExport, patterns, userTileSets]);
 
   const applyImportedPattern = useCallback(
-    (content: string): { ok: false; error: string } | { ok: true } => {
+    (content: string, options?: { thumbnailUri?: string | null }): { ok: false; error: string } | { ok: true } => {
       const bundleResult = deserializeBundle(content);
       if (bundleResult.ok && bundleResult.kind === 'patternBundle') {
         const oldToNewSetId = new Map<string, string>();
@@ -5745,6 +5755,7 @@ export default function TestScreen() {
           ...(patternTileSetIds.length > 0 && { tileSetIds: patternTileSetIds }),
           ...(remapped.createdAtLevel != null && { createdAtLevel: remapped.createdAtLevel }),
           ...(remapped.layerTiles && Object.keys(remapped.layerTiles).length > 0 && { layerTiles: remapped.layerTiles }),
+          ...(options?.thumbnailUri != null && { thumbnailUri: options.thumbnailUri }),
         });
         // Auto-select the pattern's UGC sets in the tile set chooser so the pattern
         // thumbnail and painting resolve correctly without the user toggling them on.
@@ -5782,6 +5793,7 @@ export default function TestScreen() {
         tiles: p.tiles,
         ...(p.createdAtLevel != null && { createdAtLevel: p.createdAtLevel }),
         ...(p.layerTiles && Object.keys(p.layerTiles).length > 0 && { layerTiles: p.layerTiles }),
+        ...(options?.thumbnailUri != null && { thumbnailUri: options.thumbnailUri }),
       });
       return { ok: true };
     },
@@ -6062,15 +6074,21 @@ export default function TestScreen() {
         }
         if (patterns.length === 0) {
           const contents = await loadSamplePatternContents();
-          for (const content of contents) {
+          const patternNames = loadSamplePatternNames();
+          for (let i = 0; i < contents.length; i++) {
             if (cancelled) return;
-            applyImportedPattern(content);
+            const thumbKey = patternNames[i] ? `pattern-${patternNames[i]}` : null;
+            const thumbnailUri = thumbKey ? getSampleThumbnailDataUrl(thumbKey) : null;
+            applyImportedPattern(contents[i], { thumbnailUri });
           }
         }
         if (files.length === 0) {
           const contents = await loadSampleFileContents();
-          for (const content of contents) {
+          const fileNames = loadSampleFileNames();
+          for (let i = 0; i < contents.length; i++) {
             if (cancelled) return;
+            const content = contents[i];
+            const thumbnailUri = fileNames[i] ? getSampleThumbnailDataUrl(fileNames[i]) : null;
             const bundleResult = deserializeBundle(content);
             if (bundleResult.ok && bundleResult.kind === 'fileBundle') {
               const oldToNewSetId = new Map<string, string>();
@@ -6082,11 +6100,11 @@ export default function TestScreen() {
                 bundleResult.payload.file,
                 oldToNewSetId
               );
-              createFileFromTileData(remapped, { isSample: true });
+              createFileFromTileData(remapped, { isSample: true, thumbnailUri });
             } else {
               const result = deserializeTileFile(content);
               if (result.ok) {
-                createFileFromTileData(result.payload, { isSample: true });
+                createFileFromTileData(result.payload, { isSample: true, thumbnailUri });
               }
             }
           }
@@ -6112,7 +6130,10 @@ export default function TestScreen() {
   const handleReimportSamples = useCallback(async () => {
     try {
       const contents = await loadSampleFileContents();
-      for (const content of contents) {
+      const fileNames = loadSampleFileNames();
+      for (let i = 0; i < contents.length; i++) {
+        const content = contents[i];
+        const thumbnailUri = fileNames[i] ? getSampleThumbnailDataUrl(fileNames[i]) : null;
         const bundleResult = deserializeBundle(content);
         if (bundleResult.ok && bundleResult.kind === 'fileBundle') {
           const oldToNewSetId = new Map<string, string>();
@@ -6124,11 +6145,11 @@ export default function TestScreen() {
             bundleResult.payload.file,
             oldToNewSetId
           );
-          createFileFromTileData(remapped, { isSample: true });
+          createFileFromTileData(remapped, { isSample: true, thumbnailUri });
         } else {
           const result = deserializeTileFile(content);
           if (result.ok) {
-            createFileFromTileData(result.payload, { isSample: true });
+            createFileFromTileData(result.payload, { isSample: true, thumbnailUri });
           }
         }
       }
@@ -7554,6 +7575,104 @@ export default function TestScreen() {
                   accessibilityLabel="Toggle debug overlay"
                 />
               </ThemedView>
+              {settings.developerMode && Platform.OS === 'web' && (
+                <Pressable
+                  style={styles.settingsAction}
+                  onPress={async () => {
+                    const sampleFileNames = loadSampleFileNames();
+                    const samplePatternNames = loadSamplePatternNames();
+                    const samplesOnly = files.filter((f) => f.isSample);
+                    let count = 0;
+                    // Generate thumbnails for sample files, matching by import order
+                    for (let i = 0; i < Math.min(samplesOnly.length, sampleFileNames.length); i++) {
+                      const file = samplesOnly[i];
+                      const sources = getSourcesForFile(file);
+                      const overlayLayers = getOverlayLayersForFile(file);
+                      const dataUrl = await renderTileCanvasToDataUrl({
+                        tiles: getBaseTilesForExportFile(file),
+                        gridLayout: {
+                          rows: file.grid.rows,
+                          columns: file.grid.columns,
+                          tileSize: file.preferredTileSize,
+                        },
+                        tileSources: sources as any,
+                        gridGap: 0,
+                        blankSource: null,
+                        errorSource: null,
+                        lineColor: file.lineColor,
+                        lineWidth: file.lineWidth,
+                        strokeScaleByName,
+                        overlayLayers,
+                        maxDimension: 256,
+                      });
+                      if (dataUrl && typeof document !== 'undefined') {
+                        const link = document.createElement('a');
+                        link.href = dataUrl;
+                        link.download = `${sampleFileNames[i]}.png`;
+                        document.body.appendChild(link);
+                        link.click();
+                        link.remove();
+                        count++;
+                      }
+                    }
+                    // Generate thumbnails for sample patterns
+                    for (let i = 0; i < Math.min(patterns.length, samplePatternNames.length); i++) {
+                      const p = patterns[i];
+                      const patSources = getSourcesForFile({
+                        tiles: p.tiles,
+                        grid: { rows: p.height, columns: p.width },
+                        tileSetIds: p.tileSetIds ?? [],
+                        sourceNames: [],
+                        category: p.category,
+                        categories: [p.category],
+                      } as any);
+                      const patOverlayLayers: OverlayLayerParams[] = [];
+                      if (p.layerTiles) {
+                        for (const [levelStr, layerData] of Object.entries(p.layerTiles)) {
+                          const level = parseInt(levelStr, 10);
+                          const levelInfo = getLevelGridInfo(p.width, p.height, level);
+                          if (levelInfo && layerData.tiles.length === levelInfo.cells.length) {
+                            patOverlayLayers.push({
+                              tiles: layerData.tiles,
+                              levelInfo,
+                              level1TileSize: 45,
+                              gridGap: 0,
+                            });
+                          }
+                        }
+                      }
+                      const dataUrl = await renderTileCanvasToDataUrl({
+                        tiles: p.tiles,
+                        gridLayout: {
+                          rows: p.height,
+                          columns: p.width,
+                          tileSize: 45,
+                        },
+                        tileSources: patSources as any,
+                        gridGap: 0,
+                        blankSource: null,
+                        errorSource: null,
+                        overlayLayers: patOverlayLayers.length > 0 ? patOverlayLayers : undefined,
+                        maxDimension: 256,
+                      });
+                      if (dataUrl && typeof document !== 'undefined') {
+                        const link = document.createElement('a');
+                        link.href = dataUrl;
+                        link.download = `pattern-${samplePatternNames[i]}.png`;
+                        document.body.appendChild(link);
+                        link.click();
+                        link.remove();
+                        count++;
+                      }
+                    }
+                    window.alert(`Generated ${count} thumbnail(s). Save them to assets/samples/thumbnails/ and run npm run embed-samples.`);
+                  }}
+                  accessibilityRole="button"
+                  accessibilityLabel="Generate sample thumbnails"
+                >
+                  <ThemedText type="defaultSemiBold">Generate Sample Thumbnails</ThemedText>
+                </Pressable>
+              )}
               <TouchableOpacity
                 style={[styles.settingsAction, styles.settingsActionDanger]}
                 onPress={() => {
