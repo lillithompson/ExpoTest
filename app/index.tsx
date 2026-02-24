@@ -4953,20 +4953,39 @@ export default function TestScreen() {
           const srcTile = patternTiles[mapped.sourceRow * patternWidth + mapped.sourceCol];
           if (!srcTile) continue;
           const tr = applyGroupRotationToTile(srcTile.rotation, srcTile.mirrorX, srcTile.mirrorY, rot);
-          cellUpdates[mr * mCols + mc] = {
+          const primaryTile = {
             imageIndex: srcTile.imageIndex,
             rotation: tr.rotation,
             mirrorX: mirrorX ? !tr.mirrorX : tr.mirrorX,
             mirrorY: tr.mirrorY,
             name: srcTile.name,
           };
+          cellUpdates[mr * mCols + mc] = primaryTile;
+
+          // --- global mirror copies (same rules as getMirroredPlacements) ---
+          if (settings.mirrorHorizontal) {
+            const mcm = mCols - 1 - mc;
+            if (mcm >= 0 && mcm < mCols)
+              cellUpdates[mr * mCols + mcm] = { ...primaryTile, mirrorX: !primaryTile.mirrorX };
+          }
+          if (settings.mirrorVertical) {
+            const mrm = mRows - 1 - mr;
+            if (mrm >= 0 && mrm < mRows)
+              cellUpdates[mrm * mCols + mc] = { ...primaryTile, mirrorY: !primaryTile.mirrorY };
+          }
+          if (settings.mirrorHorizontal && settings.mirrorVertical) {
+            const mrm = mRows - 1 - mr;
+            const mcm = mCols - 1 - mc;
+            if (mrm >= 0 && mrm < mRows && mcm >= 0 && mcm < mCols)
+              cellUpdates[mrm * mCols + mcm] = { ...primaryTile, rotation: (primaryTile.rotation + 180) % 360 };
+          }
         }
       }
       if (Object.keys(cellUpdates).length > 0) {
         updateActiveFileLayerCells(targetLevel, cellUpdates);
       }
     },
-    [activeFile?.grid.columns, activeFile?.grid.rows, updateActiveFileLayerCells]
+    [activeFile?.grid.columns, activeFile?.grid.rows, updateActiveFileLayerCells, settings.mirrorHorizontal, settings.mirrorVertical]
   );
 
   const stampPreviewRect = useMemo(() => {

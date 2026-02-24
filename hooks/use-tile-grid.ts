@@ -2973,13 +2973,35 @@ export const useTileGrid = ({
               if (!srcTile) continue;
               const rot = normalizeRotationCW(rotCW);
               const tr = applyGroupRotationToTile(srcTile.rotation, srcTile.mirrorX, srcTile.mirrorY, rot);
-              next[destIndex] = {
+              const primaryTile = {
                 imageIndex: srcTile.imageIndex,
                 rotation: tr.rotation,
                 mirrorX: mirrorX ? !tr.mirrorX : tr.mirrorX,
                 mirrorY: tr.mirrorY,
                 name: srcTile.name,
               };
+              next[destIndex] = primaryTile;
+
+              // --- global mirror copies (same rules as getMirroredPlacements) ---
+              if (mirrorHorizontal) {
+                const mc = cols - 1 - destCol;
+                const mi = destRow * cols + mc;
+                if (mc >= 0 && mc < cols && !lockedCellIndices?.has(mi))
+                  next[mi] = { ...primaryTile, mirrorX: !primaryTile.mirrorX };
+              }
+              if (mirrorVertical) {
+                const mr = rows - 1 - destRow;
+                const mi = mr * cols + destCol;
+                if (mr >= 0 && mr < rows && !lockedCellIndices?.has(mi))
+                  next[mi] = { ...primaryTile, mirrorY: !primaryTile.mirrorY };
+              }
+              if (mirrorHorizontal && mirrorVertical) {
+                const mr = rows - 1 - destRow;
+                const mc = cols - 1 - destCol;
+                const mi = mr * cols + mc;
+                if (mr >= 0 && mr < rows && mc >= 0 && mc < cols && !lockedCellIndices?.has(mi))
+                  next[mi] = { ...primaryTile, rotation: (primaryTile.rotation + 180) % 360 };
+              }
             }
           }
           return next;
@@ -2993,6 +3015,8 @@ export const useTileGrid = ({
       tileSourcesLength,
       lockedCellIndices,
       pushUndo,
+      mirrorHorizontal,
+      mirrorVertical,
     ]
   );
 
