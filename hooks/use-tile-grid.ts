@@ -94,6 +94,9 @@ type Params = {
 
 const MAX_UNDO_STEPS = 50;
 
+// Toggle performance logging (only active in __DEV__)
+const PERF_LOG = typeof __DEV__ !== 'undefined' && __DEV__;
+
 type Result = {
   gridLayout: GridLayout;
   tiles: Tile[];
@@ -452,24 +455,33 @@ export const useTileGrid = ({
   const [cloneCursorIndex, setCloneCursorIndex] = useState<number | null>(null);
   const patternAnchorRef = useRef<number | null>(null);
   const drawStrokeRef = useRef<number[]>([]);
+  // Reusable sentinel array for draw-mode overwrite state (avoids 512-element allocation per press)
+  const drawOverwriteSentinelRef = useRef<{ cells: number; tiles: Tile[] }>({ cells: 0, tiles: [] });
+  const getDrawOverwriteSentinel = (): Tile[] => {
+    const ref = drawOverwriteSentinelRef.current;
+    if (ref.cells !== internalTotalCells) {
+      ref.cells = internalTotalCells;
+      ref.tiles = Array.from({ length: internalTotalCells }, () => ({
+        imageIndex: -1, rotation: 0, mirrorX: false, mirrorY: false,
+      }) as Tile);
+    }
+    return ref.tiles;
+  };
   const placementOrderRef = useRef(0);
   const onTilesChangeRef = useRef(onTilesChange);
   onTilesChangeRef.current = onTilesChange;
   const latestTilesForPersistRef = useRef<Tile[]>(tiles);
   latestTilesForPersistRef.current = tiles;
   const persistTilesTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const LAYER_PERSIST_DEBOUNCE_MS = 120;
+  const LAYER_PERSIST_DEBOUNCE_MS = 300;
   useEffect(() => {
     if (!onTilesChangeRef.current) return;
     if (persistTilesTimeoutRef.current) clearTimeout(persistTilesTimeoutRef.current);
-    const _snapshotLen = tiles.length;
-    const _snapshotFilled = tiles.filter((t) => t.imageIndex >= 0).length;
     persistTilesTimeoutRef.current = setTimeout(() => {
       persistTilesTimeoutRef.current = null;
-      const _persistTiles = latestTilesForPersistRef.current;
-      const _pFilled = _persistTiles.filter((t) => t.imageIndex >= 0).length;
-      console.log(`[LAYER-DIAG] onTilesChange DEBOUNCE FIRE | snapshotAtSchedule=${_snapshotLen}(${_snapshotFilled}filled) | persistNow=${_persistTiles.length}(${_pFilled}filled)`);
-      onTilesChangeRef.current?.(_persistTiles);
+      const persistTiles = latestTilesForPersistRef.current;
+      if (PERF_LOG) console.log(`[PERF] persist debounce fire | ${persistTiles.length} tiles`);
+      onTilesChangeRef.current?.(persistTiles);
     }, LAYER_PERSIST_DEBOUNCE_MS);
     return () => {
       if (persistTilesTimeoutRef.current) {
@@ -495,6 +507,22 @@ export const useTileGrid = ({
   );
   const lastTilesRef = useRef<Tile[]>(renderTiles);
   lastTilesRef.current = renderTiles;
+
+  // Fast-path: after normalization via renderTiles, tiles passed through setTiles updaters
+  // are already well-formed. Track whether we can skip the expensive normalizeTiles checks.
+  const tilesNormalizedRef = useRef(true);
+  // Reset when cell count or sources change (renderTiles re-normalizes)
+  useEffect(() => { tilesNormalizedRef.current = true; }, [internalTotalCells, tileSourcesLength]);
+
+  /** Return normalized tiles, skipping expensive checks when we know tiles are already valid. */
+  const ensureNormalized = (current: Tile[]): Tile[] => {
+    if (tilesNormalizedRef.current && current.length === internalTotalCells) {
+      return current;
+    }
+    const result = normalizeTiles(current, internalTotalCells, tileSourcesLength);
+    tilesNormalizedRef.current = true;
+    return result;
+  };
 
   type UndoEntry = { tiles: Tile[]; sideEffect?: UndoSideEffect };
   const undoStackRef = useRef<UndoEntry[]>([]);
@@ -556,10 +584,8 @@ export const useTileGrid = ({
     if (isUndoRedoRef.current) {
       return;
     }
-    const snapshot = lastTilesRef.current.map((t) => ({
-      ...t,
-      name: t.name,
-    }));
+    const t0 = PERF_LOG ? performance.now() : 0;
+    const snapshot = [...lastTilesRef.current];
     const stack = undoStackRef.current;
     const top = stack.length > 0 ? stack[stack.length - 1] : null;
     if (top && tilesEqual(snapshot, top.tiles)) {
@@ -575,6 +601,7 @@ export const useTileGrid = ({
     redoStackRef.current = [];
     setUndoCount(stack.length);
     setRedoCount(0);
+    if (PERF_LOG) console.log(`[PERF] pushUndo: ${(performance.now() - t0).toFixed(2)}ms | ${snapshot.length} tiles`);
   }, []);
 
   const applyTilesInternal = useCallback(
@@ -1417,15 +1444,20 @@ export const useTileGrid = ({
   const applyPlacement = (cellIndex: number, placement: Tile) => {
     const placements = getMirroredPlacements(cellIndex, placement);
     const order = getNextPlacementOrder();
-    setTiles((prev) =>
-      normalizeTiles(prev, internalTotalCells, tileSourcesLength).map((tile, index) => {
-        const p = placements.get(index);
-        if (p && lockedCellIndices?.has(index)) {
-          return tile;
+    setTiles((prev) => {
+      const t0 = PERF_LOG ? performance.now() : 0;
+      const normalized = ensureNormalized(prev);
+      const next = [...normalized];
+      placements.forEach((p, index) => {
+        if (index >= 0 && index < next.length && !lockedCellIndices?.has(index)) {
+          next[index] = { ...p, placedOrder: order };
         }
-        return p ? { ...p, placedOrder: order } : tile;
-      })
-    );
+      });
+      if (PERF_LOG) {
+        console.log(`[PERF] applyPlacement: ${(performance.now() - t0).toFixed(2)}ms | ${placements.size} placements / ${next.length} tiles`);
+      }
+      return next;
+    });
   };
 
   /** Finalize a completed stroke: length 1 → set to 00000000 (or empty); length ≥ 2 → last tile connects only to n-1. */
@@ -1435,7 +1467,8 @@ export const useTileGrid = ({
     selectionSet: Set<number> | null
   ): Tile[] => {
     if (stroke.length === 0) return prevTiles;
-    const next = prevTiles.map((t) => ({ ...t }));
+    const t0 = PERF_LOG ? performance.now() : 0;
+    const next = [...prevTiles];
     if (stroke.length === 1) {
       let zeroCandidates = getCandidatesWithExactConnections(
         new Set(),
@@ -1453,6 +1486,7 @@ export const useTileGrid = ({
         getMirroredPlacements(stroke[0], tile),
         selectionSet ?? undefined
       );
+      if (PERF_LOG) console.log(`[PERF] applyFinalizeStroke(len=1): ${(performance.now() - t0).toFixed(2)}ms`);
       return normalizeTiles(next, internalTotalCells, tileSourcesLength);
     }
     const lastIndex = stroke[stroke.length - 1];
@@ -1477,6 +1511,7 @@ export const useTileGrid = ({
       getMirroredPlacements(lastIndex, endTile),
       selectionSet ?? undefined
     );
+    if (PERF_LOG) console.log(`[PERF] applyFinalizeStroke(len=${stroke.length}): ${(performance.now() - t0).toFixed(2)}ms`);
     return normalizeTiles(next, internalTotalCells, tileSourcesLength);
   };
 
@@ -1684,19 +1719,18 @@ export const useTileGrid = ({
 
     if (cached) {
       lastPressRef.current = { ...cached, time: now };
-      setTiles((prev) =>
-        normalizeTiles(prev, internalTotalCells, tileSourcesLength).map((tile, index) =>
-          index === fullIndex
-            ? {
-                imageIndex: cached.imageIndex,
-                rotation: cached.rotation,
-                mirrorX: cached.mirrorX,
-                mirrorY: cached.mirrorY,
-                placedOrder: placementOrder,
-              }
-            : tile
-        )
-      );
+      setTiles((prev) => {
+        const normalized = ensureNormalized(prev);
+        const next = [...normalized];
+        next[fullIndex] = {
+          imageIndex: cached.imageIndex,
+          rotation: cached.rotation,
+          mirrorX: cached.mirrorX,
+          mirrorY: cached.mirrorY,
+          placedOrder: placementOrder,
+        };
+        return next;
+      });
       return;
     }
 
@@ -1708,18 +1742,7 @@ export const useTileGrid = ({
     const isDrawSubsequent = brush.mode === 'draw' && stroke.length >= 1;
     // When starting a draw stroke (first tile or new stroke on non-adjacent cell), treat all tiles as empty so we overwrite regardless of existing content.
     const drawOverwriteTilesState: Tile[] | null =
-      brush.mode === 'draw'
-        ? Array.from(
-            { length: internalTotalCells },
-            () =>
-              ({
-                imageIndex: -1,
-                rotation: 0,
-                mirrorX: false,
-                mirrorY: false,
-              }) as Tile
-          )
-        : null;
+      brush.mode === 'draw' ? getDrawOverwriteSentinel() : null;
 
     const getConnectionCount = (t: Tile): number => {
       const conn = compatTables.getConnectionsForPlacement(
@@ -1779,13 +1802,12 @@ export const useTileGrid = ({
       if (brush.mode === 'draw') {
         return;
       }
-      setTiles((prev) =>
-        normalizeTiles(prev, internalTotalCells, tileSourcesLength).map((tile, index) =>
-          index === fullIndex
-            ? { imageIndex: -2, rotation: 0, mirrorX: false, mirrorY: false }
-            : tile
-        )
-      );
+      setTiles((prev) => {
+        const normalized = ensureNormalized(prev);
+        const next = [...normalized];
+        next[fullIndex] = { imageIndex: -2, rotation: 0, mirrorX: false, mirrorY: false };
+        return next;
+      });
       return;
     }
 
@@ -1883,7 +1905,7 @@ export const useTileGrid = ({
       }
       const prevTile =
         prevCandidates[Math.floor(Math.random() * prevCandidates.length)];
-      const nextTiles = lastTilesRef.current.map((t) => ({ ...t }));
+      const nextTiles = [...lastTilesRef.current];
       applyPlacementsToArrayOverride(
         nextTiles,
         getMirroredPlacements(prevIndex, prevTile),
