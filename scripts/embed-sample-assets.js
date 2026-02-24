@@ -31,7 +31,7 @@ for (const { name, exportName } of dirs) {
   }
   const files = fs
     .readdirSync(dirPath, { withFileTypes: true })
-    .filter((e) => e.isFile())
+    .filter((e) => e.isFile() && !e.name.startsWith('.'))
     .map((e) => e.name)
     .sort();
   const contents = files.map((f) => {
@@ -41,6 +41,46 @@ for (const { name, exportName } of dirs) {
   lines.push(`export const ${exportName}: string[] = ${JSON.stringify(contents)};`);
   lines.push('');
 }
+
+// Export sample file/pattern names (without extension) in the same order as contents arrays
+const nameExports = [
+  { dirName: 'files', exportName: 'SAMPLE_FILE_NAMES' },
+  { dirName: 'patterns', exportName: 'SAMPLE_PATTERN_NAMES' },
+];
+
+for (const { dirName, exportName } of nameExports) {
+  const dirPath = path.join(samplesDir, dirName);
+  if (!fs.existsSync(dirPath)) {
+    lines.push(`export const ${exportName}: string[] = [];`);
+    lines.push('');
+    continue;
+  }
+  const names = fs
+    .readdirSync(dirPath, { withFileTypes: true })
+    .filter((e) => e.isFile() && !e.name.startsWith('.'))
+    .map((e) => path.parse(e.name).name)
+    .sort();
+  lines.push(`export const ${exportName}: string[] = ${JSON.stringify(names)};`);
+  lines.push('');
+}
+
+// Embed thumbnail PNGs from assets/samples/thumbnails/ as base64 data URLs
+const thumbDir = path.join(samplesDir, 'thumbnails');
+const thumbMap = {};
+if (fs.existsSync(thumbDir)) {
+  const thumbFiles = fs
+    .readdirSync(thumbDir, { withFileTypes: true })
+    .filter((e) => e.isFile() && e.name.endsWith('.png'))
+    .map((e) => e.name)
+    .sort();
+  for (const f of thumbFiles) {
+    const stem = path.parse(f).name;
+    const data = fs.readFileSync(path.join(thumbDir, f));
+    thumbMap[stem] = `data:image/png;base64,${data.toString('base64')}`;
+  }
+}
+lines.push(`export const SAMPLE_THUMBNAIL_DATA_URLS: Record<string, string> = ${JSON.stringify(thumbMap)};`);
+lines.push('');
 
 fs.writeFileSync(outputPath, lines.join('\n'), 'utf8');
 console.log('Wrote', outputPath);
