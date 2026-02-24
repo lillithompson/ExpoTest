@@ -5476,7 +5476,7 @@ export default function TestScreen() {
   }, [patternSelection, gridLayout.columns, tiles, activeFile, isEditingHigherLayer, levelGridInfo, editingLevel]);
 
   const persistActiveFileNow = async () => {
-    if (!ready || !activeFileId || viewMode !== 'modify') {
+    if (!ready || !activeFileId) {
       return;
     }
     if (saveTimeoutRef.current) {
@@ -7890,10 +7890,8 @@ export default function TestScreen() {
                     setZoomRegion(null);
                   }
                 } else {
-                  void (async () => {
-                    await persistActiveFileNow();
-                    setViewMode('file');
-                  })();
+                  persistActiveFileNow();  // fire-and-forget background save
+                  setViewMode('file');
                 }
               }}
               style={styles.navBackSquare}
@@ -7907,10 +7905,8 @@ export default function TestScreen() {
             <NavButton
               label="Modify"
               onPress={() => {
-                void (async () => {
-                  await persistActiveFileNow();
-                  setViewMode('file');
-                })();
+                persistActiveFileNow();  // fire-and-forget background save
+                setViewMode('file');
               }}
             />
             <ThemedView
