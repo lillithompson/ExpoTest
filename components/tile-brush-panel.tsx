@@ -780,11 +780,18 @@ export function TileBrushPanel({
                 const cMX = entry.mirrorX;
                 panResponderMapRef.current.set(panKey, PanResponder.create({
                   onStartShouldSetPanResponder: () => false,
-                  onMoveShouldSetPanResponder: (_, gs) => gs.dx * gs.dx + gs.dy * gs.dy > 64,
-                  onPanResponderGrant: () => {
+                  // Only claim when movement is more vertical than horizontal.
+                  // Horizontal swipes should scroll the palette, not start a stamp drag.
+                  onMoveShouldSetPanResponder: (_, gs) =>
+                    gs.dx * gs.dx + gs.dy * gs.dy > 64 &&
+                    Math.abs(gs.dy) > Math.abs(gs.dx),
+                  onPanResponderGrant: (e) => {
+                    // Prevent the browser from firing native scroll on the same touch.
+                    if (e.preventDefault) e.preventDefault();
                     stampDragCallbacksRef.current.onPatternStampDragStart?.(cId, cRot, cMX);
                   },
-                  onPanResponderMove: (_, gs) => {
+                  onPanResponderMove: (e, gs) => {
+                    if (e.preventDefault) e.preventDefault();
                     stampDragCallbacksRef.current.onPatternStampDragMove?.(gs.moveX, gs.moveY);
                   },
                   onPanResponderRelease: (_, gs) => {
