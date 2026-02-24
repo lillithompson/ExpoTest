@@ -148,12 +148,15 @@ export const normalizeTiles = (
   if (currentTiles.length === 0) {
     return buildInitialTiles(cellCount);
   }
-  // Densify sparse arrays (holes from direct index assignment on a previously-empty array).
-  // Object.keys only counts actually-set indices; if fewer than .length, there are holes.
+  // Densify arrays that have sparse holes (Object.keys detects unset indices) or explicit
+  // null/undefined entries (null appears when a previously-sparse array was JSON-serialized
+  // and reloaded — JSON.stringify converts undefined/holes to null).
+  const hasSparseHoles = Object.keys(currentTiles).length < currentTiles.length;
+  const hasNullEntries = !hasSparseHoles && currentTiles.some((t) => t == null);
   const tiles: Tile[] =
-    Object.keys(currentTiles).length < currentTiles.length
+    hasSparseHoles || hasNullEntries
       ? Array.from({ length: currentTiles.length }, (_, i) =>
-          i in currentTiles
+          currentTiles[i] != null
             ? currentTiles[i]!
             : ({ imageIndex: -1, rotation: 0, mirrorX: false, mirrorY: false } as Tile)
         )

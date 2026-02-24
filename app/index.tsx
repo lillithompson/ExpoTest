@@ -4594,26 +4594,25 @@ export default function TestScreen() {
     const canvasX = screenX - canvasScreenOffsetRef.current.x;
     const canvasY = screenY - canvasScreenOffsetRef.current.y;
     const tileStride = effectiveTileSize + GRID_GAP;
-    const rawCol = Math.floor(canvasX / tileStride) - Math.floor(displayW / 2);
-    const rawRow = Math.floor(canvasY / tileStride) - Math.floor(displayH / 2);
+    // Use fractional tile position for pixel-accurate centering, then round.
+    const cursorTileX = canvasX / tileStride;
+    const cursorTileY = canvasY / tileStride;
     let col: number;
     let row: number;
     if (offsets) {
-      // Clamp in level-N cell-index space so the anchor always lands on a complete cell.
+      // Center and clamp in level-N cell-index space so the anchor always lands on a complete cell.
       const levelInfo = getLevelGridInfo(gc, gr, mainLevel);
       if (!levelInfo || levelInfo.levelCols < rotW_native || levelInfo.levelRows < rotH_native) {
         setStampDropCell(null);
         return;
       }
-      const rawI = Math.round((rawCol - offsets.C_col) / offsets.scale);
-      const rawJ = Math.round((rawRow - offsets.C_row) / offsets.scale);
-      const clampedI = Math.max(0, Math.min(levelInfo.levelCols - rotW_native, rawI));
-      const clampedJ = Math.max(0, Math.min(levelInfo.levelRows - rotH_native, rawJ));
-      col = offsets.C_col + clampedI * offsets.scale;
-      row = offsets.C_row + clampedJ * offsets.scale;
+      const rawI = Math.round((cursorTileX - offsets.C_col) / offsets.scale - rotW_native / 2);
+      const rawJ = Math.round((cursorTileY - offsets.C_row) / offsets.scale - rotH_native / 2);
+      col = offsets.C_col + Math.max(0, Math.min(levelInfo.levelCols - rotW_native, rawI)) * offsets.scale;
+      row = offsets.C_row + Math.max(0, Math.min(levelInfo.levelRows - rotH_native, rawJ)) * offsets.scale;
     } else {
-      col = Math.max(0, Math.min(effectiveCols - displayW, rawCol));
-      row = Math.max(0, Math.min(effectiveRows - displayH, rawRow));
+      col = Math.max(0, Math.min(effectiveCols - displayW, Math.round(cursorTileX - displayW / 2)));
+      row = Math.max(0, Math.min(effectiveRows - displayH, Math.round(cursorTileY - displayH / 2)));
     }
     if (
       canvasX >= 0 &&
@@ -4646,20 +4645,20 @@ export default function TestScreen() {
         const canvasY = screenY - canvasScreenOffsetRef.current.y;
         const tileStride = effectiveTileSize + GRID_GAP;
         if (canvasX >= 0 && canvasY >= 0 && canvasX < effectiveCols * tileStride && canvasY < effectiveRows * tileStride) {
-          const rawCol = Math.floor(canvasX / tileStride) - Math.floor(displayW / 2);
-          const rawRow = Math.floor(canvasY / tileStride) - Math.floor(displayH / 2);
+          const cursorTileX = canvasX / tileStride;
+          const cursorTileY = canvasY / tileStride;
           let col: number;
           let row: number;
           if (offsets) {
             const levelInfo = getLevelGridInfo(gc, gr, mainLevel);
             if (!levelInfo || levelInfo.levelCols < rotW_native || levelInfo.levelRows < rotH_native) return;
-            const rawI = Math.round((rawCol - offsets.C_col) / offsets.scale);
-            const rawJ = Math.round((rawRow - offsets.C_row) / offsets.scale);
+            const rawI = Math.round((cursorTileX - offsets.C_col) / offsets.scale - rotW_native / 2);
+            const rawJ = Math.round((cursorTileY - offsets.C_row) / offsets.scale - rotH_native / 2);
             col = offsets.C_col + Math.max(0, Math.min(levelInfo.levelCols - rotW_native, rawI)) * offsets.scale;
             row = offsets.C_row + Math.max(0, Math.min(levelInfo.levelRows - rotH_native, rawJ)) * offsets.scale;
           } else {
-            col = Math.max(0, Math.min(effectiveCols - displayW, rawCol));
-            row = Math.max(0, Math.min(effectiveRows - displayH, rawRow));
+            col = Math.max(0, Math.min(effectiveCols - displayW, Math.round(cursorTileX - displayW / 2)));
+            row = Math.max(0, Math.min(effectiveRows - displayH, Math.round(cursorTileY - displayH / 2)));
           }
           setPendingStampCell({ row, col });
           setPendingStampPatternId(patternId);
