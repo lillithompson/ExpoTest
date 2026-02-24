@@ -14,20 +14,6 @@ import {
 } from '@/utils/tile-format';
 import { buildInitialTiles, getLevelGridInfo, type GridLayout, type Tile } from '@/utils/tile-grid';
 
-// ── Layer-loss diagnostic logging ──
-function layerSummary(layers: Record<number, Tile[]> | undefined): string {
-  if (!layers) return 'undefined';
-  const entries = Object.entries(layers).map(([k, v]) => {
-    const nonEmpty = v.filter((t) => t.imageIndex >= 0).length;
-    return `L${k}:${v.length}tiles(${nonEmpty}filled)`;
-  });
-  return entries.length === 0 ? '{}' : entries.join(', ');
-}
-function tilesSummary(tiles: Tile[]): string {
-  const filled = tiles.filter((t) => t && t.imageIndex >= 0).length;
-  return `${tiles.length}tiles(${filled}filled)`;
-}
-const LAYER_DIAG = '[LAYER-DIAG]';
 // ── End diagnostic helpers ──
 
 export type TileFile = {
@@ -173,8 +159,6 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
                 }
                 if (Object.keys(layers).length === 0) layers = undefined;
               }
-              const _fileId = typeof (file as { id?: string }).id === 'string' ? (file as { id: string }).id.slice(0, 8) : '?';
-              console.log(`${LAYER_DIAG} INITIAL-LOAD | file=${_fileId} | layers=[${layerSummary(layers)}] | tiles=${Array.isArray((file as { tiles?: unknown[] }).tiles) ? (file as { tiles: unknown[] }).tiles.length : 0}`);
               let lockedCellsPerLayer: Record<number, number[]> | undefined;
               const rawLockedPerLayer = (file as { lockedCellsPerLayer?: Record<string, unknown> }).lockedCellsPerLayer;
               if (rawLockedPerLayer != null && typeof rawLockedPerLayer === 'object' && !Array.isArray(rawLockedPerLayer)) {
@@ -284,10 +268,6 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
     if (savingRef.current) {
       await savingRef.current;
     }
-    const activeF = next.find((f) => f.id === activeId);
-    if (activeF) {
-      console.log(`${LAYER_DIAG} PERSIST-TO-STORAGE | file=${activeF.id.slice(0,8)} | tiles=${tilesSummary(activeF.tiles)} | layers=[${layerSummary(activeF.layers)}]`);
-    }
     const promise = (async () => {
       await AsyncStorage.setItem(FILES_KEY, JSON.stringify(next));
       if (activeId) {
@@ -325,9 +305,7 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
       setFiles((prev) => {
         const next = prev.map((file) => {
           if (file.id !== activeFileId) return file;
-          const prevLayers = layerSummary(file.layers);
           const hasLayers = file.layers && Object.keys(file.layers).length > 0;
-          console.log(`${LAYER_DIAG} upsertActiveFile | file=${file.id.slice(0,8)} | prevLayers=[${prevLayers}] | keepLayers=${hasLayers} | payloadTiles=${tilesSummary(payload.tiles)} | grid=${payload.gridLayout.columns}x${payload.gridLayout.rows}`);
           const result = {
                 ...file,
                 tiles: payload.tiles,
@@ -359,18 +337,6 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
                     : file.lockedCells,
                 updatedAt: Date.now(),
               };
-          console.log(`${LAYER_DIAG} upsertActiveFile RESULT | file=${result.id.slice(0,8)} | resultLayers=[${layerSummary(result.layers)}] | resultTiles=${tilesSummary(result.tiles)}`);
-          // Detect layer data loss
-          if (file.layers) {
-            for (const [lvl, prevArr] of Object.entries(file.layers)) {
-              const prevFilled = prevArr.filter((t) => t.imageIndex >= 0).length;
-              const resultArr = result.layers?.[Number(lvl)];
-              const resultFilled = resultArr ? resultArr.filter((t) => t.imageIndex >= 0).length : 0;
-              if (prevFilled > 0 && resultFilled === 0) {
-                console.warn(`${LAYER_DIAG} ⚠️ LAYER DATA LOSS DETECTED in upsertActiveFile! L${lvl}: ${prevFilled}filled → ${resultFilled}filled`, new Error().stack);
-              }
-            }
-          }
           return result;
         });
         void persistFiles(next, activeFileId);
@@ -424,7 +390,6 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
   const updateActiveFileLayerCells = useCallback(
     (level: number, cellUpdates: Record<number, Tile>) => {
       if (!activeFileId || Object.keys(cellUpdates).length === 0) return;
-      console.log(`${LAYER_DIAG} updateActiveFileLayerCells | level=${level} | cellCount=${Object.keys(cellUpdates).length}`);
       setFiles((prev) => {
         const fileIdx = prev.findIndex((f) => f.id === activeFileId);
         if (fileIdx === -1) return prev;
@@ -477,17 +442,7 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
       if (!activeFileId || level < 2) {
         return;
       }
-      console.log(`${LAYER_DIAG} updateActiveFileLayer CALLED | level=${level} | tiles=${tilesSummary(tiles)}`);
       setFiles((prev) => {
-        const file = prev.find((f) => f.id === activeFileId);
-        if (file) {
-          const prevFilled = file.layers?.[level]?.filter((t) => t.imageIndex >= 0).length ?? 0;
-          const newFilled = tiles.filter((t) => t.imageIndex >= 0).length;
-          console.log(`${LAYER_DIAG} updateActiveFileLayer INSIDE | file=${file.id.slice(0,8)} | prevLayers=[${layerSummary(file.layers)}] | writing L${level}=${tilesSummary(tiles)}`);
-          if (prevFilled > 0 && newFilled === 0) {
-            console.warn(`${LAYER_DIAG} ⚠️ LAYER DATA LOSS DETECTED in updateActiveFileLayer! L${level}: ${prevFilled}filled → 0filled`, new Error().stack);
-          }
-        }
         const next = prev.map((file) =>
           file.id === activeFileId
             ? {
@@ -510,12 +465,7 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
   const updateActiveFileTilesL1 = useCallback(
     (tiles: Tile[]) => {
       if (!activeFileId) return;
-      console.log(`${LAYER_DIAG} updateActiveFileTilesL1 | tiles=${tilesSummary(tiles)}`);
       setFiles((prev) => {
-        const file = prev.find((f) => f.id === activeFileId);
-        if (file) {
-          console.log(`${LAYER_DIAG} updateActiveFileTilesL1 INSIDE | prevLayers=[${layerSummary(file.layers)}] (layers preserved by spread)`);
-        }
         const next = prev.map((file) =>
           file.id === activeFileId
             ? { ...file, tiles, updatedAt: Date.now() }

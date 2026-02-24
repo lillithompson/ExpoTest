@@ -231,7 +231,6 @@ const throttledFetch = async (fn: () => Promise<void>) => {
 };
 
 export const prefetchTileAssets = async (sources: unknown[]) => {
-  console.log(`[prefetchTileAssets] starting prefetch for ${sources.length} sources`);
   const tasks = sources.map(async (source) => {
     const uri = resolveSourceUri(source);
     if (!uri || !uri.toLowerCase().includes('.svg')) {
@@ -262,7 +261,6 @@ export const prefetchTileAssets = async (sources: unknown[]) => {
     });
   });
   await Promise.all(tasks);
-  console.log(`[prefetchTileAssets] finished prefetch for ${sources.length} sources`);
 };
 
 export const getSvgXmlWithOverrides = async (

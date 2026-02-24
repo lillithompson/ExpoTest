@@ -1617,11 +1617,13 @@ export default function TestScreen() {
 
   /** Internal editing level (1 = tile grid, 2 = 2×2, 3 = 4×4). No change to grid/layout. */
   const editingLevel = useMemo(() => {
-    return Math.min(
+    // Clamp to at least 1 — maxResolutionLevelFromFile is 0 for new files whose
+    // grid hasn't been persisted yet (0×0), and editingLevel < 1 is invalid.
+    return Math.max(1, Math.min(
       Math.max(1, settings.gridResolutionLevel ?? 1),
-      maxResolutionLevelFromFile,
+      maxResolutionLevelFromFile || 1,
       MAX_EDITABLE_GRID_LEVEL
-    );
+    ));
   }, [maxResolutionLevelFromFile, settings.gridResolutionLevel]);
 
   /**
@@ -1972,20 +1974,13 @@ export default function TestScreen() {
     }
     lastLayerLoadRef.current = key;
     if (editingLevel >= 2 && levelGridInfo) {
-      const _raw = activeFile.layers?.[editingLevel];
-      const _rawLen = _raw?.length ?? 0;
-      const _rawFilled = _raw?.filter((t) => t.imageIndex >= 0).length ?? 0;
-      const _normalized = normalizeTiles(_raw, levelGridInfo.cells.length, tileSources.length);
-      const _normFilled = _normalized.filter((t) => t.imageIndex >= 0).length;
-      console.log(`[LAYER-DIAG] LAYER-SYNC load | file=${activeFile.id.slice(0,8)} | editingLevel=${editingLevel} | rawLayerTiles=${_rawLen}(${_rawFilled}filled) | normalized=${_normalized.length}(${_normFilled}filled) | allLayers=[${Object.keys(activeFile.layers ?? {}).join(',')}]`);
-      loadTiles(_normalized);
+      const raw = activeFile.layers?.[editingLevel];
+      loadTiles(normalizeTiles(raw, levelGridInfo.cells.length, tileSources.length));
     } else {
       const cols = activeFile.grid?.columns ?? 0;
       const rows = activeFile.grid?.rows ?? 0;
       const n = cols * rows;
       if (n > 0) {
-        const _filled = activeFile.tiles.filter((t) => t.imageIndex >= 0).length;
-        console.log(`[LAYER-DIAG] LAYER-SYNC load L1 | file=${activeFile.id.slice(0,8)} | tiles=${activeFile.tiles.length}(${_filled}filled) | allLayers=[${Object.keys(activeFile.layers ?? {}).join(',')}]`);
         loadTiles(normalizeTiles(activeFile.tiles, n, tileSources.length));
       }
     }
@@ -2619,10 +2614,17 @@ export default function TestScreen() {
     setLoadedToken(0);
     setHydrating(true);
     setShowModifyTileSetBanner(false);
-    // Force grid resolution to L1 (finest) so the grid hook uses full level-1 dimensions.
-    // If we left a coarser layer selected (e.g. L2), the hook could receive that layer's
-    // fixedRows/fixedColumns and initialize the new file with the wrong grid size.
-    setSettings((prev) => ({ ...prev, gridResolutionLevel: 1 }));
+    // Compute the target editing level from the grid dimensions the new file
+    // will have, so we render at the correct level from the first frame and
+    // avoid a visible resolution flip.
+    const intendedGrid = (availableWidth > 0 || availableHeight > 0)
+      ? computeGridLayout(availableWidth, availableHeight, GRID_GAP, NEW_FILE_TILE_SIZE)
+      : null;
+    const intendedMaxLevel = intendedGrid
+      ? Math.min(getMaxGridResolutionLevel(intendedGrid.columns, intendedGrid.rows), MAX_EDITABLE_GRID_LEVEL)
+      : 1;
+    const targetLevel = Math.max(1, intendedMaxLevel - 1);
+    setSettings((prev) => ({ ...prev, gridResolutionLevel: targetLevel }));
     setViewMode('modify');
   }, [
     activeCategories,
@@ -2631,6 +2633,8 @@ export default function TestScreen() {
     createFile,
     activeLineWidth,
     activeLineColor,
+    availableWidth,
+    availableHeight,
     setFileSourceNames,
     setZoomRegion,
     setLoadRequestId,
@@ -2889,10 +2893,9 @@ export default function TestScreen() {
     if (isHydratingFile || loadedToken !== loadToken) {
       return false;
     }
-    // Empty files (no filled tiles) can skip the prefetch gate — there are no
+    // New files (no tiles array) can skip the prefetch gate — there are no
     // tile SVGs to render, so waiting for prefetch just delays an empty grid.
-    const hasFilledTiles = hasActiveFileTiles && tiles.some((t) => t && t.imageIndex >= 0);
-    if (!tileSourcesPrefetched && hasFilledTiles) {
+    if (!tileSourcesPrefetched && hasActiveFileTiles) {
       return false;
     }
     if (!isTileSetSourcesReadyForActiveFile || !areActiveFileSourcesResolved) {
@@ -2909,7 +2912,6 @@ export default function TestScreen() {
     loadToken,
     tileSourcesPrefetched,
     hasActiveFileTiles,
-    tiles,
     isTileSetSourcesReadyForActiveFile,
     areActiveFileSourcesResolved,
     hasMissingTileSources,
@@ -3485,14 +3487,6 @@ export default function TestScreen() {
       resetTiles();
     }
     const fileSourceNames = Array.isArray(file.sourceNames) ? file.sourceNames : [];
-    const _filledL1 = file.tiles.filter((t: { imageIndex: number }) => t.imageIndex >= 0).length;
-    const _layerKeys = file.layers ? Object.keys(file.layers) : [];
-    const _layerDetail = _layerKeys.map((k) => {
-      const arr = file.layers![Number(k)] ?? [];
-      const filled = arr.filter((t: { imageIndex: number }) => t.imageIndex >= 0).length;
-      return `L${k}:${arr.length}(${filled}filled)`;
-    }).join(', ');
-    console.log(`[LAYER-DIAG] LOAD-EFFECT | file=${file.id.slice(0,8)} | L1=${file.tiles.length}(${_filledL1}filled) | layers=[${_layerDetail || 'none'}] | grid=${file.grid.columns}x${file.grid.rows} | token=${nextToken}`);
     pendingRestoreRef.current = {
       fileId: file.id,
       tiles: file.tiles,
@@ -3504,14 +3498,18 @@ export default function TestScreen() {
       preview: Boolean(previewUri),
       sourceNames: fileSourceNames.length > 0 ? fileSourceNames : undefined,
     };
-    const maxLevel = Math.min(
-      getMaxGridResolutionLevel(file.grid.columns, file.grid.rows),
-      MAX_EDITABLE_GRID_LEVEL
-    );
-    setSettings((prev) => ({
-      ...prev,
-      gridResolutionLevel: Math.max(1, maxLevel - 1),
-    }));
+    // Only override gridResolutionLevel for files with a real grid. New files
+    // start 0×0 and handleCreateNewFile already set the level to L1.
+    if (file.grid.columns > 0 && file.grid.rows > 0) {
+      const maxLevel = Math.min(
+        getMaxGridResolutionLevel(file.grid.columns, file.grid.rows),
+        MAX_EDITABLE_GRID_LEVEL
+      );
+      setSettings((prev) => ({
+        ...prev,
+        gridResolutionLevel: Math.max(1, maxLevel - 1),
+      }));
+    }
   }, [activeFileId, loadRequestId, ready, viewMode, clearCloneSource, setSettings]);
 
   useEffect(() => {
@@ -3560,8 +3558,15 @@ export default function TestScreen() {
       setGridStabilized(false);
       return;
     }
+    // Empty files with no preview have nothing to wait for — stabilize immediately
+    // to avoid a black flash before the empty grid appears.
+    const hasPreviewToFade = Boolean(loadPreviewUri || clearPreviewUri);
+    if (!hasPreviewToFade && !hasActiveFileTiles) {
+      setGridStabilized(true);
+      return;
+    }
     const isNativeWithPreview =
-      Platform.OS !== 'web' && Boolean(loadPreviewUri || clearPreviewUri);
+      Platform.OS !== 'web' && hasPreviewToFade;
     if (isNativeWithPreview && !nativeCanvasPaintReady) {
       const delayMs = isExpoGo ? 1800 : 2500;
       const timeout = setTimeout(() => {
@@ -3590,6 +3595,7 @@ export default function TestScreen() {
     loadPreviewUri,
     clearPreviewUri,
     nativeCanvasPaintReady,
+    hasActiveFileTiles,
   ]);
 
   useEffect(() => {
@@ -3720,8 +3726,6 @@ export default function TestScreen() {
       // to avoid loading 25 L2 tiles into a 400-cell grid (which would show as data loss).
       let didLoad = false;
       if (fileDimensionsMatch) {
-        const _hasLayerData = editingLevel >= 2 && activeFile?.layers?.[editingLevel] != null && (activeFile.layers[editingLevel]?.length ?? 0) > 0;
-        console.log(`[LAYER-DIAG] RESTORE-EFFECT | file=${pending.fileId.slice(0,8)} | editingLevel=${editingLevel} | hasLayerData=${_hasLayerData} | gridLayout=${gridLayout.columns}x${gridLayout.rows} | pendingGrid=${pending.columns}x${pending.rows}`);
         const nameSource =
           pending.sourceNames && pending.sourceNames.length > 0
             ? pending.sourceNames
@@ -3762,12 +3766,8 @@ export default function TestScreen() {
         const gridCells = gridLayout.rows * gridLayout.columns;
         const expectedCells = tilesToLoad.length;
         if (gridCells === expectedCells) {
-          const _filled = tilesToLoad.filter((t) => t.imageIndex >= 0).length;
-          console.log(`[LAYER-DIAG] RESTORE-EFFECT LOAD | editingLevel=${editingLevel} | tiles=${tilesToLoad.length}(${_filled}filled) | gridCells=${gridCells}`);
           loadTiles(tilesToLoad);
           didLoad = true;
-        } else {
-          console.log(`[LAYER-DIAG] RESTORE-EFFECT SKIP (size mismatch) | gridCells=${gridCells} | expectedCells=${expectedCells} | editingLevel=${editingLevel}`);
         }
       }
       if (didLoad) {
@@ -3830,19 +3830,25 @@ export default function TestScreen() {
         setSuspendTiles(false);
         return;
       }
+      // Persist the intended grid dimensions immediately so that
+      // maxResolutionLevelFromFile / levelGridInfo / isEditingHigherLayer are
+      // correct from the first visible frame — avoids a resolution flip.
+      upsertActiveFile({
+        tiles: [],
+        gridLayout: {
+          columns: emptyBranchShape.columns,
+          rows: emptyBranchShape.rows,
+          tileSize: emptyBranchShape.tileSize,
+        },
+        preferredTileSize: pending.preferredTileSize ?? emptyBranchShape.tileSize,
+      });
       resetTiles();
       pendingRestoreRef.current = null;
       setHydrating(false);
       setSuspendTiles(false);
       setLoadedToken(pending.token ?? 0);
-      const maxLevel = Math.min(
-        getMaxGridResolutionLevel(emptyBranchShape.columns, emptyBranchShape.rows),
-        MAX_EDITABLE_GRID_LEVEL
-      );
-      setSettings((prev) => ({
-        ...prev,
-        gridResolutionLevel: Math.max(1, maxLevel - 1),
-      }));
+      // Don't change gridResolutionLevel here — handleCreateNewFile already
+      // computed and set the target level from the intended grid dimensions.
     }
   }, [
     activeFileId,
@@ -3860,6 +3866,7 @@ export default function TestScreen() {
     setSettings,
     tileSources.length,
     zoomRegion,
+    upsertActiveFile,
   ]);
 
   useEffect(() => {
@@ -3913,15 +3920,9 @@ export default function TestScreen() {
         if (fileSourceNames.length === 0 && resolvedSourceNames.length > 0) {
           setFileSourceNames(resolvedSourceNames);
         }
-        const _saveTiles = editingLevel === 1 ? fullTilesForSave : (Array.isArray(activeFile?.tiles) ? activeFile.tiles : []);
-        const _saveFilled = _saveTiles.filter((t) => t.imageIndex >= 0).length;
-        const _activeFileLayers = activeFile?.layers ? Object.keys(activeFile.layers).map((k) => {
-          const arr = activeFile.layers![Number(k)] ?? [];
-          return `L${k}:${arr.length}(${arr.filter((t) => t.imageIndex >= 0).length}filled)`;
-        }).join(', ') : 'none';
-        console.log(`[LAYER-DIAG] AUTOSAVE (150ms) | editingLevel=${editingLevel} | saveTiles=${_saveTiles.length}(${_saveFilled}filled) | activeFileLayers=[${_activeFileLayers}] | isHydrating=${isHydratingFile}`);
+        const saveTiles = editingLevel === 1 ? fullTilesForSave : (Array.isArray(activeFile?.tiles) ? activeFile.tiles : []);
         const payload: Parameters<typeof upsertActiveFile>[0] = {
-          tiles: _saveTiles,
+          tiles: saveTiles,
           gridLayout: editingLevel === 1 ? fullGridLayoutForSave : (level1LayoutForPersist ?? fullGridLayoutForSave),
           category: primaryCategory,
           categories: activeCategories,
@@ -3977,11 +3978,9 @@ export default function TestScreen() {
           if (fileSourceNames.length === 0 && resolvedSourceNames.length > 0) {
             setFileSourceNames(resolvedSourceNames);
           }
-          const _saveTiles2 = editingLevel === 1 ? fullTilesForSave : (Array.isArray(activeFile?.tiles) ? activeFile.tiles : []);
-          const _saveFilled2 = _saveTiles2.filter((t) => t.imageIndex >= 0).length;
-          console.log(`[LAYER-DIAG] AUTOSAVE (800ms preview) | editingLevel=${editingLevel} | saveTiles=${_saveTiles2.length}(${_saveFilled2}filled)`);
+          const saveTiles2 = editingLevel === 1 ? fullTilesForSave : (Array.isArray(activeFile?.tiles) ? activeFile.tiles : []);
           const payload: Parameters<typeof upsertActiveFile>[0] = {
-            tiles: _saveTiles2,
+            tiles: saveTiles2,
             gridLayout: editingLevel === 1 ? fullGridLayoutForSave : (level1LayoutForPersist ?? fullGridLayoutForSave),
             category: primaryCategory,
             categories: activeCategories,
