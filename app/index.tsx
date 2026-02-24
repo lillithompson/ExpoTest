@@ -2016,8 +2016,15 @@ export default function TestScreen() {
     fixedColumns: isEditingHigherLayer ? levelGridInfo!.levelCols : (activeFile?.grid.columns ?? 0),
     fixedTileSize: layerFixedTileSize,
     onTilesChange:
-      editingLevel >= 2
-        ? (t: Tile[]) => updateActiveFileLayer(editingLevel, t)
+      editingLevel >= 2 && viewMode === 'modify' && !isHydratingFile
+        ? (t: Tile[]) => {
+            const filled = t.filter(tile => tile.imageIndex >= 0).length;
+            console.log(`[LAYER-DIAG] onTilesChange persist | level=${editingLevel} | count=${t.length} | filled=${filled}`);
+            if (filled === 0 && t.length > 0) {
+              console.warn(`[LAYER-DIAG] WARNING: persisting all-blank tiles to layer ${editingLevel}!`, new Error().stack);
+            }
+            updateActiveFileLayer(editingLevel, t);
+          }
         : undefined,
     onClonePaint: applyCloneToFinerLayers,
     brush,
@@ -5714,6 +5721,12 @@ export default function TestScreen() {
     downloadLoadedCount >= downloadExpectedRef.current;
 
   const openFileInModifyView = async (fileId: string) => {
+    // Flush any pending finer-layer updates for the CURRENT file before switching
+    if (finerLayerFlushTimerRef.current) {
+      clearTimeout(finerLayerFlushTimerRef.current);
+      finerLayerFlushTimerRef.current = null;
+    }
+    flushFinerLayerPending();
     await persistActiveFileNow();
     const file = files.find((entry) => entry.id === fileId);
     if (!file) {
@@ -7946,6 +7959,11 @@ export default function TestScreen() {
                     setZoomRegion(null);
                   }
                 } else {
+                  if (finerLayerFlushTimerRef.current) {
+                    clearTimeout(finerLayerFlushTimerRef.current);
+                    finerLayerFlushTimerRef.current = null;
+                  }
+                  flushFinerLayerPending();
                   persistActiveFileNow();  // fire-and-forget background save
                   setViewMode('file');
                 }
@@ -7961,6 +7979,11 @@ export default function TestScreen() {
             <NavButton
               label="Modify"
               onPress={() => {
+                if (finerLayerFlushTimerRef.current) {
+                  clearTimeout(finerLayerFlushTimerRef.current);
+                  finerLayerFlushTimerRef.current = null;
+                }
+                flushFinerLayerPending();
                 persistActiveFileNow();  // fire-and-forget background save
                 setViewMode('file');
               }}

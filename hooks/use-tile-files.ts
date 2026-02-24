@@ -458,6 +458,10 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
       if (!activeFileId || level < 2) {
         return;
       }
+      const filled = tiles.filter(t => t.imageIndex >= 0).length;
+      if (filled === 0 && tiles.length > 0) {
+        console.warn(`[LAYER-DIAG] updateActiveFileLayer: writing all-blank tiles to level ${level} of file ${activeFileId}`, new Error().stack);
+      }
       setFiles((prev) => {
         const next = prev.map((file) =>
           file.id === activeFileId
