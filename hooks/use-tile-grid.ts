@@ -46,6 +46,8 @@ type Params = {
   fixedTileSize?: number;
   /** Called when tiles are updated (e.g. for persisting a resolution layer). */
   onTilesChange?: (tiles: Tile[]) => void;
+  /** Called when a clone paint operation occurs. */
+  onClonePaint?: (destFullIndex: number, sourceMappedIndex: number) => void;
   brush:
     | { mode: 'random' }
     | { mode: 'draw' }
@@ -182,6 +184,7 @@ export const useTileGrid = ({
   fixedColumns,
   fixedTileSize,
   onTilesChange,
+  onClonePaint,
   brush,
   mirrorHorizontal,
   mirrorVertical,
@@ -1590,6 +1593,7 @@ export const useTileGrid = ({
         mirrorY: sourceTile.mirrorY,
         name: sourceTile.name,
       });
+      onClonePaint?.(fullIndex, mappedIndex);
       return;
     }
     if (brush.mode === 'pattern') {

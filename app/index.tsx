@@ -1940,6 +1940,7 @@ export default function TestScreen() {
       editingLevel >= 2
         ? (t: Tile[]) => updateActiveFileLayer(editingLevel, t)
         : undefined,
+    onClonePaint: applyCloneToFinerLayers,
     brush,
     mirrorHorizontal: settings.mirrorHorizontal,
     mirrorVertical: settings.mirrorVertical,
@@ -5284,6 +5285,58 @@ export default function TestScreen() {
       }
     }
   };
+
+  const applyCloneToFinerLayers = useCallback((
+    destFullIndex: number,
+    sourceMappedIndex: number,
+  ) => {
+    if (!activeFile || editingLevel <= 1) return;
+    const gridCols = activeFile.grid.columns;
+    const gridRows = activeFile.grid.rows;
+    const editLevelCols = levelGridInfo?.levelCols ?? gridCols;
+    const editLevelRows = levelGridInfo?.levelRows ?? gridRows;
+
+    for (let M = 1; M < editingLevel; M++) {
+      const offsets = getLevelNtoMOffsets(gridCols, gridRows, editingLevel, M);
+      if (!offsets) continue;
+      const { scale, C_row, C_col } = offsets;
+      const mInfo = getLevelGridInfo(gridCols, gridRows, M);
+      if (!mInfo) continue;
+
+      const { levelCols: mCols, levelRows: mRows } = mInfo;
+      const srcRow_N = Math.floor(sourceMappedIndex / editLevelCols);
+      const srcCol_N = sourceMappedIndex % editLevelCols;
+      const dstRow_N = Math.floor(destFullIndex / editLevelCols);
+      const dstCol_N = destFullIndex % editLevelCols;
+
+      const srcStartRow_M = srcRow_N * scale + C_row;
+      const srcStartCol_M = srcCol_N * scale + C_col;
+      const dstStartRow_M = dstRow_N * scale + C_row;
+      const dstStartCol_M = dstCol_N * scale + C_col;
+
+      const sourceTiles = M === 1 ? (activeFile.tiles ?? []) : (activeFile.layers?.[M] ?? []);
+      const cellUpdates: Record<number, Tile> = {};
+
+      for (let dr = 0; dr < scale; dr++) {
+        for (let dc = 0; dc < scale; dc++) {
+          const sRow = srcStartRow_M + dr;
+          const sCol = srcStartCol_M + dc;
+          const dRow = dstStartRow_M + dr;
+          const dCol = dstStartCol_M + dc;
+          if (sRow < 0 || sRow >= mRows || sCol < 0 || sCol >= mCols) continue;
+          if (dRow < 0 || dRow >= mRows || dCol < 0 || dCol >= mCols) continue;
+          const srcTile = sourceTiles[sRow * mCols + sCol];
+          if (srcTile) {
+            cellUpdates[dRow * mCols + dCol] = { ...srcTile };
+          }
+        }
+      }
+
+      if (Object.keys(cellUpdates).length > 0) {
+        updateActiveFileLayerCells(M, cellUpdates);
+      }
+    }
+  }, [activeFile, editingLevel, levelGridInfo, updateActiveFileLayerCells]);
 
   const pendingPatternPreview = useMemo(() => {
     if (!patternSelection || gridLayout.columns === 0) {
@@ -8888,16 +8941,16 @@ export default function TestScreen() {
                         resolveUgcSourceFromName={buildUserTileSourceFromName}
                         showOverlays={showOverlays}
                         isCloneSource={
-                          editingLevel === 1 && brush.mode === 'clone' && cloneSourceIndex === cellIndex
+                          brush.mode === 'clone' && cloneSourceIndex === cellIndex
                         }
                         isCloneSample={
-                          editingLevel === 1 && brush.mode === 'clone' && cloneSampleIndex === cellIndex
+                          brush.mode === 'clone' && cloneSampleIndex === cellIndex
                         }
                         isCloneTargetOrigin={
-                          editingLevel === 1 && brush.mode === 'clone' && cloneAnchorIndex === cellIndex
+                          brush.mode === 'clone' && cloneAnchorIndex === cellIndex
                         }
                         isCloneCursor={
-                          editingLevel === 1 && brush.mode === 'clone' && cloneCursorIndex === cellIndex
+                          brush.mode === 'clone' && cloneCursorIndex === cellIndex
                         }
                         isLocked={lockedCellIndicesSet?.has(getFullIndexForCanvas(cellIndex))}
                       />
@@ -9171,16 +9224,16 @@ export default function TestScreen() {
                           resolveUgcSourceFromName={buildUserTileSourceFromName}
                           showOverlays={showOverlays}
                           isCloneSource={
-                            editingLevel === 1 && brush.mode === 'clone' && cloneSourceIndex === cellIndex
+                            brush.mode === 'clone' && cloneSourceIndex === cellIndex
                           }
                           isCloneSample={
-                            editingLevel === 1 && brush.mode === 'clone' && cloneSampleIndex === cellIndex
+                            brush.mode === 'clone' && cloneSampleIndex === cellIndex
                           }
                           isCloneTargetOrigin={
-                            editingLevel === 1 && brush.mode === 'clone' && cloneAnchorIndex === cellIndex
+                            brush.mode === 'clone' && cloneAnchorIndex === cellIndex
                           }
                           isCloneCursor={
-                            editingLevel === 1 && brush.mode === 'clone' && cloneCursorIndex === cellIndex
+                            brush.mode === 'clone' && cloneCursorIndex === cellIndex
                           }
                           isLocked={lockedCellIndicesSet?.has(getFullIndexForCanvas(cellIndex))}
                         />
