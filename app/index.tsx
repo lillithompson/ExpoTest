@@ -116,7 +116,7 @@ import {
     type Tile,
 } from '@/utils/tile-grid';
 import { displayToPatternCell, getRotatedDimensions } from '@/utils/pattern-transform';
-import { applyGroupRotationToTile, normalizeRotationCW } from '@/utils/tile-group-rotate';
+import { applyGroupRotationToTile, normalizeRotationCW, rotateCell } from '@/utils/tile-group-rotate';
 import type { CrossLayerContext } from '@/utils/cross-layer-compat';
 import { deserializePattern, deserializeTileSet, serializePattern } from '@/utils/tile-ugc-format';
 import JSZip from 'jszip';
@@ -3005,6 +3005,10 @@ export default function TestScreen() {
   }, [brush.mode, clearCloneSource]);
 
   useEffect(() => {
+    clearCloneSource();
+  }, [editingLevel, clearCloneSource]);
+
+  useEffect(() => {
     Animated.timing(selectBarAnim, {
       toValue: isSelectMode ? 1 : 0,
       duration: 180,
@@ -4957,7 +4961,7 @@ export default function TestScreen() {
    * @param isFloodComplete - if true, only fill cells where imageIndex === -1 (flood complete mode).
    */
   const applyPatternFloodToFinerLayers = (isFloodComplete: boolean) => {
-    if (!isEditingHigherLayer || !levelGridInfo || !selectedPattern || !activeFile) return;
+    if (brush.mode !== 'pattern' || !isEditingHigherLayer || !levelGridInfo || !selectedPattern || !activeFile) return;
     const patCreatedAtLevel = selectedPattern.createdAtLevel;
     // Check if any finer level has data in this pattern
     const hasFinerData = Array.from({ length: editingLevel - 1 }, (_, i) => i + 1).some(
@@ -7463,17 +7467,112 @@ export default function TestScreen() {
                       const centerCol = (minCol + maxCol) / 2;
                       const newHeight = width;
                       const newWidth = height;
+                      const cols = fullGridColumnsForMapping;
+                      const rows = fullGridRows;
                       let newMinRow = Math.round(centerRow - (newHeight - 1) / 2);
                       let newMaxRow = newMinRow + newHeight - 1;
                       let newMinCol = Math.round(centerCol - (newWidth - 1) / 2);
                       let newMaxCol = newMinCol + newWidth - 1;
-                      const cols = fullGridColumnsForMapping;
-                      const rows = fullGridRows;
                       newMinRow = Math.max(0, Math.min(newMinRow, rows - 1));
                       newMaxRow = Math.max(0, Math.min(newMaxRow, rows - 1));
                       newMinCol = Math.max(0, Math.min(newMinCol, cols - 1));
                       newMaxCol = Math.max(0, Math.min(newMaxCol, cols - 1));
-                      rotateRegion(minRow, maxRow, minCol, maxCol, cols);
+
+                      if (isEditingHigherLayer && selectionBoundsLayerGrid && levelGridInfo && activeFile) {
+                        // Rotate editing-level tiles using layer-cell coordinates
+                        const { minRow: lyrMinRow, maxRow: lyrMaxRow, minCol: lyrMinCol, maxCol: lyrMaxCol } = selectionBoundsLayerGrid;
+                        rotateRegion(lyrMinRow, lyrMaxRow, lyrMinCol, lyrMaxCol, levelGridInfo.levelCols);
+
+                        const fullCols = activeFile.grid.columns;
+                        const fullRows = activeFile.grid.rows;
+                        const emptyTile: Tile = { imageIndex: -1, rotation: 0, mirrorX: false, mirrorY: false };
+
+                        // Rotate L1 tiles (file.tiles)
+                        if (fullCols > 0 && fullRows > 0) {
+                          const l1Count = fullCols * fullRows;
+                          const l1Src = normalizeTiles(activeFile.tiles, l1Count, tileSources.length);
+                          const l1Pairs: Array<{ fromIdx: number; relR: number; relC: number; tile: Tile }> = [];
+                          for (let r = minRow; r <= maxRow; r += 1) {
+                            for (let c = minCol; c <= maxCol; c += 1) {
+                              const idx = r * fullCols + c;
+                              l1Pairs.push({ fromIdx: idx, relR: r - minRow, relC: c - minCol, tile: l1Src[idx] ?? { ...emptyTile } });
+                            }
+                          }
+                          if (l1Pairs.length > 0) {
+                            const nextL1 = [...l1Src];
+                            l1Pairs.forEach(({ fromIdx }) => { nextL1[fromIdx] = { ...emptyTile }; });
+                            l1Pairs.forEach(({ relR, relC, tile }) => {
+                              const { newR, newC } = rotateCell(relR, relC, height, width, 90);
+                              const toR = newMinRow + newR;
+                              const toC = newMinCol + newC;
+                              if (toR >= 0 && toR < fullRows && toC >= 0 && toC < fullCols) {
+                                const transformed = applyGroupRotationToTile(tile.rotation, tile.mirrorX, tile.mirrorY, 90);
+                                nextL1[toR * fullCols + toC] = { ...tile, rotation: transformed.rotation, mirrorX: transformed.mirrorX, mirrorY: transformed.mirrorY };
+                              }
+                            });
+                            updateActiveFileTilesL1(nextL1);
+                          }
+                        }
+
+                        // Rotate intermediate layers (internal levels 2..editingLevel-1)
+                        for (let M = 2; M < editingLevel; M += 1) {
+                          const levelMInfo = getLevelGridInfo(fullCols, fullRows, M);
+                          if (!levelMInfo) continue;
+                          const mCols = levelMInfo.levelCols;
+                          const mRows = levelMInfo.levelRows;
+                          const mCount = levelMInfo.cells.length;
+                          const mSrc = normalizeTiles(activeFile?.layers?.[M] ?? [], mCount, tileSources.length);
+                          let mSelMinRow = Infinity, mSelMaxRow = -Infinity, mSelMinCol = Infinity, mSelMaxCol = -Infinity;
+                          const mPairs: Array<{ fromIdx: number; mRow: number; mCol: number; tile: Tile }> = [];
+                          levelMInfo.cells.forEach((cell, idx) => {
+                            if (
+                              cell.minRow >= minRow && cell.maxRow <= maxRow &&
+                              cell.minCol >= minCol && cell.maxCol <= maxCol
+                            ) {
+                              const mRow = Math.floor(idx / mCols);
+                              const mCol = idx % mCols;
+                              if (mRow < mSelMinRow) mSelMinRow = mRow;
+                              if (mRow > mSelMaxRow) mSelMaxRow = mRow;
+                              if (mCol < mSelMinCol) mSelMinCol = mCol;
+                              if (mCol > mSelMaxCol) mSelMaxCol = mCol;
+                              mPairs.push({ fromIdx: idx, mRow, mCol, tile: mSrc[idx] ?? { ...emptyTile } });
+                            }
+                          });
+                          if (mPairs.length === 0) continue;
+                          const mSelHeight = mSelMaxRow - mSelMinRow + 1;
+                          const mSelWidth = mSelMaxCol - mSelMinCol + 1;
+                          const mCenterRow = (mSelMinRow + mSelMaxRow) / 2;
+                          const mCenterCol = (mSelMinCol + mSelMaxCol) / 2;
+                          const mNewHeight = mSelWidth;
+                          const mNewWidth = mSelHeight;
+                          let mNewMinRow = Math.round(mCenterRow - (mNewHeight - 1) / 2);
+                          let mNewMaxRow = mNewMinRow + mNewHeight - 1;
+                          let mNewMinCol = Math.round(mCenterCol - (mNewWidth - 1) / 2);
+                          let mNewMaxCol = mNewMinCol + mNewWidth - 1;
+                          mNewMinRow = Math.max(0, Math.min(mNewMinRow, mRows - 1));
+                          mNewMaxRow = Math.max(0, Math.min(mNewMaxRow, mRows - 1));
+                          mNewMinCol = Math.max(0, Math.min(mNewMinCol, mCols - 1));
+                          mNewMaxCol = Math.max(0, Math.min(mNewMaxCol, mCols - 1));
+                          const nextM = [...mSrc];
+                          mPairs.forEach(({ fromIdx }) => { nextM[fromIdx] = { ...emptyTile }; });
+                          mPairs.forEach(({ mRow, mCol, tile }) => {
+                            const relR = mRow - mSelMinRow;
+                            const relC = mCol - mSelMinCol;
+                            const { newR, newC } = rotateCell(relR, relC, mSelHeight, mSelWidth, 90);
+                            const toR = mNewMinRow + newR;
+                            const toC = mNewMinCol + newC;
+                            if (toR >= 0 && toR < mRows && toC >= 0 && toC < mCols) {
+                              const transformed = applyGroupRotationToTile(tile.rotation, tile.mirrorX, tile.mirrorY, 90);
+                              nextM[toR * mCols + toC] = { ...tile, rotation: transformed.rotation, mirrorX: transformed.mirrorX, mirrorY: transformed.mirrorY };
+                            }
+                          });
+                          updateActiveFileLayer(M, nextM);
+                        }
+                      } else {
+                        // Level 1: rotate via hook (existing behavior)
+                        rotateRegion(minRow, maxRow, minCol, maxCol, cols);
+                      }
+
                       const newStart = newMinRow * cols + newMinCol;
                       const newEnd = newMaxRow * cols + newMaxCol;
                       setCanvasSelection({ start: newStart, end: newEnd });
@@ -8474,10 +8573,10 @@ export default function TestScreen() {
                   strokeScaleByName={strokeScaleByName}
                   showDebug={settings.showDebug}
                   showOverlays={showOverlays}
-                  cloneSourceIndex={editingLevel === 1 && brush.mode === 'clone' ? cloneSourceIndex : null}
-                  cloneSampleIndex={editingLevel === 1 && brush.mode === 'clone' ? cloneSampleIndex : null}
-                  cloneAnchorIndex={editingLevel === 1 && brush.mode === 'clone' ? cloneAnchorIndex : null}
-                  cloneCursorIndex={editingLevel === 1 && brush.mode === 'clone' ? cloneCursorIndex : null}
+                  cloneSourceIndex={brush.mode === 'clone' ? cloneSourceIndex : null}
+                  cloneSampleIndex={brush.mode === 'clone' ? cloneSampleIndex : null}
+                  cloneAnchorIndex={brush.mode === 'clone' ? cloneAnchorIndex : null}
+                  cloneCursorIndex={brush.mode === 'clone' ? cloneCursorIndex : null}
                   lockedCellIndices={lockedCellIndicesArray}
                   lockedBoundaryEdges={lockedBoundaryEdges}
                   onPaintReady={
