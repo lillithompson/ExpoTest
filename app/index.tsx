@@ -4893,6 +4893,22 @@ export default function TestScreen() {
     const clampMaxR = Math.min(visRows - 1, visMaxRow);
     const clampMinC = Math.max(0, visMinCol);
     const clampMaxC = Math.min(visCols - 1, visMaxCol);
+
+    // When editing a higher layer and not zoomed, derive pixel bounds from levelGridInfo.cells + level-1 stride
+    if (!zoomed && isEditingHigherLayer && levelGridInfo && level1DisplayLayout && level1DisplayLayout.tileSize > 0) {
+      const l1Stride = level1DisplayLayout.tileSize + GRID_GAP;
+      const startCellIdx = clampMinR * levelGridInfo.levelCols + clampMinC;
+      const endCellIdx = clampMaxR * levelGridInfo.levelCols + clampMaxC;
+      const startCell = levelGridInfo.cells[startCellIdx];
+      const endCell = levelGridInfo.cells[endCellIdx];
+      if (!startCell || !endCell) return null;
+      const left = startCell.minCol * l1Stride;
+      const top = startCell.minRow * l1Stride;
+      const right = (endCell.maxCol + 1) * l1Stride - (GRID_GAP > 0 ? GRID_GAP : 0);
+      const bottom = (endCell.maxRow + 1) * l1Stride - (GRID_GAP > 0 ? GRID_GAP : 0);
+      return { left, top, width: right - left, height: bottom - top };
+    }
+
     const width = (clampMaxC - clampMinC + 1) * tileStride - (GRID_GAP > 0 ? GRID_GAP : 0);
     const height = (clampMaxR - clampMinR + 1) * tileStride - (GRID_GAP > 0 ? GRID_GAP : 0);
     return {
@@ -4901,7 +4917,7 @@ export default function TestScreen() {
       width,
       height,
     };
-  }, [isMoveMode, canvasSelection, moveDragOffset, selectionBoundsFullGrid, selectionBoundsLayerGrid, isEditingHigherLayer, gridLayout, zoomRegion, level1DisplayLayout.tileSize]);
+  }, [isMoveMode, canvasSelection, moveDragOffset, selectionBoundsFullGrid, selectionBoundsLayerGrid, isEditingHigherLayer, gridLayout, zoomRegion, level1DisplayLayout, levelGridInfo]);
 
   const handlePatternStampDragStart = useCallback((patternId: string, rotation: number, mirrorX: boolean) => {
     isStampDraggingRef.current = true;
@@ -5196,6 +5212,24 @@ export default function TestScreen() {
     }
     const anchorRow = Math.floor(patternAnchorIndex / gridLayout.columns);
     const anchorCol = patternAnchorIndex % gridLayout.columns;
+
+    // When editing a higher layer, derive pixel bounds from levelGridInfo.cells + level-1 stride
+    if (isEditingHigherLayer && levelGridInfo && level1DisplayLayout && level1DisplayLayout.tileSize > 0) {
+      const l1Stride = level1DisplayLayout.tileSize + GRID_GAP;
+      const endRow = Math.min(anchorRow + heightCells - 1, levelGridInfo.levelRows - 1);
+      const endCol = Math.min(anchorCol + widthCells - 1, levelGridInfo.levelCols - 1);
+      const startCellIdx = anchorRow * levelGridInfo.levelCols + anchorCol;
+      const endCellIdx = endRow * levelGridInfo.levelCols + endCol;
+      const startCell = levelGridInfo.cells[startCellIdx];
+      const endCell = levelGridInfo.cells[endCellIdx];
+      if (!startCell || !endCell) return null;
+      const left = startCell.minCol * l1Stride;
+      const top = startCell.minRow * l1Stride;
+      const right = (endCell.maxCol + 1) * l1Stride - (GRID_GAP > 0 ? GRID_GAP : 0);
+      const bottom = (endCell.maxRow + 1) * l1Stride - (GRID_GAP > 0 ? GRID_GAP : 0);
+      return { left, top, width: right - left, height: bottom - top };
+    }
+
     const tileStride = gridLayout.tileSize + GRID_GAP;
     const width = widthCells * tileStride - (GRID_GAP > 0 ? GRID_GAP : 0);
     const height = heightCells * tileStride - (GRID_GAP > 0 ? GRID_GAP : 0);
@@ -5214,6 +5248,9 @@ export default function TestScreen() {
     patternRotations,
     gridLayout.columns,
     gridLayout.tileSize,
+    isEditingHigherLayer,
+    levelGridInfo,
+    level1DisplayLayout,
   ]);
 
   const handleSavePattern = () => {
