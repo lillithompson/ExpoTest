@@ -301,9 +301,9 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
         return;
       }
       setFiles((prev) => {
-        const next = prev.map((file) =>
-          file.id === activeFileId
-            ? {
+        const next = prev.map((file) => {
+          if (file.id !== activeFileId) return file;
+          return {
                 ...file,
                 tiles: payload.tiles,
                 grid: { rows: payload.gridLayout.rows, columns: payload.gridLayout.columns },
@@ -333,9 +333,8 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
                     ? payload.lockedCells
                     : file.lockedCells,
                 updatedAt: Date.now(),
-              }
-            : file
-        );
+              };
+        });
         void persistFiles(next, activeFileId);
         return next;
       });

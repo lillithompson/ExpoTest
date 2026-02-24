@@ -142,11 +142,10 @@ export function LayerSidePanel({
       {/* Backdrop to dismiss slide-out */}
       {expandedLayer !== null && (
         <Pressable
-          style={StyleSheet.absoluteFill}
+          style={[StyleSheet.absoluteFill, { pointerEvents: 'auto' }]}
           onPress={collapseAll}
           accessibilityRole="button"
           accessibilityLabel="Close layer panel"
-          pointerEvents="auto"
         />
       )}
 
@@ -155,8 +154,8 @@ export function LayerSidePanel({
         style={[
           styles.buttonColumn,
           { left: buttonLeft, top: topOffset, gap },
+          { pointerEvents: 'box-none' },
         ]}
-        pointerEvents="box-none"
       >
         {Array.from({ length: maxDisplayLevel }, (_, i) => i + 1).map((displayLevel) => {
           const internalLevel = maxDisplayLevel - displayLevel + 1;
@@ -212,8 +211,7 @@ export function LayerSidePanel({
           return (
             <View
               key={internalLevel}
-              style={styles.buttonRow}
-              pointerEvents="box-none"
+              style={[styles.buttonRow, { pointerEvents: 'box-none' }]}
             >
               {/*
                * Hidden measurer: absolutely positioned so it doesn't constrain to the
@@ -221,8 +219,7 @@ export function LayerSidePanel({
                * captures that width so all slide-outs animate to the same measured size.
                */}
               <View
-                pointerEvents="none"
-                style={styles.slideOutMeasurer}
+                style={[styles.slideOutMeasurer, { pointerEvents: 'none' }]}
                 onLayout={(e) => handleMeasure(internalLevel, e.nativeEvent.layout.width)}
               >
                 <Text style={styles.slideOutLabel} numberOfLines={1}>{resolutionLabel}</Text>
@@ -233,7 +230,6 @@ export function LayerSidePanel({
 
               {isExpanded && (
                 <View
-                  pointerEvents="none"
                   style={[
                     styles.buttonWhiteFill,
                     {
@@ -242,6 +238,7 @@ export function LayerSidePanel({
                       borderTopLeftRadius: borderRadius,
                       borderBottomLeftRadius: borderRadius,
                     },
+                    { pointerEvents: 'none' },
                   ]}
                 />
               )}
@@ -287,8 +284,7 @@ export function LayerSidePanel({
                 {/* Radial gradient fill — compact mode only */}
                 {!isFullMode && (
                   <Svg
-                    style={StyleSheet.absoluteFill}
-                    pointerEvents="none"
+                    style={[StyleSheet.absoluteFill, { pointerEvents: 'none' }]}
                     width={COMPACT_BUTTON_SIZE}
                     height={COMPACT_BUTTON_SIZE}
                   >
@@ -323,8 +319,7 @@ export function LayerSidePanel({
 
               {/* Slide-out panel — width animates 0 → slideOutWidth */}
               <Animated.View
-                style={[styles.slideOut, { width: anim, height: buttonSize }]}
-                pointerEvents={isExpanded ? 'box-none' : 'none'}
+                style={[styles.slideOut, { width: anim, height: buttonSize }, { pointerEvents: isExpanded ? 'box-none' : 'none' }]}
               >
                 <View style={contentStyle}>
                   <Text style={styles.slideOutLabel} numberOfLines={1}>
