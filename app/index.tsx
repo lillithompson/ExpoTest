@@ -4596,15 +4596,25 @@ export default function TestScreen() {
     const tileStride = effectiveTileSize + GRID_GAP;
     const rawCol = Math.floor(canvasX / tileStride) - Math.floor(displayW / 2);
     const rawRow = Math.floor(canvasY / tileStride) - Math.floor(displayH / 2);
-    // Snap to the pattern's level cell boundaries so the outline only lands on valid grid positions.
-    const snappedCol = offsets
-      ? Math.round((rawCol - offsets.C_col) / offsets.scale) * offsets.scale + offsets.C_col
-      : rawCol;
-    const snappedRow = offsets
-      ? Math.round((rawRow - offsets.C_row) / offsets.scale) * offsets.scale + offsets.C_row
-      : rawRow;
-    const col = Math.max(0, Math.min(effectiveCols - displayW, snappedCol));
-    const row = Math.max(0, Math.min(effectiveRows - displayH, snappedRow));
+    let col: number;
+    let row: number;
+    if (offsets) {
+      // Clamp in level-N cell-index space so the anchor always lands on a complete cell.
+      const levelInfo = getLevelGridInfo(gc, gr, mainLevel);
+      if (!levelInfo || levelInfo.levelCols < rotW_native || levelInfo.levelRows < rotH_native) {
+        setStampDropCell(null);
+        return;
+      }
+      const rawI = Math.round((rawCol - offsets.C_col) / offsets.scale);
+      const rawJ = Math.round((rawRow - offsets.C_row) / offsets.scale);
+      const clampedI = Math.max(0, Math.min(levelInfo.levelCols - rotW_native, rawI));
+      const clampedJ = Math.max(0, Math.min(levelInfo.levelRows - rotH_native, rawJ));
+      col = offsets.C_col + clampedI * offsets.scale;
+      row = offsets.C_row + clampedJ * offsets.scale;
+    } else {
+      col = Math.max(0, Math.min(effectiveCols - displayW, rawCol));
+      row = Math.max(0, Math.min(effectiveRows - displayH, rawRow));
+    }
     if (
       canvasX >= 0 &&
       canvasY >= 0 &&
@@ -4638,14 +4648,19 @@ export default function TestScreen() {
         if (canvasX >= 0 && canvasY >= 0 && canvasX < effectiveCols * tileStride && canvasY < effectiveRows * tileStride) {
           const rawCol = Math.floor(canvasX / tileStride) - Math.floor(displayW / 2);
           const rawRow = Math.floor(canvasY / tileStride) - Math.floor(displayH / 2);
-          const snappedCol = offsets
-            ? Math.round((rawCol - offsets.C_col) / offsets.scale) * offsets.scale + offsets.C_col
-            : rawCol;
-          const snappedRow = offsets
-            ? Math.round((rawRow - offsets.C_row) / offsets.scale) * offsets.scale + offsets.C_row
-            : rawRow;
-          const col = Math.max(0, Math.min(effectiveCols - displayW, snappedCol));
-          const row = Math.max(0, Math.min(effectiveRows - displayH, snappedRow));
+          let col: number;
+          let row: number;
+          if (offsets) {
+            const levelInfo = getLevelGridInfo(gc, gr, mainLevel);
+            if (!levelInfo || levelInfo.levelCols < rotW_native || levelInfo.levelRows < rotH_native) return;
+            const rawI = Math.round((rawCol - offsets.C_col) / offsets.scale);
+            const rawJ = Math.round((rawRow - offsets.C_row) / offsets.scale);
+            col = offsets.C_col + Math.max(0, Math.min(levelInfo.levelCols - rotW_native, rawI)) * offsets.scale;
+            row = offsets.C_row + Math.max(0, Math.min(levelInfo.levelRows - rotH_native, rawJ)) * offsets.scale;
+          } else {
+            col = Math.max(0, Math.min(effectiveCols - displayW, rawCol));
+            row = Math.max(0, Math.min(effectiveRows - displayH, rawRow));
+          }
           setPendingStampCell({ row, col });
           setPendingStampPatternId(patternId);
           setShowStampConfirmDialog(true);
