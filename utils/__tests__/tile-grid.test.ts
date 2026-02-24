@@ -10,6 +10,7 @@ import {
     getLevelCellIndexForPoint,
     getLevelGridInfo,
     getLevelKRange,
+    getLevelNtoMOffsets,
     getMaxGridResolutionLevel,
     getSpiralCellOrder,
     getSpiralCellOrderInRect,
@@ -571,5 +572,68 @@ describe('migrateLegacyLockedCells', () => {
     // Old index 5 = row 1, col 1 → new row 1, col 2 = 1*6+2 = 8
     expect(result).toContain(1);
     expect(result).toContain(8);
+  });
+});
+
+describe('getLevelNtoMOffsets', () => {
+  it('power-of-2 grid (8x8) level 2→1: C_row=0, C_col=0', () => {
+    const result = getLevelNtoMOffsets(8, 8, 2, 1);
+    expect(result).not.toBeNull();
+    expect(result!.scale).toBe(2);
+    expect(result!.C_row).toBe(0);
+    expect(result!.C_col).toBe(0);
+  });
+
+  it('non-power-of-2 (7x7) level 2→1: C_row=-1, C_col=-1', () => {
+    const result = getLevelNtoMOffsets(7, 7, 2, 1);
+    expect(result).not.toBeNull();
+    expect(result!.scale).toBe(2);
+    expect(result!.C_row).toBe(-1);
+    expect(result!.C_col).toBe(-1);
+  });
+
+  it('round-trip: level-N cell maps to correct L1 position matching getLevelGridInfo full bounds', () => {
+    const cols = 10;
+    const rows = 8;
+    const levelN = 2;
+    const infoN = getLevelGridInfo(cols, rows, levelN)!;
+    const offsets = getLevelNtoMOffsets(cols, rows, levelN, 1)!;
+    // For each level-N cell (row j, col i), the mapped L1 origin should match
+    // the cell's full (unclamped) bounds — use fullMin* for partial cells, min* for complete.
+    for (let j = 0; j < infoN.levelRows; j++) {
+      for (let i = 0; i < infoN.levelCols; i++) {
+        const cell = infoN.cells[j * infoN.levelCols + i];
+        const expectedL1Row = j * offsets.scale + offsets.C_row;
+        const expectedL1Col = i * offsets.scale + offsets.C_col;
+        const cellFullMinRow = cell.fullMinRow ?? cell.minRow;
+        const cellFullMinCol = cell.fullMinCol ?? cell.minCol;
+        expect(expectedL1Row).toBe(cellFullMinRow);
+        expect(expectedL1Col).toBe(cellFullMinCol);
+      }
+    }
+  });
+
+  it('multi-hop consistency: 3→2→1 composed equals direct 3→1', () => {
+    const cols = 10;
+    const rows = 8;
+    const off3to2 = getLevelNtoMOffsets(cols, rows, 3, 2)!;
+    const off2to1 = getLevelNtoMOffsets(cols, rows, 2, 1)!;
+    const off3to1 = getLevelNtoMOffsets(cols, rows, 3, 1)!;
+    // Composing: L3 cell (j, i) → L2 cell (j*s32 + C32_row, i*s32 + C32_col)
+    // → L1 cell ((j*s32 + C32_row)*s21 + C21_row, ...)
+    // = j*s32*s21 + C32_row*s21 + C21_row
+    // Direct: j*s31 + C31_row
+    expect(off3to2.scale * off2to1.scale).toBe(off3to1.scale);
+    const composedCRow = off3to2.C_row * off2to1.scale + off2to1.C_row;
+    const composedCCol = off3to2.C_col * off2to1.scale + off2to1.C_col;
+    expect(composedCRow).toBe(off3to1.C_row);
+    expect(composedCCol).toBe(off3to1.C_col);
+  });
+
+  it('returns null for invalid level combos', () => {
+    expect(getLevelNtoMOffsets(8, 8, 1, 1)).toBeNull();
+    expect(getLevelNtoMOffsets(8, 8, 1, 2)).toBeNull();
+    expect(getLevelNtoMOffsets(8, 8, 2, 2)).toBeNull();
+    expect(getLevelNtoMOffsets(8, 8, 0, 1)).toBeNull();
   });
 });

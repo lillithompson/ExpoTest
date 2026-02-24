@@ -113,7 +113,9 @@ import {
     getLevelCellIndexForPoint,
     getLevelGridInfo,
     getLevelKRange,
+    getLevelNtoMOffsets,
     getMaxGridResolutionLevel,
+    getPatternFloodOrigin,
     hydrateTilesWithSourceNames,
     normalizeTiles,
     type LevelGridInfo,
@@ -750,57 +752,6 @@ const TileCell = memo(
     prev.isCloneCursor === next.isCloneCursor
 );
 
-/**
- * Computes the coordinate offset from level-N (coarser) cells to level-M (finer) cells.
- * Level-N cell (j, i) maps to level-M cells at rows [j*scale+C_row .. j*scale+C_row+scale-1]
- * and cols [i*scale+C_col .. i*scale+C_col+scale-1].
- */
-function getLevelNtoMOffsets(
-  columns: number,
-  rows: number,
-  levelN: number,
-  levelM: number
-): { scale: number; C_row: number; C_col: number } | null {
-  if (levelN <= levelM || levelN < 2 || levelM < 1) return null;
-  const cellTilesN = Math.pow(2, levelN - 1);
-  const cellTilesM = Math.pow(2, levelM - 1);
-  const scale = Math.round(cellTilesN / cellTilesM);
-  const centerCol = Math.floor(columns / 2);
-  const centerRow = Math.floor(rows / 2);
-  const vRangeN = getLevelKRange(centerCol, columns, cellTilesN);
-  const vRangeM = levelM === 1 ? { kMin: 0 } : getLevelKRange(centerCol, columns, cellTilesM);
-  const hRangeN = getLevelKRange(centerRow, rows, cellTilesN);
-  const hRangeM = levelM === 1 ? { kMin: 0 } : getLevelKRange(centerRow, rows, cellTilesM);
-  if (!vRangeN || !vRangeM || !hRangeN || !hRangeM) return null;
-  return {
-    scale,
-    C_row: hRangeN.kMin * scale - hRangeM.kMin,
-    C_col: vRangeN.kMin * scale - vRangeM.kMin,
-  };
-}
-
-/**
- * Returns the pattern tiling origin for flood fill at `editingLevel`, expressed in
- * editingLevel coordinate space. The origin is the cell in editingLevel that corresponds
- * to the coarsest-level grid's (row=0, col=0), ensuring all levels tile in lockstep.
- */
-function getPatternFloodOrigin(
-  gridCols: number,
-  gridRows: number,
-  pat: { createdAtLevel?: number; layerTiles?: Record<number, unknown> },
-  editingLevel: number
-): { row: number; col: number } {
-  const createdAt = pat.createdAtLevel ?? 1;
-  const allLevels = [
-    createdAt,
-    ...Object.keys(pat.layerTiles ?? {}).map(Number),
-  ];
-  const coarsestLevel = Math.max(...allLevels);
-  if (coarsestLevel <= editingLevel) return { row: 0, col: 0 };
-  const offsets = getLevelNtoMOffsets(gridCols, gridRows, coarsestLevel, editingLevel);
-  if (!offsets) return { row: 0, col: 0 };
-  return { row: offsets.C_row, col: offsets.C_col };
-}
 
 /**
  * Compute a pattern tile at (row, col) using explicit pattern data.
@@ -1707,11 +1658,9 @@ export default function TestScreen() {
     }
   }, [updateActiveFileLayerCells]);
 
-  /** Schedule a debounced flush of finer-layer pending updates (150 ms). */
+  /** Schedule a throttled flush of finer-layer pending updates (150 ms). */
   const scheduleFinerLayerFlush = useCallback(() => {
-    if (finerLayerFlushTimerRef.current) {
-      clearTimeout(finerLayerFlushTimerRef.current);
-    }
+    if (finerLayerFlushTimerRef.current) return;
     finerLayerFlushTimerRef.current = setTimeout(() => {
       finerLayerFlushTimerRef.current = null;
       flushFinerLayerPending();
