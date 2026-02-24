@@ -4197,8 +4197,81 @@ export default function TestScreen() {
   const clearCanvas = () => {
     clearSequenceRef.current += 1;
     if (canvasSelection) {
-      if (!canEditCurrentLayer) return;
-      resetTiles();
+      const emptyTile = { imageIndex: -1, rotation: 0, mirrorX: false, mirrorY: false };
+      const fullCols = activeFile?.grid?.columns ?? 0;
+      const fullRows = activeFile?.grid?.rows ?? 0;
+      // resetTiles handles undo, mirrors, and locked cells for the current editing layer
+      if (canEditCurrentLayer) {
+        resetTiles();
+      }
+      // Clear selected region on all OTHER unlocked/visible layers
+      if (activeFile && fullCols > 0 && fullRows > 0) {
+        const startRow = Math.floor(canvasSelection.start / fullCols);
+        const startCol = canvasSelection.start % fullCols;
+        const endRow = Math.floor(canvasSelection.end / fullCols);
+        const endCol = canvasSelection.end % fullCols;
+        const minRow = Math.min(startRow, endRow);
+        const maxRow = Math.max(startRow, endRow);
+        const minCol = Math.min(startCol, endCol);
+        const maxCol = Math.max(startCol, endCol);
+        // Clear L1 if not the current editing level
+        if (editingLevel !== 1 && !isLayerLocked(activeFile, 1) && isLayerVisible(activeFile, 1)) {
+          const lockedL1Set = new Set(activeFile.lockedCells ?? []);
+          const currentL1 = activeFile.tiles ? [...activeFile.tiles] : buildInitialTiles(fullRows * fullCols);
+          for (let r = minRow; r <= maxRow; r++) {
+            for (let c = minCol; c <= maxCol; c++) {
+              const idx = r * fullCols + c;
+              if (!lockedL1Set.has(idx) && idx < currentL1.length) {
+                currentL1[idx] = { ...emptyTile };
+              }
+            }
+          }
+          upsertActiveFile({
+            ...activeFile,
+            tiles: currentL1,
+            gridLayout: {
+              rows: fullRows,
+              columns: fullCols,
+              tileSize: activeFile.preferredTileSize,
+            },
+            category: activeFile.category,
+            categories: activeFile.categories,
+            preferredTileSize: activeFile.preferredTileSize,
+          });
+        }
+        // Clear L2 if not the current editing level
+        if (editingLevel !== 2 && level2GridInfo && !isLayerLocked(activeFile, 2) && isLayerVisible(activeFile, 2)) {
+          const lockedL2Set = new Set(activeFile.lockedCellsPerLayer?.[2] ?? []);
+          const l2Count = level2GridInfo.cells.length;
+          const currentL2 = activeFile.layers?.[2] ? [...activeFile.layers[2]] : Array.from({ length: l2Count }, () => ({ ...emptyTile }));
+          level2GridInfo.cells.forEach((cell, idx) => {
+            if (
+              cell.minRow >= minRow && cell.maxRow <= maxRow &&
+              cell.minCol >= minCol && cell.maxCol <= maxCol &&
+              !lockedL2Set.has(idx)
+            ) {
+              if (idx < currentL2.length) currentL2[idx] = { ...emptyTile };
+            }
+          });
+          updateActiveFileLayer(2, currentL2);
+        }
+        // Clear L3 if not the current editing level
+        if (editingLevel !== 3 && level3GridInfo && !isLayerLocked(activeFile, 3) && isLayerVisible(activeFile, 3)) {
+          const lockedL3Set = new Set(activeFile.lockedCellsPerLayer?.[3] ?? []);
+          const l3Count = level3GridInfo.cells.length;
+          const currentL3 = activeFile.layers?.[3] ? [...activeFile.layers[3]] : Array.from({ length: l3Count }, () => ({ ...emptyTile }));
+          level3GridInfo.cells.forEach((cell, idx) => {
+            if (
+              cell.minRow >= minRow && cell.maxRow <= maxRow &&
+              cell.minCol >= minCol && cell.maxCol <= maxCol &&
+              !lockedL3Set.has(idx)
+            ) {
+              if (idx < currentL3.length) currentL3[idx] = { ...emptyTile };
+            }
+          });
+          updateActiveFileLayer(3, currentL3);
+        }
+      }
       return;
     }
     const clearId = clearSequenceRef.current;
@@ -4222,9 +4295,35 @@ export default function TestScreen() {
             return next;
           })();
     const l2Count = level2GridInfo?.cells.length ?? 0;
-    const emptyL2 = Array.from({ length: l2Count }, () => ({ ...emptyTile }));
+    const lockedL2 = new Set(activeFile?.lockedCellsPerLayer?.[2] ?? []);
+    const emptyL2 =
+      l2Count <= 0
+        ? []
+        : (() => {
+            const next = Array.from({ length: l2Count }, () => ({ ...emptyTile }));
+            if (lockedL2.size > 0) {
+              const currentL2 = activeFile?.layers?.[2] ?? [];
+              lockedL2.forEach((i) => {
+                if (i >= 0 && i < currentL2.length && currentL2[i]) next[i] = { ...currentL2[i] };
+              });
+            }
+            return next;
+          })();
     const l3Count = level3GridInfo?.cells.length ?? 0;
-    const emptyL3 = Array.from({ length: l3Count }, () => ({ ...emptyTile }));
+    const lockedL3 = new Set(activeFile?.lockedCellsPerLayer?.[3] ?? []);
+    const emptyL3 =
+      l3Count <= 0
+        ? []
+        : (() => {
+            const next = Array.from({ length: l3Count }, () => ({ ...emptyTile }));
+            if (lockedL3.size > 0) {
+              const currentL3 = activeFile?.layers?.[3] ?? [];
+              lockedL3.forEach((i) => {
+                if (i >= 0 && i < currentL3.length && currentL3[i]) next[i] = { ...currentL3[i] };
+              });
+            }
+            return next;
+          })();
     const newTiles =
       activeFile && isLayerLocked(activeFile, 1) ? (activeFile.tiles ?? []) : emptyL1;
     const newL2 =
