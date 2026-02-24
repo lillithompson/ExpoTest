@@ -561,10 +561,10 @@ function GridBackground({
   );
   return (
     <View
-      pointerEvents="none"
       style={[
         styles.gridBackground,
         { width, height, backgroundColor },
+        { pointerEvents: 'none' },
       ]}
     >
       {strokeWidth > 0 &&
@@ -704,20 +704,19 @@ const TileCell = memo(
         >
           {tileContent != null ? (
             <View
-              style={StyleSheet.absoluteFill}
-              pointerEvents={Platform.OS === 'web' ? 'none' : 'auto'}
+              style={[StyleSheet.absoluteFill, { pointerEvents: Platform.OS === 'web' ? 'none' : 'auto' }]}
             >
               {tileContent}
             </View>
           ) : null}
           {showOverlays && isCloneTargetOrigin && (
-            <View pointerEvents="none" style={styles.cloneTargetOrigin} />
+            <View style={[styles.cloneTargetOrigin, { pointerEvents: 'none' }]} />
           )}
           {showOverlays && isCloneCursor && (
-            <View pointerEvents="none" style={styles.cloneCursor} />
+            <View style={[styles.cloneCursor, { pointerEvents: 'none' }]} />
           )}
           {showOverlays && isCloneSample && (
-            <View pointerEvents="none" style={styles.cloneSample} />
+            <View style={[styles.cloneSample, { pointerEvents: 'none' }]} />
           )}
           {showOverlays && showDebug && <TileDebugOverlay connections={connections} />}
         </View>
@@ -952,6 +951,20 @@ export default function TestScreen() {
     start: number;
     end: number;
   } | null>(null);
+  // Refs for stable ModifyPalette callbacks (avoid re-creating closures every render)
+  const brushRef = useRef(brush);
+  brushRef.current = brush;
+  const paletteRotationsRef = useRef(paletteRotations);
+  paletteRotationsRef.current = paletteRotations;
+  const paletteMirrorsRef = useRef(paletteMirrors);
+  paletteMirrorsRef.current = paletteMirrors;
+  const paletteMirrorsYRef = useRef(paletteMirrorsY);
+  paletteMirrorsYRef.current = paletteMirrorsY;
+  const paletteSourcesRef = useRef<typeof paletteSources>(undefined as any);
+  const isSelectionModeRef = useRef(isSelectionMode);
+  isSelectionModeRef.current = isSelectionMode;
+  const canvasSelectionRef = useRef(canvasSelection);
+  canvasSelectionRef.current = canvasSelection;
   const [zoomRegion, setZoomRegion] = useState<{
     minRow: number;
     maxRow: number;
@@ -1153,6 +1166,7 @@ export default function TestScreen() {
     paletteProfileLogParent('paletteSources', performance.now() - t0, `sources=${result.length}`);
     return result;
   }, [activeCategories, selectedTileSetIds, getSourcesForSelection]);
+  paletteSourcesRef.current = paletteSources;
   const allSourceLookup = useMemo(() => {
     const map = new Map<string, TileSource>();
     TILE_CATEGORIES.forEach((category) => {
@@ -1317,15 +1331,16 @@ export default function TestScreen() {
     },
     [resolveSourceName, getSourcesForSelection, selectedCategories, selectedTileSetIds]
   );
+  const activeFileSourceNamesProp = activeFile?.sourceNames;
   const rawActiveFileSourceNames = useMemo(() => {
-    if (activeFile && Array.isArray(activeFile.sourceNames) && activeFile.sourceNames.length > 0) {
-      return activeFile.sourceNames;
+    if (Array.isArray(activeFileSourceNamesProp) && activeFileSourceNamesProp.length > 0) {
+      return activeFileSourceNamesProp;
     }
     if (fileSourceNames.length > 0) {
       return fileSourceNames;
     }
     return [];
-  }, [activeFile, fileSourceNames]);
+  }, [activeFileSourceNamesProp, fileSourceNames]);
   const activeFileSourceNames = useMemo(() => {
     if (rawActiveFileSourceNames.length === 0) {
       return fileSourceNames;
@@ -1336,9 +1351,11 @@ export default function TestScreen() {
     const hasNew = fileSourceNames.some((name) => !rawActiveFileSourceNames.includes(name));
     return hasNew ? fileSourceNames : rawActiveFileSourceNames;
   }, [rawActiveFileSourceNames, fileSourceNames]);
+  const activeFileTilesProp = activeFile?.tiles;
+  const activeFileTileSetIdsProp = activeFile?.tileSetIds;
   const tileSources = useMemo(() => {
     const stored = activeFileSourceNames;
-    const tileSetIds = Array.isArray(activeFile?.tileSetIds) ? activeFile.tileSetIds : [];
+    const tileSetIds = Array.isArray(activeFileTileSetIdsProp) ? activeFileTileSetIdsProp : [];
     const paletteLookup = new Map<string, TileSource>();
     paletteSources.forEach((source) => {
       if (!paletteLookup.has(source.name)) {
@@ -1346,8 +1363,11 @@ export default function TestScreen() {
       }
     });
     if (stored.length === 0) {
-      if (activeFile && Array.isArray(activeFile.tiles) && activeFile.tiles.length > 0) {
-        return getSourcesForFile(activeFile);
+      if (activeFileTilesProp && Array.isArray(activeFileTilesProp) && activeFileTilesProp.length > 0) {
+        // Need full file object for getSourcesForFile; construct minimal snapshot
+        // from properties already tracked in deps
+        const file = activeFile;
+        if (file) return getSourcesForFile(file);
       }
       return paletteSources;
     }
@@ -1362,7 +1382,8 @@ export default function TestScreen() {
       );
     });
   }, [
-    activeFile,
+    activeFileTileSetIdsProp,
+    activeFileTilesProp,
     activeFileSourceNames,
     paletteSources,
     resolveSourceName,
@@ -1402,6 +1423,8 @@ export default function TestScreen() {
     });
     return indexByName;
   }, [tileSources]);
+  const tileIndexByNameRef = useRef(tileIndexByName);
+  tileIndexByNameRef.current = tileIndexByName;
   const tileSourcesSignature = useMemo(
     () =>
       tileSources
@@ -1484,6 +1507,8 @@ export default function TestScreen() {
     },
     [fileSourceNames, activeFileSourceNames]
   );
+  const ensureFileSourceNamesRef = useRef(ensureFileSourceNames);
+  ensureFileSourceNamesRef.current = ensureFileSourceNames;
   const tileSourcesKey = useMemo(
     () => tileSources.map((source) => source.name).join('|'),
     [tileSources]
@@ -1935,8 +1960,9 @@ export default function TestScreen() {
     if (
       lastLayerLoadRef.current.editingLevel === key.editingLevel &&
       lastLayerLoadRef.current.fileId === key.fileId
-    )
+    ) {
       return;
+    }
     lastLayerLoadRef.current = key;
     if (editingLevel >= 2 && levelGridInfo) {
       loadTiles(
@@ -2524,6 +2550,10 @@ export default function TestScreen() {
   const ignoreMouseAfterTouchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const previewSaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const prevPreviewUriRef = useRef<string | undefined>(activeFile?.previewUri);
+  const prevThumbnailUriRef = useRef<string | undefined>(activeFile?.thumbnailUri);
+  prevPreviewUriRef.current = activeFile?.previewUri;
+  prevThumbnailUriRef.current = activeFile?.thumbnailUri;
   const loadTokenRef = useRef(0);
   const isHydratingFileRef = useRef(false);
   const interactionStartRef = useRef<{ id: number; time: number } | null>(null);
@@ -2637,9 +2667,11 @@ export default function TestScreen() {
     [files, downloadTargetId]
   );
   const activeFileTileSetIds = useMemo(
-    () => (Array.isArray(activeFile?.tileSetIds) ? activeFile.tileSetIds : []),
-    [activeFile]
+    () => (Array.isArray(activeFileTileSetIdsProp) ? activeFileTileSetIdsProp : []),
+    [activeFileTileSetIdsProp]
   );
+  const activeFileTileSetIdsRef = useRef(activeFileTileSetIds);
+  activeFileTileSetIdsRef.current = activeFileTileSetIds;
   /** When in pattern mode with a UGC pattern, include the pattern's tile set IDs so placed pattern tiles resolve. */
   const resolutionTileSetIds = useMemo(() => {
     const base =
@@ -2716,6 +2748,8 @@ export default function TestScreen() {
     },
     [resolveSourceName]
   );
+  const resolveTileAssetForFileRef = useRef(resolveTileAssetForFile);
+  resolveTileAssetForFileRef.current = resolveTileAssetForFile;
   const resolvePatternTile = useCallback(
     (tile: Tile) => {
       const patternTileSetIds =
@@ -3248,7 +3282,7 @@ export default function TestScreen() {
       lastSourceNormalizationRef.current = null;
       return;
     }
-    const file = activeFileRef.current ?? activeFile ?? null;
+    const file = activeFileRef.current ?? filesRef.current.find((f) => f.id === activeFileId) ?? null;
     if (!file) {
       return;
     }
@@ -3297,7 +3331,8 @@ export default function TestScreen() {
     });
   }, [
     activeFileId,
-    activeFile,
+    activeFileSourceNamesProp,
+    activeFileTileSetIdsProp,
     fileSourceNames,
     inferTileSetIdsFromSourceNames,
     normalizeSourceNames,
@@ -3731,9 +3766,6 @@ export default function TestScreen() {
         }
       } else {
         // We didn't load (grid shape mismatch or !fileDimensionsMatch). Layer-sync will load. Defer finalize so file becomes editable.
-        if (typeof __DEV__ !== 'undefined' && __DEV__ && enterViaFileDimensionsOnly) {
-          console.log('[apply effect] Deferred finalize (no load, gridCells !== expectedCells); will setLoadedToken');
-        }
         const token = pending.token ?? 0;
         requestAnimationFrame(() => {
           requestAnimationFrame(() => {
@@ -3995,8 +4027,8 @@ export default function TestScreen() {
               const ts = Date.now();
               const target = buildPreviewPath(PREVIEW_DIR, activeFileId, 'full', ts);
               try {
-                if (activeFile?.previewUri && isOwnPreviewUri(activeFile.previewUri, PREVIEW_DIR)) {
-                  await FileSystem.deleteAsync(activeFile.previewUri, { idempotent: true });
+                if (prevPreviewUriRef.current && isOwnPreviewUri(prevPreviewUriRef.current, PREVIEW_DIR)) {
+                  await FileSystem.deleteAsync(prevPreviewUriRef.current, { idempotent: true });
                 }
               } catch {
                 // ignore
@@ -4015,8 +4047,8 @@ export default function TestScreen() {
               const ts = Date.now();
               const thumbTarget = buildPreviewPath(PREVIEW_DIR, activeFileId, 'thumb', ts);
               try {
-                if (activeFile?.thumbnailUri && isOwnPreviewUri(activeFile.thumbnailUri, PREVIEW_DIR)) {
-                  await FileSystem.deleteAsync(activeFile.thumbnailUri, { idempotent: true });
+                if (prevThumbnailUriRef.current && isOwnPreviewUri(prevThumbnailUriRef.current, PREVIEW_DIR)) {
+                  await FileSystem.deleteAsync(prevThumbnailUriRef.current, { idempotent: true });
                 }
               } catch {
                 // ignore
@@ -4085,8 +4117,6 @@ export default function TestScreen() {
     activeLineWidth,
     ready,
     activeFileId,
-    activeFile?.previewUri,
-    activeFile?.thumbnailUri,
     upsertActiveFile,
     isHydratingFile,
     gridVisible,
@@ -5812,6 +5842,225 @@ export default function TestScreen() {
     applyImportedPatternRef.current = applyImportedPattern;
   }, [applyImportedPattern]);
 
+  // Stable callbacks for ModifyPalette (use refs to avoid recreating on every render)
+  const handlePaletteResolveTileForPatternList = useCallback(
+    (tile: Tile, tileSetIds?: string[]) =>
+      resolveTileAssetForFileRef.current(
+        tile,
+        paletteSourcesRef.current,
+        tileSetIds && tileSetIds.length > 0
+          ? tileSetIds
+          : activeFileTileSetIdsRef.current
+      ),
+    []
+  );
+  const handlePaletteCreatePatternPress = useCallback(
+    (closeChooser: () => void) => {
+      setBrush({ mode: 'pattern' });
+      setIsPatternCreationMode(true);
+      setPatternSelection(null);
+      closeChooser();
+    },
+    []
+  );
+  const handlePaletteExportPatternPress = useCallback(
+    (ids: string[]) => {
+      setSelectedPatternIdsForExport(ids);
+      setShowPatternExportMenu(true);
+    },
+    []
+  );
+  const handlePaletteSelect = useCallback(
+    (next: any) => {
+      dismissModifyBanner();
+      if (next.mode === 'clone') {
+        clearCloneSource();
+      }
+      if (next.mode === 'pattern') {
+        setIsPatternCreationMode(false);
+        setBrush(next);
+        if (isSelectionModeRef.current && canvasSelectionRef.current) {
+          pendingPaletteFloodRef.current = true;
+        }
+        return;
+      }
+      if (next.mode === 'fixed') {
+        const rotation = paletteRotationsRef.current[next.index] ?? next.rotation ?? 0;
+        const mirrorX = paletteMirrorsRef.current[next.index] ?? next.mirrorX ?? false;
+        const mirrorY = paletteMirrorsYRef.current[next.index] ?? next.mirrorY ?? false;
+        const source = paletteSourcesRef.current[next.index];
+        if (!source) {
+          return;
+        }
+        let fileIndex = tileIndexByNameRef.current.get(source.name) ?? -1;
+        if (fileIndex < 0) {
+          const updated = ensureFileSourceNamesRef.current([source]);
+          const updatedIndex = updated.indexOf(source.name);
+          fileIndex = updatedIndex;
+        }
+        if (fileIndex >= 0) {
+          fixedBrushSourceNameRef.current = source.name;
+          setBrush({
+            mode: 'fixed',
+            index: fileIndex,
+            sourceName: source.name,
+            rotation,
+            mirrorX,
+            mirrorY,
+          });
+        }
+      } else {
+        if (next.mode !== 'fixed') {
+          fixedBrushSourceNameRef.current = null;
+        }
+        setBrush(next);
+      }
+      if (isSelectionModeRef.current && canvasSelectionRef.current) {
+        pendingPaletteFloodRef.current = true;
+      }
+    },
+    [dismissModifyBanner, clearCloneSource]
+  );
+  const handlePaletteRotate = useCallback(
+    (index: number) => {
+      dismissModifyBanner();
+      setPaletteRotations((prev) => {
+        const nextRotation = ((prev[index] ?? 0) + 90) % 360;
+        const source = paletteSourcesRef.current[index];
+        const fileIndex = source ? tileIndexByNameRef.current.get(source.name) ?? -1 : -1;
+        const currentBrush = brushRef.current;
+        if (currentBrush.mode === 'fixed' && fileIndex >= 0 && currentBrush.index === fileIndex) {
+          if (source?.name != null) {
+            fixedBrushSourceNameRef.current = source.name;
+          }
+          setBrush({
+            mode: 'fixed',
+            index: fileIndex,
+            sourceName: source?.name,
+            rotation: nextRotation,
+            mirrorX: currentBrush.mirrorX,
+            mirrorY: currentBrush.mirrorY,
+          });
+        }
+        return {
+          ...prev,
+          [index]: nextRotation,
+        };
+      });
+    },
+    [dismissModifyBanner]
+  );
+  const handlePaletteMirror = useCallback(
+    (index: number) => {
+      dismissModifyBanner();
+      const rotation = paletteRotationsRef.current[index] ?? 0;
+      const curX = paletteMirrorsRef.current[index] ?? false;
+      const curY = paletteMirrorsYRef.current[index] ?? false;
+      const horizontalInR0 = rotation === 0 || rotation === 180 ? curX : curY;
+      const verticalInR0 = rotation === 0 || rotation === 180 ? curY : curX;
+      const newH = !horizontalInR0;
+      const newMirrorX = rotation === 0 || rotation === 180 ? newH : verticalInR0;
+      const newMirrorY = rotation === 0 || rotation === 180 ? verticalInR0 : newH;
+      setPaletteMirrors((prev) => ({ ...prev, [index]: newMirrorX }));
+      setPaletteMirrorsY((prev) => ({ ...prev, [index]: newMirrorY }));
+      const source = paletteSourcesRef.current[index];
+      const fileIndex = source ? tileIndexByNameRef.current.get(source.name) ?? -1 : -1;
+      const currentBrush = brushRef.current;
+      if (currentBrush.mode === 'fixed' && fileIndex >= 0 && currentBrush.index === fileIndex) {
+        if (source?.name != null) {
+          fixedBrushSourceNameRef.current = source.name;
+        }
+        setBrush({
+          mode: 'fixed',
+          index: fileIndex,
+          sourceName: source?.name,
+          rotation: currentBrush.rotation,
+          mirrorX: newMirrorX,
+          mirrorY: newMirrorY,
+        });
+      }
+    },
+    [dismissModifyBanner]
+  );
+  const handlePaletteMirrorVertical = useCallback(
+    (index: number) => {
+      dismissModifyBanner();
+      const rotation = paletteRotationsRef.current[index] ?? 0;
+      const curX = paletteMirrorsRef.current[index] ?? false;
+      const curY = paletteMirrorsYRef.current[index] ?? false;
+      const horizontalInR0 = rotation === 0 || rotation === 180 ? curX : curY;
+      const verticalInR0 = rotation === 0 || rotation === 180 ? curY : curX;
+      const newV = !verticalInR0;
+      const newMirrorX = rotation === 0 || rotation === 180 ? horizontalInR0 : newV;
+      const newMirrorY = rotation === 0 || rotation === 180 ? newV : horizontalInR0;
+      setPaletteMirrors((prev) => ({ ...prev, [index]: newMirrorX }));
+      setPaletteMirrorsY((prev) => ({ ...prev, [index]: newMirrorY }));
+      const source = paletteSourcesRef.current[index];
+      const fileIndex = source ? tileIndexByNameRef.current.get(source.name) ?? -1 : -1;
+      const currentBrush = brushRef.current;
+      if (currentBrush.mode === 'fixed' && fileIndex >= 0 && currentBrush.index === fileIndex) {
+        if (source?.name != null) {
+          fixedBrushSourceNameRef.current = source.name;
+        }
+        setBrush({
+          mode: 'fixed',
+          index: fileIndex,
+          sourceName: source?.name,
+          rotation: currentBrush.rotation,
+          mirrorX: newMirrorX,
+          mirrorY: newMirrorY,
+        });
+      }
+    },
+    [dismissModifyBanner]
+  );
+  const handlePaletteGetRotation = useCallback(
+    (index: number) => paletteRotationsRef.current[index] ?? 0,
+    []
+  );
+  const handlePaletteGetMirror = useCallback(
+    (index: number) => paletteMirrorsRef.current[index] ?? false,
+    []
+  );
+  const handlePaletteGetMirrorVertical = useCallback(
+    (index: number) => paletteMirrorsYRef.current[index] ?? false,
+    []
+  );
+  const handlePaletteSetOrientation = useCallback(
+    (index: number, orientation: { rotation: number; mirrorX: boolean; mirrorY: boolean }) => {
+      dismissModifyBanner();
+      setPaletteRotations((prev) => ({ ...prev, [index]: orientation.rotation }));
+      setPaletteMirrors((prev) => ({ ...prev, [index]: orientation.mirrorX }));
+      setPaletteMirrorsY((prev) => ({ ...prev, [index]: orientation.mirrorY }));
+      const source = paletteSourcesRef.current[index];
+      const fileIndex = source ? tileIndexByNameRef.current.get(source.name) ?? -1 : -1;
+      const currentBrush = brushRef.current;
+      if (currentBrush.mode === 'fixed' && fileIndex >= 0 && currentBrush.index === fileIndex) {
+        if (source?.name != null) {
+          fixedBrushSourceNameRef.current = source.name;
+        }
+        setBrush({
+          mode: 'fixed',
+          index: fileIndex,
+          sourceName: source?.name,
+          rotation: orientation.rotation,
+          mirrorX: orientation.mirrorX,
+          mirrorY: orientation.mirrorY,
+        });
+      }
+    },
+    [dismissModifyBanner]
+  );
+  const handlePalettePatternPress = useCallback(() => {
+    dismissModifyBanner();
+    if (brushRef.current.mode !== 'pattern') setBrush({ mode: 'pattern' });
+    setIsPatternCreationMode(false);
+  }, [dismissModifyBanner]);
+  const handlePaletteRandomLongPress = useCallback(() => {
+    dismissModifyBanner();
+    setShowTileSetChooser(true);
+  }, [dismissModifyBanner]);
+
   // Load sample files, patterns, and tile sets only on app load when the user has none (once per session).
   useEffect(() => {
     if (
@@ -6518,8 +6767,7 @@ export default function TestScreen() {
     >
         {insets.top > 0 && (
           <View
-            pointerEvents="none"
-            style={[styles.statusBarBackground, { height: insets.top }]}
+            style={[styles.statusBarBackground, { height: insets.top }, { pointerEvents: 'none' }]}
           />
         )}
         <ThemedView style={styles.fileHeader}>
@@ -6568,8 +6816,8 @@ export default function TestScreen() {
               }),
               opacity: selectBarAnim,
             },
+            { pointerEvents: isSelectMode ? 'auto' : 'none' },
           ]}
-          pointerEvents={isSelectMode ? 'auto' : 'none'}
         >
           <View style={styles.fileSelectDeleteExportRow}>
             <Pressable
@@ -7392,8 +7640,7 @@ export default function TestScreen() {
     >
       {insets.top > 0 && (
         <View
-          pointerEvents="none"
-          style={[styles.statusBarBackground, { height: insets.top }]}
+          style={[styles.statusBarBackground, { height: insets.top }, { pointerEvents: 'none' }]}
         />
       )}
         <ThemedView
@@ -7849,17 +8096,17 @@ export default function TestScreen() {
           </ThemedView>
         </ThemedView>
         {(undoRedoBanner !== null || zoomRegion !== null || isEditingInvisibleLayer) && (
-          <View style={styles.toolbarBannersOverlay} pointerEvents="box-none">
+          <View style={[styles.toolbarBannersOverlay, { pointerEvents: 'box-none' }]}>
             {undoRedoBanner !== null && (
               <View style={styles.toolbarBannerRow} overflow="hidden">
                 <Animated.View
-                  pointerEvents="none"
                   style={[
                     styles.undoRedoBanner,
                     styles.toolbarBannerBar,
                     {
                       transform: [{ translateY: undoRedoBannerTranslateY }],
                     },
+                    { pointerEvents: 'none' },
                   ]}
                 >
                   <Text
@@ -7873,7 +8120,7 @@ export default function TestScreen() {
               </View>
             )}
             {zoomRegion !== null && (
-              <View pointerEvents="box-none" style={[styles.toolbarBannerRow, styles.zoomedBannerRow]}>
+              <View style={[styles.toolbarBannerRow, styles.zoomedBannerRow, { pointerEvents: 'box-none' }]}>
                 <Text
                   style={styles.undoRedoBannerText}
                   numberOfLines={1}
@@ -7899,7 +8146,7 @@ export default function TestScreen() {
               </View>
             )}
             {isEditingInvisibleLayer && (
-              <View pointerEvents="box-none" style={[styles.toolbarBannerRow, styles.zoomedBannerRow]}>
+              <View style={[styles.toolbarBannerRow, styles.zoomedBannerRow, { pointerEvents: 'box-none' }]}>
                 <Text
                   style={styles.undoRedoBannerText}
                   numberOfLines={1}
@@ -7960,26 +8207,24 @@ export default function TestScreen() {
             <>
               {isTransparentPreview(clearPreviewUri ?? loadPreviewUri) && (
                 <View
-                  pointerEvents="none"
                   style={[
                     styles.gridPreviewBackdrop,
                     { backgroundColor: settings.backgroundColor },
+                    { pointerEvents: 'none' },
                   ]}
                 />
               )}
               {Platform.OS === 'web' ? (
                 <Image
                   source={{ uri: clearPreviewUri ?? loadPreviewUri ?? undefined }}
-                  style={styles.gridPreview}
+                  style={[styles.gridPreview, { pointerEvents: 'none' }]}
                   resizeMode="cover"
-                  pointerEvents="none"
                 />
               ) : (
                 <ExpoImage
                   source={{ uri: clearPreviewUri ?? loadPreviewUri ?? '' }}
-                  style={styles.gridPreview}
+                  style={[styles.gridPreview, { pointerEvents: 'none' }]}
                   contentFit="cover"
-                  pointerEvents="none"
                 />
               )}
             </>
@@ -7987,7 +8232,7 @@ export default function TestScreen() {
           {(settings.mirrorHorizontal || settings.mirrorVertical) &&
             actualGridWidth > 0 &&
             actualGridHeight > 0 && (
-              <View pointerEvents="none" style={styles.mirrorLines}>
+              <View style={[styles.mirrorLines, { pointerEvents: 'none' }]}>
                 {settings.mirrorHorizontal && (
                   <View
                     style={[
@@ -8016,49 +8261,44 @@ export default function TestScreen() {
             )}
           {isPatternCreationMode && patternSelectionRect && (
             <View
-              pointerEvents="none"
-              style={[styles.patternSelection, patternSelectionRect]}
+              style={[styles.patternSelection, patternSelectionRect, { pointerEvents: 'none' }]}
             />
           )}
           {canvasSelectionRect && (
             <View
-              pointerEvents="none"
               style={[
                 styles.canvasSelectionBox,
                 canvasSelectionRect,
                 isMoveMode && moveDragOffset && styles.canvasSelectionBoxDimmed,
+                { pointerEvents: 'none' },
               ]}
             />
           )}
           {movePreviewRect && (
-            <View pointerEvents="none" style={[styles.movePreviewBox, movePreviewRect]} />
+            <View style={[styles.movePreviewBox, movePreviewRect, { pointerEvents: 'none' }]} />
           )}
           {stampPreviewRect && (
-            <View pointerEvents="none" style={[styles.movePreviewBox, stampPreviewRect]} />
+            <View style={[styles.movePreviewBox, stampPreviewRect, { pointerEvents: 'none' }]} />
           )}
           {lockedBoundaryEdges.map((rect, idx) => (
             <View
               key={`locked-edge-${idx}`}
-              pointerEvents="none"
-              style={[styles.lockedBoundaryEdge, rect]}
+              style={[styles.lockedBoundaryEdge, rect, { pointerEvents: 'none' }]}
             />
           ))}
           {patternAlignmentRect && (
             <View
-              pointerEvents="none"
-              style={[styles.patternAlignment, patternAlignmentRect]}
+              style={[styles.patternAlignment, patternAlignmentRect, { pointerEvents: 'none' }]}
             />
           )}
           {Platform.OS === 'web' ? (
             <View
               ref={setGridNode}
-              style={[styles.grid, { opacity: gridVisible ? 1 : 0 }]}
-              pointerEvents="box-none"
+              style={[styles.grid, { opacity: gridVisible ? 1 : 0 }, { pointerEvents: 'box-none' }]}
             >
             <ThemedView
-              style={styles.grid}
+              style={[styles.grid, { pointerEvents: gridVisible && !isClearing ? 'auto' : 'none' }]}
               accessibilityRole="grid"
-              pointerEvents={gridVisible && !isClearing ? 'auto' : 'none'}
               onLayout={(event: any) => {
                 const layout = event?.nativeEvent?.layout;
                 if (layout) {
@@ -8523,7 +8763,7 @@ export default function TestScreen() {
             {activeFile?.layerVisibility?.[2] !== false &&
               level2GridInfo &&
               level2GridInfo.cells.length > 0 && (
-                <View style={[StyleSheet.absoluteFill, { backgroundColor: 'transparent' }]} pointerEvents="none">
+                <View style={[StyleSheet.absoluteFill, { backgroundColor: 'transparent', pointerEvents: 'none' }]}>
                   {level2GridInfo.cells.map((cell, i) => {
                     if (zoomRegion && (
                       cell.minCol > zoomRegion.maxCol ||
@@ -8620,7 +8860,7 @@ export default function TestScreen() {
             {activeFile?.layerVisibility?.[3] !== false &&
               level3GridInfo &&
               level3GridInfo.cells.length > 0 && (
-                <View style={[StyleSheet.absoluteFill, { backgroundColor: 'transparent' }]} pointerEvents="none">
+                <View style={[StyleSheet.absoluteFill, { backgroundColor: 'transparent', pointerEvents: 'none' }]}>
                   {level3GridInfo.cells.map((cell, i) => {
                     if (zoomRegion && (
                       cell.minCol > zoomRegion.maxCol ||
@@ -8726,8 +8966,8 @@ export default function TestScreen() {
                   width: actualGridWidth,
                   height: actualGridHeight,
                 },
+                { pointerEvents: 'none' },
               ]}
-              pointerEvents="none"
             >
               {useSkiaGrid ? (
                 <TileGridCanvas
@@ -8807,7 +9047,7 @@ export default function TestScreen() {
               {activeFile?.layerVisibility?.[2] !== false &&
                 level2GridInfo &&
                 level2GridInfo.cells.length > 0 && (
-                  <View style={[StyleSheet.absoluteFill, { backgroundColor: 'transparent' }]} pointerEvents="none">
+                  <View style={[StyleSheet.absoluteFill, { backgroundColor: 'transparent', pointerEvents: 'none' }]}>
                     {level2GridInfo.cells.map((cell, i) => {
                       if (zoomRegion && (
                         cell.minCol > zoomRegion.maxCol ||
@@ -8904,7 +9144,7 @@ export default function TestScreen() {
               {activeFile?.layerVisibility?.[3] !== false &&
                 level3GridInfo &&
                 level3GridInfo.cells.length > 0 && (
-                  <View style={[StyleSheet.absoluteFill, { backgroundColor: 'transparent' }]} pointerEvents="none">
+                  <View style={[StyleSheet.absoluteFill, { backgroundColor: 'transparent', pointerEvents: 'none' }]}>
                     {level3GridInfo.cells.map((cell, i) => {
                       if (zoomRegion && (
                         cell.minCol > zoomRegion.maxCol ||
@@ -9000,8 +9240,7 @@ export default function TestScreen() {
                 )}
               <View
                 ref={gridTouchRef}
-                style={StyleSheet.absoluteFillObject}
-                pointerEvents={gridVisible && !isClearing ? 'auto' : 'none'}
+                style={[StyleSheet.absoluteFillObject, { pointerEvents: gridVisible && !isClearing ? 'auto' : 'none' }]}
                 onLayout={(event: any) => {
                   const layout = event?.nativeEvent?.layout;
                   if (layout) {
@@ -9200,7 +9439,7 @@ export default function TestScreen() {
                 accessibilityRole="button"
                 accessibilityLabel="Cancel"
               />
-              <View style={styles.moveConfirmPanelWrap} pointerEvents="box-none">
+              <View style={[styles.moveConfirmPanelWrap, { pointerEvents: 'box-none' }]}>
                 <ThemedView style={styles.moveConfirmPanel}>
                   <ThemedText type="defaultSemiBold" style={styles.moveConfirmTitle}>
                     Mirror changes?
@@ -9247,7 +9486,7 @@ export default function TestScreen() {
                 accessibilityRole="button"
                 accessibilityLabel="Cancel move"
               />
-              <View style={styles.moveConfirmPanelWrap} pointerEvents="box-none">
+              <View style={[styles.moveConfirmPanelWrap, { pointerEvents: 'box-none' }]}>
                 <ThemedView style={styles.moveConfirmPanel}>
                   <ThemedText type="defaultSemiBold" style={styles.moveConfirmTitle}>
                     Move tiles?
@@ -9409,7 +9648,7 @@ export default function TestScreen() {
                 accessibilityRole="button"
                 accessibilityLabel="Cancel stamp"
               />
-              <View style={styles.moveConfirmPanelWrap} pointerEvents="box-none">
+              <View style={[styles.moveConfirmPanelWrap, { pointerEvents: 'box-none' }]}>
                 <ThemedView style={styles.moveConfirmPanel}>
                   <ThemedText type="defaultSemiBold" style={styles.moveConfirmTitle}>
                     Place Stamp?
@@ -9507,8 +9746,8 @@ export default function TestScreen() {
                 style={[
                   styles.modifyTileSetBanner,
                   { transform: [{ translateY: modifyBannerTranslateY }] },
+                  { pointerEvents: 'box-none' },
                 ]}
-                pointerEvents="box-none"
               >
               <ScrollView
                 horizontal
@@ -9673,13 +9912,13 @@ export default function TestScreen() {
         </View>
         {isPatternCreationMode && !showPatternSaveModal && (
           <View
-            pointerEvents="box-none"
             style={[
               styles.patternCreationOverlay,
               { top: 0, bottom: brushPanelHeight },
+              { pointerEvents: 'box-none' },
             ]}
           >
-            <View style={styles.patternCreationTop} pointerEvents="auto">
+            <View style={[styles.patternCreationTop, { pointerEvents: 'auto' }]}>
               <ThemedText type="defaultSemiBold" style={styles.patternCreationText}>
                 drag select to creat a pattern
               </ThemedText>
@@ -9688,10 +9927,10 @@ export default function TestScreen() {
         )}
         {isPatternCreationMode && !showPatternSaveModal && (
           <View
-            pointerEvents="auto"
             style={[
               styles.patternCreationBottom,
               { height: brushPanelHeight },
+              { pointerEvents: 'auto' },
             ]}
           />
         )}
@@ -9710,29 +9949,13 @@ export default function TestScreen() {
           createPattern={createPattern}
           deletePatterns={deletePatterns}
           resolvePatternTile={resolvePatternTile}
-          resolveTileForPatternList={(tile, tileSetIds) =>
-            resolveTileAssetForFile(
-              tile,
-              tileSources,
-              tileSetIds && tileSetIds.length > 0
-                ? tileSetIds
-                : activeFileTileSetIds
-            )
-          }
-          onCreatePatternPress={(closeChooser) => {
-            setBrush({ mode: 'pattern' });
-            setIsPatternCreationMode(true);
-            setPatternSelection(null);
-            closeChooser();
-          }}
+          resolveTileForPatternList={handlePaletteResolveTileForPatternList}
+          onCreatePatternPress={handlePaletteCreatePatternPress}
           hidePatternChooserWhen={isPatternCreationMode}
           showImportInChooser
           onImportPatternPress={handleImportPatternPress}
           showExportInChooser
-          onExportPatternPress={(ids) => {
-            setSelectedPatternIdsForExport(ids);
-            setShowPatternExportMenu(true);
-          }}
+          onExportPatternPress={handlePaletteExportPatternPress}
           dismissModifyBanner={dismissModifyBanner}
           selectedPatternId={selectedPatternId}
           patternRotations={patternRotations}
@@ -9740,182 +9963,19 @@ export default function TestScreen() {
           onSelectedPatternIdChange={setSelectedPatternId}
           onPatternRotationsChange={setPatternRotations}
           onPatternMirrorsChange={setPatternMirrors}
-          onSelect={(next) => {
-            dismissModifyBanner();
-            if (next.mode === 'clone') {
-              clearCloneSource();
-            }
-            if (next.mode === 'pattern') {
-              setIsPatternCreationMode(false);
-              setBrush(next);
-              if (isSelectionMode && canvasSelection) {
-                pendingPaletteFloodRef.current = true;
-              }
-              return;
-            }
-            if (next.mode === 'fixed') {
-              const rotation = paletteRotations[next.index] ?? next.rotation ?? 0;
-              const mirrorX = paletteMirrors[next.index] ?? next.mirrorX ?? false;
-              const mirrorY = paletteMirrorsY[next.index] ?? next.mirrorY ?? false;
-              const source = paletteSources[next.index];
-              if (!source) {
-                return;
-              }
-              let fileIndex = tileIndexByName.get(source.name) ?? -1;
-              if (fileIndex < 0) {
-                const updated = ensureFileSourceNames([source]);
-                const updatedIndex = updated.indexOf(source.name);
-                fileIndex = updatedIndex;
-              }
-              if (fileIndex >= 0) {
-                fixedBrushSourceNameRef.current = source.name;
-                setBrush({
-                  mode: 'fixed',
-                  index: fileIndex,
-                  sourceName: source.name,
-                  rotation,
-                  mirrorX,
-                  mirrorY,
-                });
-              }
-            } else {
-              if (next.mode !== 'fixed') {
-                fixedBrushSourceNameRef.current = null;
-              }
-              setBrush(next);
-            }
-            if (isSelectionMode && canvasSelection) {
-              pendingPaletteFloodRef.current = true;
-            }
-          }}
-          onRotate={(index) => {
-            dismissModifyBanner();
-            setPaletteRotations((prev) => {
-              const nextRotation = ((prev[index] ?? 0) + 90) % 360;
-              const source = paletteSources[index];
-              const fileIndex = source ? tileIndexByName.get(source.name) ?? -1 : -1;
-              if (brush.mode === 'fixed' && fileIndex >= 0 && brush.index === fileIndex) {
-                if (source?.name != null) {
-                  fixedBrushSourceNameRef.current = source.name;
-                }
-                setBrush({
-                  mode: 'fixed',
-                  index: fileIndex,
-                  sourceName: source?.name,
-                  rotation: nextRotation,
-                  mirrorX: brush.mirrorX,
-                  mirrorY: brush.mirrorY,
-                });
-              }
-              return {
-                ...prev,
-                [index]: nextRotation,
-              };
-            });
-          }}
-          onMirror={(index) => {
-            dismissModifyBanner();
-            const rotation = paletteRotations[index] ?? 0;
-            const curX = paletteMirrors[index] ?? false;
-            const curY = paletteMirrorsY[index] ?? false;
-            const horizontalInR0 = rotation === 0 || rotation === 180 ? curX : curY;
-            const verticalInR0 = rotation === 0 || rotation === 180 ? curY : curX;
-            const newH = !horizontalInR0;
-            const newMirrorX = rotation === 0 || rotation === 180 ? newH : verticalInR0;
-            const newMirrorY = rotation === 0 || rotation === 180 ? verticalInR0 : newH;
-            setPaletteMirrors((prev) => ({ ...prev, [index]: newMirrorX }));
-            setPaletteMirrorsY((prev) => ({ ...prev, [index]: newMirrorY }));
-            const source = paletteSources[index];
-            const fileIndex = source ? tileIndexByName.get(source.name) ?? -1 : -1;
-            if (brush.mode === 'fixed' && fileIndex >= 0 && brush.index === fileIndex) {
-              if (source?.name != null) {
-                fixedBrushSourceNameRef.current = source.name;
-              }
-              setBrush({
-                mode: 'fixed',
-                index: fileIndex,
-                sourceName: source?.name,
-                rotation: brush.rotation,
-                mirrorX: newMirrorX,
-                mirrorY: newMirrorY,
-              });
-            }
-          }}
-          onMirrorVertical={(index) => {
-            dismissModifyBanner();
-            const rotation = paletteRotations[index] ?? 0;
-            const curX = paletteMirrors[index] ?? false;
-            const curY = paletteMirrorsY[index] ?? false;
-            const horizontalInR0 = rotation === 0 || rotation === 180 ? curX : curY;
-            const verticalInR0 = rotation === 0 || rotation === 180 ? curY : curX;
-            const newV = !verticalInR0;
-            const newMirrorX = rotation === 0 || rotation === 180 ? horizontalInR0 : newV;
-            const newMirrorY = rotation === 0 || rotation === 180 ? newV : horizontalInR0;
-            setPaletteMirrors((prev) => ({ ...prev, [index]: newMirrorX }));
-            setPaletteMirrorsY((prev) => ({ ...prev, [index]: newMirrorY }));
-            const source = paletteSources[index];
-            const fileIndex = source ? tileIndexByName.get(source.name) ?? -1 : -1;
-            if (brush.mode === 'fixed' && fileIndex >= 0 && brush.index === fileIndex) {
-              if (source?.name != null) {
-                fixedBrushSourceNameRef.current = source.name;
-              }
-              setBrush({
-                mode: 'fixed',
-                index: fileIndex,
-                sourceName: source?.name,
-                rotation: brush.rotation,
-                mirrorX: newMirrorX,
-                mirrorY: newMirrorY,
-              });
-            }
-          }}
-          getRotation={(index) => paletteRotations[index] ?? 0}
-          getMirror={(index) => paletteMirrors[index] ?? false}
-          getMirrorVertical={(index) => paletteMirrorsY[index] ?? false}
-          onSetOrientation={(index, orientation) => {
-            dismissModifyBanner();
-            setPaletteRotations((prev) => ({ ...prev, [index]: orientation.rotation }));
-            setPaletteMirrors((prev) => ({ ...prev, [index]: orientation.mirrorX }));
-            setPaletteMirrorsY((prev) => ({ ...prev, [index]: orientation.mirrorY }));
-            const source = paletteSources[index];
-            const fileIndex = source ? tileIndexByName.get(source.name) ?? -1 : -1;
-            if (brush.mode === 'fixed' && fileIndex >= 0 && brush.index === fileIndex) {
-              if (source?.name != null) {
-                fixedBrushSourceNameRef.current = source.name;
-              }
-              setBrush({
-                mode: 'fixed',
-                index: fileIndex,
-                sourceName: source?.name,
-                rotation: orientation.rotation,
-                mirrorX: orientation.mirrorX,
-                mirrorY: orientation.mirrorY,
-              });
-            }
-          }}
-          onPatternPress={() => {
-            dismissModifyBanner();
-            if (brush.mode !== 'pattern') setBrush({ mode: 'pattern' });
-            setIsPatternCreationMode(false);
-          }}
-          onPatternLongPress={() => {
-            dismissModifyBanner();
-            if (brush.mode !== 'pattern') setBrush({ mode: 'pattern' });
-            setIsPatternCreationMode(false);
-          }}
-          onPatternDoubleTap={() => {
-            dismissModifyBanner();
-            if (brush.mode !== 'pattern') setBrush({ mode: 'pattern' });
-            setIsPatternCreationMode(false);
-          }}
-          onRandomLongPress={() => {
-            dismissModifyBanner();
-            setShowTileSetChooser(true);
-          }}
-          onRandomDoubleTap={() => {
-            dismissModifyBanner();
-            setShowTileSetChooser(true);
-          }}
+          onSelect={handlePaletteSelect}
+          onRotate={handlePaletteRotate}
+          onMirror={handlePaletteMirror}
+          onMirrorVertical={handlePaletteMirrorVertical}
+          getRotation={handlePaletteGetRotation}
+          getMirror={handlePaletteGetMirror}
+          getMirrorVertical={handlePaletteGetMirrorVertical}
+          onSetOrientation={handlePaletteSetOrientation}
+          onPatternPress={handlePalettePatternPress}
+          onPatternLongPress={handlePalettePatternPress}
+          onPatternDoubleTap={handlePalettePatternPress}
+          onRandomLongPress={handlePaletteRandomLongPress}
+          onRandomDoubleTap={handlePaletteRandomLongPress}
           onPatternStampDragStart={handlePatternStampDragStart}
           onPatternStampDragMove={handlePatternStampDragMove}
           onPatternStampDragEnd={handlePatternStampDragEnd}

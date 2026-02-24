@@ -174,13 +174,13 @@ const TileCell = memo(
           />
         )}
         {showOverlays && isCloneTargetOrigin && (
-          <View pointerEvents="none" style={styles.cloneTargetOrigin} />
+          <View style={[styles.cloneTargetOrigin, { pointerEvents: 'none' }]} />
         )}
         {showOverlays && isCloneCursor && (
-          <View pointerEvents="none" style={styles.cloneCursor} />
+          <View style={[styles.cloneCursor, { pointerEvents: 'none' }]} />
         )}
         {showOverlays && isCloneSample && (
-          <View pointerEvents="none" style={styles.cloneSample} />
+          <View style={[styles.cloneSample, { pointerEvents: 'none' }]} />
         )}
         {showOverlays && showDebug && <TileDebugOverlay connections={connections} />}
       </View>
@@ -226,7 +226,7 @@ function GridBackground({
   const horizontalLines = Array.from({ length: Math.max(0, rows - 1) }, (_, i) => i + 1);
   const strokeWidth = Math.max(0, lineWidth);
   return (
-    <View style={[styles.gridBackground, { width, height, backgroundColor }]} pointerEvents="none">
+    <View style={[styles.gridBackground, { width, height, backgroundColor }, { pointerEvents: 'none' }]}>
       {strokeWidth > 0 &&
         verticalLines.map((col) => (
           <View
@@ -277,7 +277,7 @@ function GridLinesOverlay({
   const horizontalLines = Array.from({ length: Math.max(0, rows - 1) }, (_, i) => i + 1);
   const strokeWidth = Math.max(1, lineWidth);
   return (
-    <View pointerEvents="none" style={styles.gridLinesOverlay}>
+    <View style={[styles.gridLinesOverlay, { pointerEvents: 'none' }]}>
       {verticalLines.map((col) => (
         <View
           key={`grid-overlay-v-${col}`}
@@ -1086,8 +1086,7 @@ export default function ModifyTileScreen() {
     <ThemedView style={[styles.screen, { paddingTop: insets.top }]}>
       {insets.top > 0 && (
         <View
-          pointerEvents="none"
-          style={[styles.statusBarBackground, { height: insets.top }]}
+          style={[styles.statusBarBackground, { height: insets.top }, { pointerEvents: 'none' }]}
         />
       )}
       <ThemedView
@@ -1224,7 +1223,7 @@ export default function ModifyTileScreen() {
         {(settings.mirrorHorizontal || settings.mirrorVertical) &&
           gridWidth > 0 &&
           gridHeight > 0 && (
-            <View pointerEvents="none" style={styles.mirrorLines}>
+            <View style={[styles.mirrorLines, { pointerEvents: 'none' }]}>
               {settings.mirrorHorizontal && (
                 <View
                   style={[
@@ -1252,7 +1251,7 @@ export default function ModifyTileScreen() {
             </View>
           )}
         {borderConnectionStatus && gridWidth > 0 && gridHeight > 0 && (
-          <View pointerEvents="none" style={styles.borderExpectedLines}>
+          <View style={[styles.borderExpectedLines, { pointerEvents: 'none' }]}>
             {borderConnectionStatus.map((isConnected, index) => {
               const dotSize = Math.max(6, Math.round(gridLayout.tileSize * 0.2));
               const dotOffset = dotSize / 2;
@@ -1389,9 +1388,8 @@ export default function ModifyTileScreen() {
         </View>
         <ViewShot
           ref={thumbnailShotRef}
-          style={[styles.captureSurface, { width: gridWidth, height: gridHeight }]}
+          style={[styles.captureSurface, { width: gridWidth, height: gridHeight }, { pointerEvents: 'none' }]}
           options={{ format: 'png', quality: 1, result: 'tmpfile' }}
-          pointerEvents="none"
         >
           <ThemedView
             style={[
@@ -1451,8 +1449,8 @@ export default function ModifyTileScreen() {
               style={[
                 styles.modifyTileSetBanner,
                 { transform: [{ translateY: modifyBannerTranslateY }] },
+                { pointerEvents: 'box-none' },
               ]}
-              pointerEvents="box-none"
             >
               <ScrollView
                 horizontal

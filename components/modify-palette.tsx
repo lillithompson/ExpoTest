@@ -479,9 +479,9 @@ function ModifyPaletteInner({
                     outputRange: [0, 44],
                   }),
                   opacity: patternSelectAnim,
+                  pointerEvents: isPatternSelectMode ? 'auto' : 'none',
                 },
               ]}
-              pointerEvents={isPatternSelectMode ? 'auto' : 'none'}
             >
               <View style={styles.patternSelectDeleteExportRow}>
                 <Pressable

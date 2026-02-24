@@ -507,7 +507,7 @@ export function TileBrushPanel({
   );
   useEffect(() => {
     paletteProfileLog();
-  });
+  }, [displayOrderedEntries]);
   const toggleFolder = useCallback((connectionCount: number) => {
     setCollapsedFolders((prev) => {
       const next = new Set(prev);
@@ -679,10 +679,14 @@ export function TileBrushPanel({
                 >
                   {isPatternsSection ? (
                     <>
-                      <Pressable
+                      <View
                         style={styles.separatorBarIconWrapTop}
-                        onPress={() => onPatternSeparatorIconPress?.()}
-                        accessibilityRole="button"
+                        onStartShouldSetResponder={() => true}
+                        onResponderRelease={(e) => {
+                          e.stopPropagation();
+                          onPatternSeparatorIconPress?.();
+                        }}
+                        accessible
                         accessibilityLabel="Open pattern management"
                       >
                         <MaterialCommunityIcons
@@ -691,9 +695,9 @@ export function TileBrushPanel({
                           color="#374151"
                           style={styles.separatorBarIcon}
                         />
-                      </Pressable>
+                      </View>
                       {isCollapsed && (
-                        <View style={styles.separatorBarIconWrap} pointerEvents="none">
+                        <View style={[styles.separatorBarIconWrap, { pointerEvents: 'none' }]}>
                           <MaterialCommunityIcons
                             name="chevron-right"
                             size={SEPARATOR_BAR_WIDTH * 0.75}
@@ -712,7 +716,7 @@ export function TileBrushPanel({
                         style={[styles.separatorBarIcon, { marginTop: 5 }]}
                       />
                       {isCollapsed && (
-                        <View style={styles.separatorBarIconWrap} pointerEvents="none">
+                        <View style={[styles.separatorBarIconWrap, { pointerEvents: 'none' }]}>
                           <MaterialCommunityIcons
                             name="chevron-right"
                             size={SEPARATOR_BAR_WIDTH * 0.75}
@@ -728,7 +732,7 @@ export function TileBrushPanel({
                         {String(n)}
                       </ThemedText>
                       {isCollapsed && (
-                        <View style={styles.separatorBarIconWrap} pointerEvents="none">
+                        <View style={[styles.separatorBarIconWrap, { pointerEvents: 'none' }]}>
                           <MaterialCommunityIcons
                             name="chevron-right"
                             size={SEPARATOR_BAR_WIDTH * 0.75}
@@ -951,8 +955,8 @@ export function TileBrushPanel({
                     {
                       borderColor: isSelected ? '#22c55e' : 'transparent',
                     },
+                    { pointerEvents: 'none' },
                   ]}
-                  pointerEvents="none"
                 />
                 {isRandom ? (
                   <View style={styles.labelButton}>

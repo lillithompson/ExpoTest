@@ -537,7 +537,7 @@ export default function TileSetCreatorScreen() {
       ]}
     >
       {insets.top > 0 && (
-        <View pointerEvents="none" style={[styles.statusBarBackground, { height: insets.top }]} />
+        <View style={[styles.statusBarBackground, { height: insets.top }, { pointerEvents: 'none' }]} />
       )}
       <ThemedView style={styles.fileHeader}>
         {Platform.OS === 'web' && !isMobileWeb ? (
@@ -590,8 +590,8 @@ export default function TileSetCreatorScreen() {
             }),
             opacity: selectBarAnim,
           },
+          { pointerEvents: isSelectMode ? 'auto' : 'none' },
         ]}
-        pointerEvents={isSelectMode ? 'auto' : 'none'}
       >
         <View style={styles.fileSelectDeleteExportRow}>
           <Pressable

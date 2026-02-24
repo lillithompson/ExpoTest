@@ -449,7 +449,7 @@ export default function TileSetEditorScreen() {
       ]}
     >
       {insets.top > 0 && (
-        <View pointerEvents="none" style={[styles.statusBarBackground, { height: insets.top }]} />
+        <View style={[styles.statusBarBackground, { height: insets.top }, { pointerEvents: 'none' }]} />
       )}
       <ThemedView style={styles.fileHeader}>
         <View style={styles.headerLeft}>
@@ -516,8 +516,8 @@ export default function TileSetEditorScreen() {
             }),
             opacity: selectBarAnim,
           },
+          { pointerEvents: isSelectMode ? 'auto' : 'none' },
         ]}
-        pointerEvents={isSelectMode ? 'auto' : 'none'}
       >
         <View style={styles.fileSelectDeleteExportRow}>
           <Pressable

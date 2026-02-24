@@ -10,7 +10,7 @@ export function TileDebugOverlay({ connections }: Props) {
   }
 
   return (
-    <View pointerEvents="none" style={styles.container}>
+    <View style={[styles.container, { pointerEvents: 'none' }]}>
       {connections.map((connected, index) => (
         <View
           key={`conn-${index}`}
