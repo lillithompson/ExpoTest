@@ -344,7 +344,7 @@ export default function TileSetCreatorScreen() {
     }
     const input = document.createElement('input');
     input.type = 'file';
-    input.accept = '.tileset';
+    input.accept = '.tileset,.json,application/octet-stream';
     input.style.display = 'none';
     input.onchange = (e: Event) => {
       const target = e.target as HTMLInputElement;

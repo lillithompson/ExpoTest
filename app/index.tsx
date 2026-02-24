@@ -5601,7 +5601,7 @@ export default function TestScreen() {
     }
     const input = document.createElement('input');
     input.type = 'file';
-    input.accept = '.tile';
+    input.accept = '.tile,.json,application/octet-stream';
     input.style.display = 'none';
     input.onchange = (e: Event) => {
       const target = e.target as HTMLInputElement;
@@ -5926,7 +5926,7 @@ export default function TestScreen() {
     }
     const input = document.createElement('input');
     input.type = 'file';
-    input.accept = '.tilepattern';
+    input.accept = '.tilepattern,.json,application/octet-stream';
     input.style.display = 'none';
     input.onchange = (e: Event) => {
       const target = e.target as HTMLInputElement;
