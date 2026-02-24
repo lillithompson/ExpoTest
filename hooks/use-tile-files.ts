@@ -583,7 +583,8 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
         thumbnailUri: null,
         previewUri: null,
         updatedAt: Date.now(),
-                lockedCells: [],
+        lockedCells: [],
+        layerEmphasized: { 1: true, 2: true, 3: true },
       };
       setFiles((prev) => {
         const next = [nextFile, ...prev];
