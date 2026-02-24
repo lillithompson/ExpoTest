@@ -112,6 +112,7 @@ import {
     getGridLevelLinePositions,
     getLevelCellIndexForPoint,
     getLevelGridInfo,
+    getLevelKRange,
     getMaxGridResolutionLevel,
     hydrateTilesWithSourceNames,
     normalizeTiles,
@@ -766,14 +767,15 @@ function getLevelNtoMOffsets(
   const scale = Math.round(cellTilesN / cellTilesM);
   const centerCol = Math.floor(columns / 2);
   const centerRow = Math.floor(rows / 2);
-  const kMinV_N = Math.ceil(-centerCol / cellTilesN);
-  const kMinV_M = Math.ceil(-centerCol / cellTilesM);
-  const kMinH_N = Math.ceil(-centerRow / cellTilesN);
-  const kMinH_M = Math.ceil(-centerRow / cellTilesM);
+  const vRangeN = getLevelKRange(centerCol, columns, cellTilesN);
+  const vRangeM = levelM === 1 ? { kMin: 0 } : getLevelKRange(centerCol, columns, cellTilesM);
+  const hRangeN = getLevelKRange(centerRow, rows, cellTilesN);
+  const hRangeM = levelM === 1 ? { kMin: 0 } : getLevelKRange(centerRow, rows, cellTilesM);
+  if (!vRangeN || !vRangeM || !hRangeN || !hRangeM) return null;
   return {
     scale,
-    C_row: kMinH_N * scale - kMinH_M,
-    C_col: kMinV_N * scale - kMinV_M,
+    C_row: hRangeN.kMin * scale - hRangeM.kMin,
+    C_col: vRangeN.kMin * scale - vRangeM.kMin,
   };
 }
 
@@ -9035,6 +9037,18 @@ export default function TestScreen() {
                     const h =
                       (cell.maxRow - cell.minRow + 1) * tileSizeForCell +
                       (cell.maxRow - cell.minRow) * GRID_GAP;
+                    // For partial cells: draw sprite at full cell size, absolutely positioned so visible portion aligns
+                    const isPartialCell = cell.isPartial === true;
+                    const fullW = isPartialCell && cell.fullMinCol != null && cell.fullMaxCol != null
+                      ? (cell.fullMaxCol - cell.fullMinCol + 1) * tileSizeForCell + (cell.fullMaxCol - cell.fullMinCol) * GRID_GAP
+                      : w;
+                    const fullH = isPartialCell && cell.fullMinRow != null && cell.fullMaxRow != null
+                      ? (cell.fullMaxRow - cell.fullMinRow + 1) * tileSizeForCell + (cell.fullMaxRow - cell.fullMinRow) * GRID_GAP
+                      : h;
+                    const spriteLeft = isPartialCell && cell.fullMinCol != null
+                      ? -(cell.minCol - cell.fullMinCol) * stride : 0;
+                    const spriteTop = isPartialCell && cell.fullMinRow != null
+                      ? -(cell.minRow - cell.fullMinRow) * stride : 0;
                     const l2Connections =
                       settings.showDebug && tile.imageIndex >= 0
                         ? getTransformedConnectionsForName(
@@ -9064,17 +9078,30 @@ export default function TestScreen() {
                           strokeWidth={level2StrokeWidth}
                           style={[
                             styles.tileImage,
-                            {
-                              width: '100%',
-                              height: '100%',
-                              transform: [
-                                { scaleX: tile.mirrorX ? -1 : 1 },
-                                { scaleY: tile.mirrorY ? -1 : 1 },
-                                { rotate: `${tile.rotation}deg` },
-                              ],
-                            },
+                            isPartialCell
+                              ? {
+                                  position: 'absolute',
+                                  left: spriteLeft,
+                                  top: spriteTop,
+                                  width: fullW,
+                                  height: fullH,
+                                  transform: [
+                                    { scaleX: tile.mirrorX ? -1 : 1 },
+                                    { scaleY: tile.mirrorY ? -1 : 1 },
+                                    { rotate: `${tile.rotation}deg` },
+                                  ],
+                                }
+                              : {
+                                  width: '100%',
+                                  height: '100%',
+                                  transform: [
+                                    { scaleX: tile.mirrorX ? -1 : 1 },
+                                    { scaleY: tile.mirrorY ? -1 : 1 },
+                                    { rotate: `${tile.rotation}deg` },
+                                  ],
+                                },
                           ]}
-                          displaySize={w}
+                          displaySize={isPartialCell ? fullW : w}
                         />
                         {settings.showDebug && <TileDebugOverlay connections={l2Connections} />}
                       </View>
@@ -9132,6 +9159,17 @@ export default function TestScreen() {
                     const h =
                       (cell.maxRow - cell.minRow + 1) * tileSizeForCell +
                       (cell.maxRow - cell.minRow) * GRID_GAP;
+                    const isPartialCell = cell.isPartial === true;
+                    const fullW = isPartialCell && cell.fullMinCol != null && cell.fullMaxCol != null
+                      ? (cell.fullMaxCol - cell.fullMinCol + 1) * tileSizeForCell + (cell.fullMaxCol - cell.fullMinCol) * GRID_GAP
+                      : w;
+                    const fullH = isPartialCell && cell.fullMinRow != null && cell.fullMaxRow != null
+                      ? (cell.fullMaxRow - cell.fullMinRow + 1) * tileSizeForCell + (cell.fullMaxRow - cell.fullMinRow) * GRID_GAP
+                      : h;
+                    const spriteLeft = isPartialCell && cell.fullMinCol != null
+                      ? -(cell.minCol - cell.fullMinCol) * stride : 0;
+                    const spriteTop = isPartialCell && cell.fullMinRow != null
+                      ? -(cell.minRow - cell.fullMinRow) * stride : 0;
                     const l3Connections =
                       settings.showDebug && tile.imageIndex >= 0
                         ? getTransformedConnectionsForName(
@@ -9161,17 +9199,30 @@ export default function TestScreen() {
                           strokeWidth={level3StrokeWidth}
                           style={[
                             styles.tileImage,
-                            {
-                              width: '100%',
-                              height: '100%',
-                              transform: [
-                                { scaleX: tile.mirrorX ? -1 : 1 },
-                                { scaleY: tile.mirrorY ? -1 : 1 },
-                                { rotate: `${tile.rotation}deg` },
-                              ],
-                            },
+                            isPartialCell
+                              ? {
+                                  position: 'absolute',
+                                  left: spriteLeft,
+                                  top: spriteTop,
+                                  width: fullW,
+                                  height: fullH,
+                                  transform: [
+                                    { scaleX: tile.mirrorX ? -1 : 1 },
+                                    { scaleY: tile.mirrorY ? -1 : 1 },
+                                    { rotate: `${tile.rotation}deg` },
+                                  ],
+                                }
+                              : {
+                                  width: '100%',
+                                  height: '100%',
+                                  transform: [
+                                    { scaleX: tile.mirrorX ? -1 : 1 },
+                                    { scaleY: tile.mirrorY ? -1 : 1 },
+                                    { rotate: `${tile.rotation}deg` },
+                                  ],
+                                },
                           ]}
-                          displaySize={w}
+                          displaySize={isPartialCell ? fullW : w}
                         />
                         {settings.showDebug && <TileDebugOverlay connections={l3Connections} />}
                       </View>
@@ -9370,6 +9421,17 @@ export default function TestScreen() {
                       const h =
                         (cell.maxRow - cell.minRow + 1) * tileSizeForCell +
                         (cell.maxRow - cell.minRow) * GRID_GAP;
+                      const isPartialCell = cell.isPartial === true;
+                      const fullW = isPartialCell && cell.fullMinCol != null && cell.fullMaxCol != null
+                        ? (cell.fullMaxCol - cell.fullMinCol + 1) * tileSizeForCell + (cell.fullMaxCol - cell.fullMinCol) * GRID_GAP
+                        : w;
+                      const fullH = isPartialCell && cell.fullMinRow != null && cell.fullMaxRow != null
+                        ? (cell.fullMaxRow - cell.fullMinRow + 1) * tileSizeForCell + (cell.fullMaxRow - cell.fullMinRow) * GRID_GAP
+                        : h;
+                      const spriteLeft = isPartialCell && cell.fullMinCol != null
+                        ? -(cell.minCol - cell.fullMinCol) * stride : 0;
+                      const spriteTop = isPartialCell && cell.fullMinRow != null
+                        ? -(cell.minRow - cell.fullMinRow) * stride : 0;
                       const l2DebugConnections =
                         settings.showDebug && tile.imageIndex >= 0
                           ? getTransformedConnectionsForName(
@@ -9399,17 +9461,30 @@ export default function TestScreen() {
                             strokeWidth={level2StrokeWidth}
                             style={[
                               styles.tileImage,
-                              {
-                                width: '100%',
-                                height: '100%',
-                                transform: [
-                                  { scaleX: tile.mirrorX ? -1 : 1 },
-                                  { scaleY: tile.mirrorY ? -1 : 1 },
-                                  { rotate: `${tile.rotation}deg` },
-                                ],
-                              },
+                              isPartialCell
+                                ? {
+                                    position: 'absolute',
+                                    left: spriteLeft,
+                                    top: spriteTop,
+                                    width: fullW,
+                                    height: fullH,
+                                    transform: [
+                                      { scaleX: tile.mirrorX ? -1 : 1 },
+                                      { scaleY: tile.mirrorY ? -1 : 1 },
+                                      { rotate: `${tile.rotation}deg` },
+                                    ],
+                                  }
+                                : {
+                                    width: '100%',
+                                    height: '100%',
+                                    transform: [
+                                      { scaleX: tile.mirrorX ? -1 : 1 },
+                                      { scaleY: tile.mirrorY ? -1 : 1 },
+                                      { rotate: `${tile.rotation}deg` },
+                                    ],
+                                  },
                             ]}
-                            displaySize={w}
+                            displaySize={isPartialCell ? fullW : w}
                           />
                           {settings.showDebug && <TileDebugOverlay connections={l2DebugConnections} />}
                         </View>
@@ -9467,6 +9542,17 @@ export default function TestScreen() {
                       const h =
                         (cell.maxRow - cell.minRow + 1) * tileSizeForCell +
                         (cell.maxRow - cell.minRow) * GRID_GAP;
+                      const isPartialCell = cell.isPartial === true;
+                      const fullW = isPartialCell && cell.fullMinCol != null && cell.fullMaxCol != null
+                        ? (cell.fullMaxCol - cell.fullMinCol + 1) * tileSizeForCell + (cell.fullMaxCol - cell.fullMinCol) * GRID_GAP
+                        : w;
+                      const fullH = isPartialCell && cell.fullMinRow != null && cell.fullMaxRow != null
+                        ? (cell.fullMaxRow - cell.fullMinRow + 1) * tileSizeForCell + (cell.fullMaxRow - cell.fullMinRow) * GRID_GAP
+                        : h;
+                      const spriteLeft = isPartialCell && cell.fullMinCol != null
+                        ? -(cell.minCol - cell.fullMinCol) * stride : 0;
+                      const spriteTop = isPartialCell && cell.fullMinRow != null
+                        ? -(cell.minRow - cell.fullMinRow) * stride : 0;
                       const l3DebugConnections =
                         settings.showDebug && tile.imageIndex >= 0
                           ? getTransformedConnectionsForName(
@@ -9496,17 +9582,30 @@ export default function TestScreen() {
                             strokeWidth={level3StrokeWidth}
                             style={[
                               styles.tileImage,
-                              {
-                                width: '100%',
-                                height: '100%',
-                                transform: [
-                                  { scaleX: tile.mirrorX ? -1 : 1 },
-                                  { scaleY: tile.mirrorY ? -1 : 1 },
-                                  { rotate: `${tile.rotation}deg` },
-                                ],
-                              },
+                              isPartialCell
+                                ? {
+                                    position: 'absolute',
+                                    left: spriteLeft,
+                                    top: spriteTop,
+                                    width: fullW,
+                                    height: fullH,
+                                    transform: [
+                                      { scaleX: tile.mirrorX ? -1 : 1 },
+                                      { scaleY: tile.mirrorY ? -1 : 1 },
+                                      { rotate: `${tile.rotation}deg` },
+                                    ],
+                                  }
+                                : {
+                                    width: '100%',
+                                    height: '100%',
+                                    transform: [
+                                      { scaleX: tile.mirrorX ? -1 : 1 },
+                                      { scaleY: tile.mirrorY ? -1 : 1 },
+                                      { rotate: `${tile.rotation}deg` },
+                                    ],
+                                  },
                             ]}
-                            displaySize={w}
+                            displaySize={isPartialCell ? fullW : w}
                           />
                           {settings.showDebug && <TileDebugOverlay connections={l3DebugConnections} />}
                         </View>

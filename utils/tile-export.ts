@@ -611,13 +611,24 @@ export const renderTileCanvasToSvg = async ({
       for (let i = 0; i < levelInfo.cells.length; i += 1) {
         const tile = overlayTiles[i];
         if (!tile) continue;
-        const { minCol, maxCol, minRow, maxRow } = levelInfo.cells[i];
+        const cell = levelInfo.cells[i];
+        const { minCol, maxCol, minRow, maxRow } = cell;
         const left = minCol * layerStride;
         const top = minRow * layerStride;
         const cellW =
           (maxCol - minCol + 1) * level1TileSize + (maxCol - minCol) * layerGap;
         const cellH =
           (maxRow - minRow + 1) * level1TileSize + (maxRow - minRow) * layerGap;
+        // For partial cells: compute full (unclamped) cell dimensions and offset
+        const isPartial = cell.isPartial === true;
+        const fullCellW = isPartial && cell.fullMinCol != null && cell.fullMaxCol != null
+          ? (cell.fullMaxCol - cell.fullMinCol + 1) * level1TileSize + (cell.fullMaxCol - cell.fullMinCol) * layerGap
+          : cellW;
+        const fullCellH = isPartial && cell.fullMinRow != null && cell.fullMaxRow != null
+          ? (cell.fullMaxRow - cell.fullMinRow + 1) * level1TileSize + (cell.fullMaxRow - cell.fullMinRow) * layerGap
+          : cellH;
+        const clipOffsetX = isPartial && cell.fullMinCol != null ? (minCol - cell.fullMinCol) * layerStride : 0;
+        const clipOffsetY = isPartial && cell.fullMinRow != null ? (minRow - cell.fullMinRow) * layerStride : 0;
         const sourceByIndex =
           tile.imageIndex >= 0
             ? (tileSources[tile.imageIndex] as { name?: string; source?: unknown } | undefined)
@@ -636,8 +647,8 @@ export const renderTileCanvasToSvg = async ({
         const tileName = (resolvedSource?.name ?? tile.name) ?? '';
         const strokeScale = layerStrokeScaleByName?.get(tileName) ?? 1;
         const strokeW =
-          layerLineWidth != null && level1TileSize > 0 && cellW > 0
-            ? layerLineWidth * strokeScale * (level1TileSize / cellW)
+          layerLineWidth != null && level1TileSize > 0 && fullCellW > 0
+            ? layerLineWidth * strokeScale * (level1TileSize / fullCellW)
             : undefined;
         const overrides =
           resolvedSource != null
@@ -646,18 +657,27 @@ export const renderTileCanvasToSvg = async ({
                 strokeWidth: strokeW,
               }
             : undefined;
-        const centerX = cellW / 2;
-        const centerY = cellH / 2;
+        // Transform draws at full cell size, offset by -clipOffset so the visible portion aligns
+        const drawLeft = left - clipOffsetX;
+        const drawTop = top - clipOffsetY;
+        const centerX = fullCellW / 2;
+        const centerY = fullCellH / 2;
         const scaleX = tile.mirrorX ? -1 : 1;
         const scaleY = tile.mirrorY ? -1 : 1;
         const rotation = tile.rotation ?? 0;
-        const transform = [
-          `translate(${left} ${top})`,
+        const innerTransform = [
+          `translate(${drawLeft} ${drawTop})`,
           `translate(${centerX} ${centerY})`,
           `scale(${scaleX} ${scaleY})`,
           `rotate(${rotation})`,
           `translate(${-centerX} ${-centerY})`,
         ].join(' ');
+
+        // Wrap in clip for partial cells
+        const clipOpen = isPartial
+          ? `<svg x="${left}" y="${top}" width="${cellW}" height="${cellH}" overflow="hidden"><g transform="translate(${-left} ${-top})">`
+          : '';
+        const clipClose = isPartial ? '</g></svg>' : '';
 
         const ugcXml =
           (tileName ? ugcXmlBySourceName?.get(tileName) : undefined) ??
@@ -671,40 +691,40 @@ export const renderTileCanvasToSvg = async ({
           const extracted = extractSvgContent(nextXml);
           const content = extracted.content && extracted.content.trim() ? extracted.content : nextXml;
           if (content) {
-            const viewBox = extracted.viewBox ?? `0 0 ${cellW} ${cellH}`;
+            const viewBox = extracted.viewBox ?? `0 0 ${fullCellW} ${fullCellH}`;
             const viewParts = viewBox.split(/\s+/).map((part) => Number(part));
-            let vbWidth = Number.isFinite(viewParts[2]) ? viewParts[2] : cellW;
-            let vbHeight = Number.isFinite(viewParts[3]) ? viewParts[3] : cellH;
+            let vbWidth = Number.isFinite(viewParts[2]) ? viewParts[2] : fullCellW;
+            let vbHeight = Number.isFinite(viewParts[3]) ? viewParts[3] : fullCellH;
             const outerScale = getOuterScaleFromSvgContent(content);
             if (outerScale !== 1) {
               vbWidth = vbWidth / outerScale;
               vbHeight = vbHeight / outerScale;
             }
-            const scaleXToCell = cellW / vbWidth;
-            const scaleYToCell = cellH / vbHeight;
-            const fullTransform = `${transform} scale(${scaleXToCell} ${scaleYToCell})`;
-            svgParts.push(applyTransformToSvgContent(content, fullTransform));
+            const scaleXToCell = fullCellW / vbWidth;
+            const scaleYToCell = fullCellH / vbHeight;
+            const fullTransform = `${innerTransform} scale(${scaleXToCell} ${scaleYToCell})`;
+            svgParts.push(clipOpen + applyTransformToSvgContent(content, fullTransform) + clipClose);
             continue;
           }
         }
 
         const inline = await toInlineSvg(source, overrides);
         if (inline && inline.content) {
-          const viewBox = inline.viewBox ?? `0 0 ${cellW} ${cellH}`;
+          const viewBox = inline.viewBox ?? `0 0 ${fullCellW} ${fullCellH}`;
           const viewParts = viewBox.split(/\s+/).map((part) => Number(part));
-          const vbWidth = Number.isFinite(viewParts[2]) ? viewParts[2] : cellW;
-          const vbHeight = Number.isFinite(viewParts[3]) ? viewParts[3] : cellH;
-          const scaleXToCell = cellW / vbWidth;
-          const scaleYToCell = cellH / vbHeight;
-          const fullTransform = `${transform} scale(${scaleXToCell} ${scaleYToCell})`;
-          svgParts.push(applyTransformToSvgContent(inline.content, fullTransform));
+          const vbWidth = Number.isFinite(viewParts[2]) ? viewParts[2] : fullCellW;
+          const vbHeight = Number.isFinite(viewParts[3]) ? viewParts[3] : fullCellH;
+          const scaleXToCell = fullCellW / vbWidth;
+          const scaleYToCell = fullCellH / vbHeight;
+          const fullTransform = `${innerTransform} scale(${scaleXToCell} ${scaleYToCell})`;
+          svgParts.push(clipOpen + applyTransformToSvgContent(inline.content, fullTransform) + clipClose);
           continue;
         }
 
         const dataUri = await toDataUri(source, overrides);
         if (!dataUri) continue;
         svgParts.push(
-          `<g transform="${transform}"><image href="${dataUri}" width="${cellW}" height="${cellH}" /></g>`
+          clipOpen + `<g transform="${innerTransform}"><image href="${dataUri}" width="${fullCellW}" height="${fullCellH}" /></g>` + clipClose
         );
       }
     }
@@ -1007,13 +1027,24 @@ export const renderTileCanvasToDataUrl = async ({
       for (let i = 0; i < levelInfo.cells.length; i += 1) {
         const tile = overlayTiles[i];
         if (!tile) continue;
-        const { minCol, maxCol, minRow, maxRow } = levelInfo.cells[i];
+        const cell = levelInfo.cells[i];
+        const { minCol, maxCol, minRow, maxRow } = cell;
         const left = minCol * layerStride;
         const top = minRow * layerStride;
         const cellW =
           (maxCol - minCol + 1) * level1TileSize + (maxCol - minCol) * layerGap;
         const cellH =
           (maxRow - minRow + 1) * level1TileSize + (maxRow - minRow) * layerGap;
+        // For partial cells: compute full cell dimensions and clip offset
+        const isPartial = cell.isPartial === true;
+        const fullCellW = isPartial && cell.fullMinCol != null && cell.fullMaxCol != null
+          ? (cell.fullMaxCol - cell.fullMinCol + 1) * level1TileSize + (cell.fullMaxCol - cell.fullMinCol) * layerGap
+          : cellW;
+        const fullCellH = isPartial && cell.fullMinRow != null && cell.fullMaxRow != null
+          ? (cell.fullMaxRow - cell.fullMinRow + 1) * level1TileSize + (cell.fullMaxRow - cell.fullMinRow) * layerGap
+          : cellH;
+        const clipOffsetX = isPartial && cell.fullMinCol != null ? (minCol - cell.fullMinCol) * layerStride : 0;
+        const clipOffsetY = isPartial && cell.fullMinRow != null ? (minRow - cell.fullMinRow) * layerStride : 0;
         const sourceByIndex =
           tile.imageIndex >= 0
             ? (tileSources[tile.imageIndex] as { name?: string; source?: unknown } | undefined)
@@ -1032,8 +1063,8 @@ export const renderTileCanvasToDataUrl = async ({
         const tileName = (resolvedSource?.name ?? tile.name) ?? '';
         const scale = layerStrokeScaleByName?.get(tileName) ?? 1;
         const strokeW =
-          layerLineWidth != null && level1TileSize > 0 && cellW > 0
-            ? layerLineWidth * scale * (level1TileSize / cellW)
+          layerLineWidth != null && level1TileSize > 0 && fullCellW > 0
+            ? layerLineWidth * scale * (level1TileSize / fullCellW)
             : undefined;
         const img = await getImage(
           source,
@@ -1046,10 +1077,19 @@ export const renderTileCanvasToDataUrl = async ({
         );
         if (!img) continue;
         ctx.save();
-        ctx.translate(left + cellW / 2, top + cellH / 2);
+        if (isPartial) {
+          // Clip to the visible (clamped) portion of the cell
+          ctx.beginPath();
+          ctx.rect(left, top, cellW, cellH);
+          ctx.clip();
+        }
+        // Draw at full cell size, offset so the visible portion aligns
+        const drawLeft = left - clipOffsetX;
+        const drawTop = top - clipOffsetY;
+        ctx.translate(drawLeft + fullCellW / 2, drawTop + fullCellH / 2);
         ctx.scale(tile.mirrorX ? -1 : 1, tile.mirrorY ? -1 : 1);
         ctx.rotate(((tile.rotation || 0) * Math.PI) / 180);
-        ctx.drawImage(img, -cellW / 2, -cellH / 2, cellW, cellH);
+        ctx.drawImage(img, -fullCellW / 2, -fullCellH / 2, fullCellW, fullCellH);
         ctx.restore();
       }
     }

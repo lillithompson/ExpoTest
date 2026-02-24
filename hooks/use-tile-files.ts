@@ -12,7 +12,7 @@ import {
     serializeTileFile,
     type TileFilePayload
 } from '@/utils/tile-format';
-import { buildInitialTiles, getLevelGridInfo, type GridLayout, type Tile } from '@/utils/tile-grid';
+import { buildInitialTiles, getLevelGridInfo, migrateLegacyLayerTiles, migrateLegacyLockedCells, type GridLayout, type Tile } from '@/utils/tile-grid';
 
 // ── End diagnostic helpers ──
 
@@ -155,7 +155,9 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
                   if (!Number.isInteger(level) || level < 2) continue;
                   const arr = rawLayers[key];
                   if (!Array.isArray(arr)) continue;
-                  layers[level] = arr as Tile[];
+                  // Migrate legacy (complete-only) tile arrays to expanded grid with partial cells
+                  const migrated = migrateLegacyLayerTiles(arr as Tile[], grid.columns, grid.rows, level);
+                  layers[level] = migrated ?? (arr as Tile[]);
                 }
                 if (Object.keys(layers).length === 0) layers = undefined;
               }
@@ -171,7 +173,14 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
                   const cells = (arr as unknown[]).filter(
                     (i): i is number => typeof i === 'number' && Number.isInteger(i) && i >= 0
                   );
-                  if (cells.length > 0) lockedCellsPerLayer[level] = cells;
+                  if (cells.length === 0) continue;
+                  // Migrate legacy locked cell indices to expanded grid
+                  const migratedLocked = migrateLegacyLockedCells(cells, grid.columns, grid.rows, level);
+                  if (migratedLocked && migratedLocked.length > 0) {
+                    lockedCellsPerLayer[level] = migratedLocked;
+                  } else {
+                    lockedCellsPerLayer[level] = cells;
+                  }
                 }
                 if (Object.keys(lockedCellsPerLayer).length === 0) lockedCellsPerLayer = undefined;
               }
@@ -412,10 +421,17 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
           const levelInfo = getLevelGridInfo(file.grid.columns, file.grid.rows, level);
           const fullSize = levelInfo ? levelInfo.cells.length : 0;
           const existing = file.layers?.[level];
-          const currentTiles: Tile[] =
-            existing && existing.length > 0
-              ? [...existing]
-              : buildInitialTiles(fullSize);
+          let base: Tile[];
+          if (existing && existing.length > 0) {
+            // Migrate legacy (complete-only) tile arrays to the expanded grid
+            const migrated = existing.length !== fullSize
+              ? migrateLegacyLayerTiles(existing, file.grid.columns, file.grid.rows, level)
+              : null;
+            base = migrated ? [...migrated] : [...existing];
+          } else {
+            base = buildInitialTiles(fullSize);
+          }
+          const currentTiles = base;
           // Pad to full size to avoid undefined holes when cellUpdates has out-of-range indices
           while (currentTiles.length < fullSize) {
             currentTiles.push({ imageIndex: -1, rotation: 0, mirrorX: false, mirrorY: false });
@@ -661,13 +677,16 @@ export const useTileFiles = (defaultCategory: TileCategory) => {
   const createFileFromTileData = useCallback(
     (payload: TileFilePayload, options?: { isSample?: boolean; thumbnailUri?: string | null }): string => {
       const layersPayload = payload.layers;
+      const payloadCols = payload.gridLayout?.columns ?? 0;
+      const payloadRows = payload.gridLayout?.rows ?? 0;
       let layers: Record<number, Tile[]> | undefined;
       if (layersPayload && typeof layersPayload === 'object' && !Array.isArray(layersPayload)) {
         layers = {};
         for (const [k, v] of Object.entries(layersPayload)) {
           const level = parseInt(k, 10);
           if (Number.isInteger(level) && level >= 2 && Array.isArray(v)) {
-            layers[level] = v;
+            const migrated = migrateLegacyLayerTiles(v, payloadCols, payloadRows, level);
+            layers[level] = migrated ?? v;
           }
         }
         if (Object.keys(layers).length === 0) layers = undefined;

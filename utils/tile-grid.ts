@@ -351,13 +351,9 @@ export function getMaxGridResolutionLevel(columns: number, rows: number): number
       const cellTiles = Math.pow(2, level - 1);
       const centerCol = Math.floor(columns / 2);
       const centerRow = Math.floor(rows / 2);
-      const kMinV = Math.ceil((0 - centerCol) / cellTiles);
-      const kMaxV = Math.floor((columns - centerCol) / cellTiles) - 1;
-      const nVertical = Math.max(0, kMaxV - kMinV + 1);
-      const kMinH = Math.ceil((0 - centerRow) / cellTiles);
-      const kMaxH = Math.floor((rows - centerRow) / cellTiles) - 1;
-      const nHorizontal = Math.max(0, kMaxH - kMinH + 1);
-      if (nVertical < 1 || nHorizontal < 1) {
+      const vRange = getLevelKRange(centerCol, columns, cellTiles);
+      const hRange = getLevelKRange(centerRow, rows, cellTiles);
+      if (!vRange || !hRange) {
         return level - 1;
       }
     }
@@ -432,6 +428,13 @@ export type LevelCellBounds = {
   maxCol: number;
   minRow: number;
   maxRow: number;
+  /** True when bounds are clamped to canvas edge (partial cell). */
+  isPartial?: boolean;
+  /** Unclamped bounds — only present when isPartial is true. */
+  fullMinCol?: number;
+  fullMaxCol?: number;
+  fullMinRow?: number;
+  fullMaxRow?: number;
 };
 
 export type LevelGridInfo = {
@@ -442,8 +445,60 @@ export type LevelGridInfo = {
 };
 
 /**
- * Returns the grid of complete cells for a given level (center-out).
- * Used for resolution layers: only these cells are editable at this level.
+ * Computes the k-range for center-out cells along one axis, including partial
+ * edge cells with ≥50% overlap (so 2D area overlap ≥ 25%).
+ * Cell k spans [center + k*cellTiles, center + (k+1)*cellTiles - 1].
+ * Returns { kMin, kMax } or null if no cells fit.
+ */
+export function getLevelKRange(
+  center: number,
+  size: number,
+  cellTiles: number
+): { kMin: number; kMax: number } | null {
+  if (size <= 0 || cellTiles <= 0) return null;
+  // Find k range where cell has ANY overlap with [0, size-1]
+  // Cell k: start = center + k*cellTiles, end = center + (k+1)*cellTiles - 1
+  // Overlap exists when start <= size-1 AND end >= 0
+  // start <= size-1  =>  k <= (size - 1 - center) / cellTiles
+  // end >= 0         =>  k >= (0 - center - cellTiles + 1) / cellTiles = (-center) / cellTiles - 1 + 1/cellTiles
+  // We iterate from the smallest k with any overlap and filter by ≥50% per-dimension overlap.
+  const kAnyMin = Math.ceil(-center / cellTiles - 1 + 1 / cellTiles);
+  const kAnyMax = Math.floor((size - 1 - center) / cellTiles);
+  let kMin: number | null = null;
+  let kMax: number | null = null;
+  for (let k = kAnyMin; k <= kAnyMax; k++) {
+    const start = center + k * cellTiles;
+    const end = start + cellTiles - 1;
+    const clampedStart = Math.max(0, start);
+    const clampedEnd = Math.min(size - 1, end);
+    const overlap = clampedEnd - clampedStart + 1;
+    if (overlap / cellTiles >= 0.5) {
+      if (kMin === null) kMin = k;
+      kMax = k;
+    }
+  }
+  if (kMin === null || kMax === null) return null;
+  return { kMin, kMax };
+}
+
+/**
+ * Returns the old (complete-cells-only) k-range for backward compatibility / migration.
+ */
+export function getLevelKRangeComplete(
+  center: number,
+  size: number,
+  cellTiles: number
+): { kMin: number; kMax: number } | null {
+  const kMin = Math.ceil(-center / cellTiles);
+  const kMax = Math.floor((size - center) / cellTiles) - 1;
+  if (kMax < kMin) return null;
+  return { kMin, kMax };
+}
+
+/**
+ * Returns the grid of cells for a given level (center-out), including partial
+ * edge cells that have ≥25% area overlap with the canvas (≥50% per dimension).
+ * Used for resolution layers: these cells are editable at this level.
  */
 export function getLevelGridInfo(
   columns: number,
@@ -463,28 +518,133 @@ export function getLevelGridInfo(
   const cellTiles = Math.pow(2, level - 1);
   const centerCol = Math.floor(columns / 2);
   const centerRow = Math.floor(rows / 2);
-  // Only include cells that are fully inside the grid (no partial cells at edges).
-  // Cell k spans [centerCol + k*cellTiles, centerCol + (k+1)*cellTiles - 1]; require maxCol <= columns-1.
-  const kMinV = Math.ceil((0 - centerCol) / cellTiles);
-  const kMaxV = Math.floor((columns - centerCol) / cellTiles) - 1;
-  const nVertical = Math.max(0, kMaxV - kMinV + 1);
-  const kMinH = Math.ceil((0 - centerRow) / cellTiles);
-  const kMaxH = Math.floor((rows - centerRow) / cellTiles) - 1;
-  const nHorizontal = Math.max(0, kMaxH - kMinH + 1);
-  if (nVertical < 1 || nHorizontal < 1) return null;
-  const levelCols = nVertical;
-  const levelRows = nHorizontal;
+  const vRange = getLevelKRange(centerCol, columns, cellTiles);
+  const hRange = getLevelKRange(centerRow, rows, cellTiles);
+  if (!vRange || !hRange) return null;
+  const levelCols = vRange.kMax - vRange.kMin + 1;
+  const levelRows = hRange.kMax - hRange.kMin + 1;
   const cells: LevelCellBounds[] = [];
   for (let j = 0; j < levelRows; j += 1) {
-    const minRow = centerRow + (kMinH + j) * cellTiles;
-    const maxRow = minRow + cellTiles - 1;
+    const fullMinRow = centerRow + (hRange.kMin + j) * cellTiles;
+    const fullMaxRow = fullMinRow + cellTiles - 1;
+    const clampedMinRow = Math.max(0, fullMinRow);
+    const clampedMaxRow = Math.min(rows - 1, fullMaxRow);
+    const rowPartial = fullMinRow !== clampedMinRow || fullMaxRow !== clampedMaxRow;
     for (let i = 0; i < levelCols; i += 1) {
-      const minCol = centerCol + (kMinV + i) * cellTiles;
-      const maxCol = minCol + cellTiles - 1;
-      cells.push({ minCol, maxCol, minRow, maxRow });
+      const fullMinCol = centerCol + (vRange.kMin + i) * cellTiles;
+      const fullMaxCol = fullMinCol + cellTiles - 1;
+      const clampedMinCol = Math.max(0, fullMinCol);
+      const clampedMaxCol = Math.min(columns - 1, fullMaxCol);
+      const colPartial = fullMinCol !== clampedMinCol || fullMaxCol !== clampedMaxCol;
+      const isPartial = rowPartial || colPartial;
+      const cell: LevelCellBounds = {
+        minCol: clampedMinCol,
+        maxCol: clampedMaxCol,
+        minRow: clampedMinRow,
+        maxRow: clampedMaxRow,
+      };
+      if (isPartial) {
+        cell.isPartial = true;
+        cell.fullMinCol = fullMinCol;
+        cell.fullMaxCol = fullMaxCol;
+        cell.fullMinRow = fullMinRow;
+        cell.fullMaxRow = fullMaxRow;
+      }
+      cells.push(cell);
     }
   }
   return { levelCols, levelRows, cells };
+}
+
+/**
+ * Migrates a legacy layer tile array (from the old complete-cells-only k-range) to the
+ * new expanded grid that includes partial edge cells. Old interior cells are mapped to
+ * their new positions; new partial cells get empty tiles.
+ * Returns the remapped tile array sized to the new grid, or null if no migration is needed
+ * (already correct size or unrecognized).
+ */
+export function migrateLegacyLayerTiles(
+  oldTiles: Tile[],
+  columns: number,
+  rows: number,
+  level: number
+): Tile[] | null {
+  if (level < 2) return null;
+  const cellTiles = Math.pow(2, level - 1);
+  const centerCol = Math.floor(columns / 2);
+  const centerRow = Math.floor(rows / 2);
+  // Old (complete-only) ranges
+  const oldVRange = getLevelKRangeComplete(centerCol, columns, cellTiles);
+  const oldHRange = getLevelKRangeComplete(centerRow, rows, cellTiles);
+  // New (with partials) ranges
+  const newVRange = getLevelKRange(centerCol, columns, cellTiles);
+  const newHRange = getLevelKRange(centerRow, rows, cellTiles);
+  if (!oldVRange || !oldHRange || !newVRange || !newHRange) return null;
+  const oldCols = oldVRange.kMax - oldVRange.kMin + 1;
+  const oldRows = oldHRange.kMax - oldHRange.kMin + 1;
+  const oldCount = oldCols * oldRows;
+  const newCols = newVRange.kMax - newVRange.kMin + 1;
+  const newRows = newHRange.kMax - newHRange.kMin + 1;
+  const newCount = newCols * newRows;
+  // Already the right size — no migration needed
+  if (oldTiles.length === newCount) return null;
+  // Doesn't match old count either — can't migrate, fall back
+  if (oldTiles.length !== oldCount) return null;
+  // Offset of old grid origin within new grid
+  const colOffset = oldVRange.kMin - newVRange.kMin;
+  const rowOffset = oldHRange.kMin - newHRange.kMin;
+  const emptyTile: Tile = { imageIndex: -1, rotation: 0, mirrorX: false, mirrorY: false };
+  const newTiles: Tile[] = Array.from({ length: newCount }, () => ({ ...emptyTile }));
+  for (let oldR = 0; oldR < oldRows; oldR++) {
+    for (let oldC = 0; oldC < oldCols; oldC++) {
+      const newR = oldR + rowOffset;
+      const newC = oldC + colOffset;
+      if (newR >= 0 && newR < newRows && newC >= 0 && newC < newCols) {
+        newTiles[newR * newCols + newC] = oldTiles[oldR * oldCols + oldC];
+      }
+    }
+  }
+  return newTiles;
+}
+
+/**
+ * Migrates legacy locked cell indices from the old (complete-only) grid to the new
+ * expanded grid. Returns remapped indices, or null if no migration is needed.
+ */
+export function migrateLegacyLockedCells(
+  oldLockedCells: number[],
+  columns: number,
+  rows: number,
+  level: number
+): number[] | null {
+  if (level < 2 || oldLockedCells.length === 0) return null;
+  const cellTiles = Math.pow(2, level - 1);
+  const centerCol = Math.floor(columns / 2);
+  const centerRow = Math.floor(rows / 2);
+  const oldVRange = getLevelKRangeComplete(centerCol, columns, cellTiles);
+  const oldHRange = getLevelKRangeComplete(centerRow, rows, cellTiles);
+  const newVRange = getLevelKRange(centerCol, columns, cellTiles);
+  const newHRange = getLevelKRange(centerRow, rows, cellTiles);
+  if (!oldVRange || !oldHRange || !newVRange || !newHRange) return null;
+  const oldCols = oldVRange.kMax - oldVRange.kMin + 1;
+  const newCols = newVRange.kMax - newVRange.kMin + 1;
+  // If same grid size, no migration needed
+  if (oldCols === newCols && (oldVRange.kMin === newVRange.kMin) && (oldHRange.kMin === newHRange.kMin)) return null;
+  const colOffset = oldVRange.kMin - newVRange.kMin;
+  const rowOffset = oldHRange.kMin - newHRange.kMin;
+  const newRows = newHRange.kMax - newHRange.kMin + 1;
+  return oldLockedCells
+    .map((idx) => {
+      const oldR = Math.floor(idx / oldCols);
+      const oldC = idx % oldCols;
+      const newR = oldR + rowOffset;
+      const newC = oldC + colOffset;
+      if (newR >= 0 && newR < newRows && newC >= 0 && newC < newCols) {
+        return newR * newCols + newC;
+      }
+      return -1;
+    })
+    .filter((idx) => idx >= 0);
 }
 
 /** Zoom region in level-1 tile coordinates. */

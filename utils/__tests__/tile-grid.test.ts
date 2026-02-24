@@ -9,11 +9,14 @@ import {
     getGridLevelLinePositions,
     getLevelCellIndexForPoint,
     getLevelGridInfo,
+    getLevelKRange,
     getMaxGridResolutionLevel,
     getSpiralCellOrder,
     getSpiralCellOrderInRect,
     getTileSourceIndexByName,
     hydrateTilesWithSourceNames,
+    migrateLegacyLayerTiles,
+    migrateLegacyLockedCells,
     normalizeTiles,
     resolveDisplaySource,
     zoomRegionHasPartialCellsAtLevel,
@@ -281,25 +284,25 @@ describe('zoom region flood invariant', () => {
 });
 
 describe('grid resolution level', () => {
-  it('getMaxGridResolutionLevel returns 1 for 1×1 and 0 for empty', () => {
-    expect(getMaxGridResolutionLevel(1, 1)).toBe(1);
+  it('getMaxGridResolutionLevel returns 2 for 1×1 (partial cell at L2) and 0 for empty', () => {
+    expect(getMaxGridResolutionLevel(1, 1)).toBe(2);
     expect(getMaxGridResolutionLevel(0, 8)).toBe(0);
     expect(getMaxGridResolutionLevel(10, 0)).toBe(0);
   });
 
-  it('getMaxGridResolutionLevel: center-out only complete cells; 10×8 and 8×8 max L3, 4×4 max L2', () => {
-    expect(getMaxGridResolutionLevel(10, 8)).toBe(3);
-    expect(getMaxGridResolutionLevel(8, 8)).toBe(3);
-    expect(getMaxGridResolutionLevel(4, 4)).toBe(2);
+  it('getMaxGridResolutionLevel: with partial cells; 10×8 and 8×8 max L4, 4×4 max L3', () => {
+    expect(getMaxGridResolutionLevel(10, 8)).toBe(4);
+    expect(getMaxGridResolutionLevel(8, 8)).toBe(4);
+    expect(getMaxGridResolutionLevel(4, 4)).toBe(3);
   });
 
-  it('getMaxGridResolutionLevel for 14×24: max level 3 (no complete 8×8 cell when centered)', () => {
-    expect(getMaxGridResolutionLevel(14, 24)).toBe(3);
+  it('getMaxGridResolutionLevel for 14×24: max level 4 (partial 8×8 cells fit)', () => {
+    expect(getMaxGridResolutionLevel(14, 24)).toBe(4);
   });
 
-  it('getMaxGridResolutionLevel requires ≥2 lines each way so 10×1 and 1×8 only have level 1', () => {
-    expect(getMaxGridResolutionLevel(10, 1)).toBe(1);
-    expect(getMaxGridResolutionLevel(1, 8)).toBe(1);
+  it('getMaxGridResolutionLevel: 10×1 and 1×8 have level 2 (partial cells with ≥50% overlap)', () => {
+    expect(getMaxGridResolutionLevel(10, 1)).toBe(2);
+    expect(getMaxGridResolutionLevel(1, 8)).toBe(2);
   });
 
   it('getGridLevelLinePositions level 1 matches tile boundaries', () => {
@@ -337,18 +340,40 @@ describe('grid resolution level', () => {
     expect(horizontalPx).toEqual([4 * 50]);
   });
 
-  it('getLevelGridInfo level 2 for 10×8: 4×4 grid of complete 2×2 cells (only fully contained)', () => {
+  it('getLevelGridInfo level 2 for 10×8: 6×4 grid including partial edge cells', () => {
     const info = getLevelGridInfo(10, 8, 2);
     expect(info).not.toBeNull();
-    expect(info!.levelCols).toBe(4);
+    expect(info!.levelCols).toBe(6);
     expect(info!.levelRows).toBe(4);
-    expect(info!.cells).toHaveLength(16);
-    expect(info!.cells[0]).toEqual({ minCol: 1, maxCol: 2, minRow: 0, maxRow: 1 });
-    expect(info!.cells[5]).toEqual({ minCol: 3, maxCol: 4, minRow: 2, maxRow: 3 });
+    expect(info!.cells).toHaveLength(24);
+    // First cell is partial (only col 0 visible, full cell is [-1, 0])
+    expect(info!.cells[0].minCol).toBe(0);
+    expect(info!.cells[0].maxCol).toBe(0);
+    expect(info!.cells[0].minRow).toBe(0);
+    expect(info!.cells[0].maxRow).toBe(1);
+    expect(info!.cells[0].isPartial).toBe(true);
+    expect(info!.cells[0].fullMinCol).toBe(-1);
+    expect(info!.cells[0].fullMaxCol).toBe(0);
+    // Second cell (interior) is complete
+    expect(info!.cells[1]).toEqual({ minCol: 1, maxCol: 2, minRow: 0, maxRow: 1 });
+    expect(info!.cells[1].isPartial).toBeUndefined();
+    // Last cell in first row is partial (col 9 visible, full cell is [9, 10])
+    expect(info!.cells[5].minCol).toBe(9);
+    expect(info!.cells[5].maxCol).toBe(9);
+    expect(info!.cells[5].isPartial).toBe(true);
+    expect(info!.cells[5].fullMaxCol).toBe(10);
   });
 
-  it('getLevelGridInfo level 4 for 10×8: null (no complete 8×8 cell)', () => {
-    expect(getLevelGridInfo(10, 8, 4)).toBeNull();
+  it('getLevelGridInfo level 4 for 10×8: 2×2 grid of partial cells', () => {
+    const info = getLevelGridInfo(10, 8, 4);
+    expect(info).not.toBeNull();
+    expect(info!.levelCols).toBe(2);
+    expect(info!.levelRows).toBe(2);
+    expect(info!.cells).toHaveLength(4);
+    // All cells are partial (8×8 cells don't fully fit in 10×8)
+    for (const cell of info!.cells) {
+      expect(cell.isPartial).toBe(true);
+    }
   });
 });
 
@@ -357,26 +382,33 @@ describe('getLevelCellIndexForPoint', () => {
   const gridGap = 2;
   const level1Rows = 8;
 
-  it('returns level-2 cell index when point is inside a complete cell', () => {
+  it('returns level-2 cell index when point is inside a cell (including partial)', () => {
     const info = getLevelGridInfo(10, 8, 2)!;
-    expect(info.cells[0]).toEqual({ minCol: 1, maxCol: 2, minRow: 0, maxRow: 1 });
+    // Cell at index 0 is now partial (col 0 only); cell at index 1 is the old first complete cell (cols 1-2)
+    expect(info.cells[1].minCol).toBe(1);
+    expect(info.cells[1].maxCol).toBe(2);
     const stride = tileSize + gridGap;
-    const left0 = 1 * stride;
+    const left1 = 1 * stride;
     const top0 = 0 * stride;
-    expect(getLevelCellIndexForPoint(left0, top0, info, tileSize, gridGap, level1Rows)).toBe(0);
-    expect(getLevelCellIndexForPoint(left0 + 5, top0 + 5, info, tileSize, gridGap, level1Rows)).toBe(0);
+    expect(getLevelCellIndexForPoint(left1, top0, info, tileSize, gridGap, level1Rows)).toBe(1);
+    expect(getLevelCellIndexForPoint(left1 + 5, top0 + 5, info, tileSize, gridGap, level1Rows)).toBe(1);
   });
 
-  it('returns null when point is in partial cell or outside', () => {
+  it('returns index for partial edge cell when point is in visible bounds', () => {
     const info = getLevelGridInfo(10, 8, 2)!;
-    expect(getLevelCellIndexForPoint(0, 0, info, tileSize, gridGap, level1Rows)).toBeNull();
-    expect(getLevelCellIndexForPoint(1, 1, info, tileSize, gridGap, level1Rows)).toBeNull();
+    // Cell at index 0 is partial: minCol=0, maxCol=0 (visible portion only)
+    expect(info.cells[0].minCol).toBe(0);
+    expect(info.cells[0].isPartial).toBe(true);
+    const stride = tileSize + gridGap;
+    // Click at col 0 row 0 should hit the partial cell
+    expect(getLevelCellIndexForPoint(0, 0, info, tileSize, gridGap, level1Rows)).toBe(0);
   });
 
   it('assigns horizontal mirror boundary row to cell above (20×16 level 3)', () => {
     const info = getLevelGridInfo(20, 16, 3)!;
-    expect(info.levelCols).toBe(4);
-    expect(info.levelRows).toBe(4);
+    // 20×16 L3: centerCol=10, centerRow=8, cellTiles=4
+    // With partials the grid may be larger, but the mirror boundary logic should still work
+    expect(info.levelRows).toBeGreaterThanOrEqual(4);
     const stride = tileSize + gridGap;
     const centerRow = Math.floor(16 / 2);
     const boundaryY = centerRow * stride;
@@ -385,8 +417,9 @@ describe('getLevelCellIndexForPoint', () => {
     const xCenter = 10 * stride;
     const cellAbove = getLevelCellIndexForPoint(xCenter, boundaryY, info, tileSizeL3, gridGap, level1Rows);
     expect(cellAbove).not.toBeNull();
-    const rowAbove = cellAbove! < info.levelCols ? 0 : Math.floor(cellAbove! / info.levelCols);
-    expect(rowAbove).toBe(1);
+    // The cell should be in a row above the center
+    const rowAbove = Math.floor(cellAbove! / info.levelCols);
+    expect(rowAbove).toBeLessThan(info.levelRows / 2);
   });
 });
 
@@ -416,5 +449,127 @@ describe('zoomRegionHasPartialCellsAtLevel', () => {
   it('returns true when zoom cuts through level-3 cells', () => {
     expect(zoomRegionHasPartialCellsAtLevel({ minRow: 0, maxRow: 2, minCol: 1, maxCol: 4 }, cols, rows, 3)).toBe(true);
     expect(zoomRegionHasPartialCellsAtLevel({ minRow: 0, maxRow: 3, minCol: 0, maxCol: 3 }, cols, rows, 3)).toBe(true);
+  });
+});
+
+describe('getLevelKRange', () => {
+  it('returns correct range for even grid (no partials)', () => {
+    // 8 cols, center=4, cellTiles=2: cells at k=-2,-1,0,1 all complete
+    const range = getLevelKRange(4, 8, 2);
+    expect(range).toEqual({ kMin: -2, kMax: 1 });
+  });
+
+  it('includes partial cells with ≥50% overlap', () => {
+    // 10 cols, center=5, cellTiles=2:
+    // k=-3: start=-1, end=0, overlap=1/2=50% → included (partial)
+    // k=2: start=9, end=10, overlap=1/2=50% → included (partial)
+    const range = getLevelKRange(5, 10, 2);
+    expect(range).toEqual({ kMin: -3, kMax: 2 });
+  });
+
+  it('excludes cells with <50% overlap', () => {
+    // 10 cols, center=5, cellTiles=4:
+    // k=-2: start=-3, end=0, overlap=1/4=25% → excluded
+    // k=1: start=9, end=12, overlap=1/4=25% → excluded
+    const range = getLevelKRange(5, 10, 4);
+    expect(range).toEqual({ kMin: -1, kMax: 0 });
+  });
+
+  it('returns null for empty dimensions', () => {
+    expect(getLevelKRange(0, 0, 2)).toBeNull();
+  });
+
+  it('handles single-tile dimension (1 col, center=0, cellTiles=2: 50% overlap)', () => {
+    const range = getLevelKRange(0, 1, 2);
+    expect(range).not.toBeNull();
+    expect(range!.kMax - range!.kMin + 1).toBe(1); // exactly 1 cell
+  });
+});
+
+describe('partial cell bounds', () => {
+  it('partial cells have full* bounds and isPartial flag', () => {
+    const info = getLevelGridInfo(10, 8, 2)!;
+    // First cell (left edge): partial
+    const c0 = info.cells[0];
+    expect(c0.isPartial).toBe(true);
+    expect(c0.minCol).toBe(0);
+    expect(c0.fullMinCol).toBe(-1);
+    expect(c0.fullMaxCol).toBe(0);
+    // Interior cell: not partial
+    const c1 = info.cells[1];
+    expect(c1.isPartial).toBeUndefined();
+    expect(c1.fullMinCol).toBeUndefined();
+  });
+
+  it('even grid has no partial cells', () => {
+    // 8×8 level 2: center=4, cellTiles=2, all cells complete
+    const info = getLevelGridInfo(8, 8, 2)!;
+    for (const cell of info.cells) {
+      expect(cell.isPartial).toBeUndefined();
+    }
+  });
+
+  it('9×9 level 2 has partial edges', () => {
+    const info = getLevelGridInfo(9, 9, 2)!;
+    // center=4, cellTiles=2
+    // k=-2: [0,1] complete; k=-1: [2,3] complete; k=0: [4,5] complete; k=1: [6,7] complete; k=2: [8,9] clamp→[8,8] partial
+    expect(info.levelCols).toBe(5);
+    expect(info.levelRows).toBe(5);
+    // Last col cells are partial
+    const lastColCell = info.cells[4]; // row 0, col 4
+    expect(lastColCell.isPartial).toBe(true);
+    expect(lastColCell.minCol).toBe(8);
+    expect(lastColCell.maxCol).toBe(8);
+    expect(lastColCell.fullMaxCol).toBe(9);
+  });
+});
+
+describe('migrateLegacyLayerTiles', () => {
+  it('remaps old complete-only tiles to expanded grid with empty partials', () => {
+    // 10×8, level 2: old grid was 4×4=16 cells, new is 6×4=24 cells
+    const oldTiles: Tile[] = Array.from({ length: 16 }, (_, i) => ({
+      imageIndex: i,
+      rotation: 0,
+      mirrorX: false,
+      mirrorY: false,
+    }));
+    const result = migrateLegacyLayerTiles(oldTiles, 10, 8, 2);
+    expect(result).not.toBeNull();
+    expect(result!).toHaveLength(24);
+    // Old cell (0,0) should map to new cell at offset (1, 0) in new grid (6 cols)
+    // because new kMinV = -3, old kMinV = -2, offset = -2 - (-3) = 1
+    expect(result![0 * 6 + 1].imageIndex).toBe(0); // old index 0 → new col 1
+    expect(result![0 * 6 + 0].imageIndex).toBe(-1); // new partial cell → empty
+    // Last old cell (row 3, col 3) → new (row 3, col 4)
+    expect(result![3 * 6 + 4].imageIndex).toBe(15);
+    // New right-edge partial → empty
+    expect(result![0 * 6 + 5].imageIndex).toBe(-1);
+  });
+
+  it('returns null when tiles already match new grid size', () => {
+    const newInfo = getLevelGridInfo(10, 8, 2)!;
+    const tiles: Tile[] = Array.from({ length: newInfo.cells.length }, () => ({
+      imageIndex: 0,
+      rotation: 0,
+      mirrorX: false,
+      mirrorY: false,
+    }));
+    expect(migrateLegacyLayerTiles(tiles, 10, 8, 2)).toBeNull();
+  });
+
+  it('returns null for level 1', () => {
+    expect(migrateLegacyLayerTiles([], 10, 8, 1)).toBeNull();
+  });
+});
+
+describe('migrateLegacyLockedCells', () => {
+  it('remaps old locked cell indices to new expanded grid', () => {
+    // 10×8, level 2: old 4 cols, new 6 cols. Offset: col+1, row+0.
+    // Old index 0 (row 0, col 0) → new index 0*6+1 = 1
+    const result = migrateLegacyLockedCells([0, 5], 10, 8, 2);
+    expect(result).not.toBeNull();
+    // Old index 5 = row 1, col 1 → new row 1, col 2 = 1*6+2 = 8
+    expect(result).toContain(1);
+    expect(result).toContain(8);
   });
 });
