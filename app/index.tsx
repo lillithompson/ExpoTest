@@ -788,6 +788,43 @@ function computePatternTileFromData(
   };
 }
 
+/** Snapshot all non-editing layers from activeFile for undo side effects. */
+function snapshotOtherLayers(
+  activeFile: TileFile | null,
+  editingLevel: number,
+  maxLevel: number,
+): Record<number, Tile[]> {
+  if (!activeFile) return {};
+  const snap: Record<number, Tile[]> = {};
+  for (let level = 1; level <= maxLevel; level++) {
+    if (level === editingLevel) continue;
+    snap[level] = [...(level === 1 ? (activeFile.tiles ?? []) : (activeFile.layers?.[level] ?? []))];
+  }
+  return snap;
+}
+
+/** Build post-snapshot by applying accumulated cell updates to pre-snapshot. */
+function applyAccumulatedUpdates(
+  pre: Record<number, Tile[]>,
+  accumulated: Record<number, Record<number, Tile>>,
+): Record<number, Tile[]> {
+  const post: Record<number, Tile[]> = {};
+  for (const [levelStr, preTiles] of Object.entries(pre)) {
+    const level = parseInt(levelStr, 10);
+    const updates = accumulated[level];
+    if (updates && Object.keys(updates).length > 0) {
+      const postTiles = [...preTiles];
+      for (const [idxStr, tile] of Object.entries(updates)) {
+        postTiles[parseInt(idxStr, 10)] = tile;
+      }
+      post[level] = postTiles;
+    } else {
+      post[level] = preTiles;
+    }
+  }
+  return post;
+}
+
 export default function TestScreen() {
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
@@ -972,6 +1009,10 @@ export default function TestScreen() {
   /** Accumulated finer-layer cell updates during pattern painting. Flushed on debounce timer. */
   const finerLayerPendingRef = useRef<Record<number, Record<number, Tile>>>({});
   const finerLayerFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** Pre-snapshot of non-editing layers at drag start (for drag-stroke undo). */
+  const dragLayerPreSnapshotRef = useRef<Record<number, Tile[]> | null>(null);
+  /** Accumulated cell updates during a drag stroke (for building post-snapshot). */
+  const dragLayerAccumulatedRef = useRef<Record<number, Record<number, Tile>>>({});
   const [showPatternSaveModal, setShowPatternSaveModal] = useState(false);
   const [showPatternExportMenu, setShowPatternExportMenu] = useState(false);
   const [selectedPatternIdsForExport, setSelectedPatternIdsForExport] = useState<string[]>([]);
@@ -1913,6 +1954,11 @@ export default function TestScreen() {
 
       if (Object.keys(cellUpdates).length > 0) {
         updateActiveFileLayerCells(M, cellUpdates);
+        // Accumulate for drag-stroke undo side-effect
+        if (dragLayerPreSnapshotRef.current) {
+          if (!dragLayerAccumulatedRef.current[M]) dragLayerAccumulatedRef.current[M] = {};
+          Object.assign(dragLayerAccumulatedRef.current[M], cellUpdates);
+        }
       }
     }
   }, [activeFile, editingLevel, levelGridInfo, updateActiveFileLayerCells]);
@@ -1930,6 +1976,7 @@ export default function TestScreen() {
     undo,
     redo,
     pushUndoForDragStart,
+    patchLastUndoSideEffect,
     canUndo,
     canRedo,
     clearCloneSource,
@@ -1991,6 +2038,21 @@ export default function TestScreen() {
     fullGridRows: viewMode === 'modify' && zoomRegion ? (activeFile?.grid.rows ?? undefined) : undefined,
     crossLayerContext,
   });
+
+  /** Finalize multi-layer undo for a completed drag stroke. */
+  const finalizeDragLayerUndo = useCallback(() => {
+    const pre = dragLayerPreSnapshotRef.current;
+    if (!pre) return;
+    flushFinerLayerPending();
+    const accumulated = dragLayerAccumulatedRef.current;
+    if (Object.keys(accumulated).length > 0) {
+      const post = applyAccumulatedUpdates(pre, accumulated);
+      patchLastUndoSideEffect({ preClear: pre, postClear: post });
+    }
+    dragLayerPreSnapshotRef.current = null;
+    dragLayerAccumulatedRef.current = {};
+  }, [flushFinerLayerPending, patchLastUndoSideEffect]);
+
   /** When switching resolution layer or file, load that layer's tiles into the grid hook. */
   const lastLayerLoadRef = useRef({ editingLevel: 0, fileId: '' });
   // Reset the guard on each new load so returning to the same file/layer always re-runs the load.
@@ -2162,54 +2224,58 @@ export default function TestScreen() {
     };
   }, []);
 
-  /** Restore other-layer data when undoing a full-canvas clear. */
+  /** Restore other-layer data when undoing an operation with side effects. */
   useEffect(() => {
     const sideEffect = lastUndoSideEffectRef.current;
     if (!sideEffect || !activeFile) return;
     const { preClear } = sideEffect;
     const rows = activeFile.grid?.rows ?? 0;
     const cols = activeFile.grid?.columns ?? 0;
-    if (preClear[1] !== undefined && editingLevel !== 1) {
-      upsertActiveFile({
-        ...activeFile,
-        tiles: preClear[1],
-        gridLayout: { rows, columns: cols, tileSize: activeFile.preferredTileSize },
-        category: activeFile.category,
-        categories: activeFile.categories,
-        preferredTileSize: activeFile.preferredTileSize,
-      });
-    }
-    if (preClear[2] !== undefined && editingLevel !== 2) {
-      updateActiveFileLayer(2, preClear[2]);
-    }
-    if (preClear[3] !== undefined && editingLevel !== 3) {
-      updateActiveFileLayer(3, preClear[3]);
+    for (const levelStr of Object.keys(preClear)) {
+      const level = parseInt(levelStr, 10);
+      if (level === editingLevel) continue;
+      const tiles = preClear[level];
+      if (tiles === undefined) continue;
+      if (level === 1) {
+        upsertActiveFile({
+          ...activeFile,
+          tiles,
+          gridLayout: { rows, columns: cols, tileSize: activeFile.preferredTileSize },
+          category: activeFile.category,
+          categories: activeFile.categories,
+          preferredTileSize: activeFile.preferredTileSize,
+        });
+      } else {
+        updateActiveFileLayer(level, tiles);
+      }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [undoSideEffectVersion]);
 
-  /** Restore other-layer data when redoing a full-canvas clear. */
+  /** Restore other-layer data when redoing an operation with side effects. */
   useEffect(() => {
     const sideEffect = lastRedoSideEffectRef.current;
     if (!sideEffect || !activeFile) return;
     const { postClear } = sideEffect;
     const rows = activeFile.grid?.rows ?? 0;
     const cols = activeFile.grid?.columns ?? 0;
-    if (postClear[1] !== undefined && editingLevel !== 1) {
-      upsertActiveFile({
-        ...activeFile,
-        tiles: postClear[1],
-        gridLayout: { rows, columns: cols, tileSize: activeFile.preferredTileSize },
-        category: activeFile.category,
-        categories: activeFile.categories,
-        preferredTileSize: activeFile.preferredTileSize,
-      });
-    }
-    if (postClear[2] !== undefined && editingLevel !== 2) {
-      updateActiveFileLayer(2, postClear[2]);
-    }
-    if (postClear[3] !== undefined && editingLevel !== 3) {
-      updateActiveFileLayer(3, postClear[3]);
+    for (const levelStr of Object.keys(postClear)) {
+      const level = parseInt(levelStr, 10);
+      if (level === editingLevel) continue;
+      const tiles = postClear[level];
+      if (tiles === undefined) continue;
+      if (level === 1) {
+        upsertActiveFile({
+          ...activeFile,
+          tiles,
+          gridLayout: { rows, columns: cols, tileSize: activeFile.preferredTileSize },
+          category: activeFile.category,
+          categories: activeFile.categories,
+          preferredTileSize: activeFile.preferredTileSize,
+        });
+      } else {
+        updateActiveFileLayer(level, tiles);
+      }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [redoSideEffectVersion]);
@@ -2237,8 +2303,22 @@ export default function TestScreen() {
                 selectedPattern, editingLevel
               )
             : null;
+        if (isEditingHigherLayer) {
+          const pre = snapshotOtherLayers(activeFile, editingLevel, maxDisplayLevel);
+          const postTilesMap = applyPatternFloodToAllLayers(false);
+          if (Object.keys(pre).length > 0) {
+            const postClear: Record<number, Tile[]> = {};
+            for (const levelStr of Object.keys(pre)) {
+              const lv = parseInt(levelStr, 10);
+              postClear[lv] = postTilesMap[lv] ?? pre[lv];
+            }
+            pendingUndoSideEffectRef.current = { preClear: pre, postClear };
+          }
+        }
         floodFill(_pfOrigin?.row, _pfOrigin?.col);
-        applyPatternFloodToAllLayers(false);
+        if (!isEditingHigherLayer) {
+          applyPatternFloodToAllLayers(false);
+        }
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -4631,6 +4711,11 @@ export default function TestScreen() {
         if (Object.keys(cellUpdates).length > 0) {
           if (!finerLayerPendingRef.current[M]) finerLayerPendingRef.current[M] = {};
           Object.assign(finerLayerPendingRef.current[M], cellUpdates);
+          // Accumulate for drag-stroke undo side-effect
+          if (dragLayerPreSnapshotRef.current) {
+            if (!dragLayerAccumulatedRef.current[M]) dragLayerAccumulatedRef.current[M] = {};
+            Object.assign(dragLayerAccumulatedRef.current[M], cellUpdates);
+          }
         }
       }
       scheduleFinerLayerFlush();
@@ -4970,11 +5055,11 @@ export default function TestScreen() {
       patternHeight: number,
       rotation: number,
       mirrorX: boolean
-    ) => {
+    ): Record<number, Tile> | null => {
       const gridCols = activeFile?.grid.columns ?? 0;
       const gridRows = activeFile?.grid.rows ?? 0;
       const mInfo = getLevelGridInfo(gridCols, gridRows, targetLevel);
-      if (!mInfo) return;
+      if (!mInfo) return null;
 
       // Anchor is in L1 units; contract to targetLevel if it is coarser than L1.
       let anchorRow_M = anchorRow_L1;
@@ -5031,7 +5116,9 @@ export default function TestScreen() {
       }
       if (Object.keys(cellUpdates).length > 0) {
         updateActiveFileLayerCells(targetLevel, cellUpdates);
+        return cellUpdates;
       }
+      return null;
     },
     [activeFile?.grid.columns, activeFile?.grid.rows, updateActiveFileLayerCells, settings.mirrorHorizontal, settings.mirrorVertical]
   );
@@ -5255,14 +5342,15 @@ export default function TestScreen() {
    * Fills all levels that the pattern contains data for, including finer and coarser layers.
    * @param isFloodComplete - if true, only fill cells where imageIndex === -1 (flood complete mode).
    */
-  const applyPatternFloodToAllLayers = (isFloodComplete: boolean) => {
-    if (brush.mode !== 'pattern' || !selectedPattern || !activeFile) return;
+  const applyPatternFloodToAllLayers = (isFloodComplete: boolean): Record<number, Tile[]> => {
+    if (brush.mode !== 'pattern' || !selectedPattern || !activeFile) return {};
     const patCreatedAtLevel = selectedPattern.createdAtLevel ?? 1;
     // Check if the pattern has data at any level other than the current editingLevel
     const hasOtherLevelData =
       (patCreatedAtLevel !== editingLevel) ||
       Object.keys(selectedPattern.layerTiles ?? {}).some((k) => parseInt(k, 10) !== editingLevel);
-    if (!hasOtherLevelData) return;
+    if (!hasOtherLevelData) return {};
+    const postTilesMap: Record<number, Tile[]> = {};
     const gridCols = activeFile.grid.columns;
     const gridRows = activeFile.grid.rows;
     const patternRotation = patternRotations[selectedPattern.id] ?? 0;
@@ -5373,12 +5461,14 @@ export default function TestScreen() {
           }
         }
       }
+      postTilesMap[M] = newMTiles;
       if (M === 1) {
         updateActiveFileTilesL1(newMTiles);
       } else {
         updateActiveFileLayer(M, newMTiles);
       }
     }
+    return postTilesMap;
   };
 
   const pendingPatternPreview = useMemo(() => {
@@ -8130,15 +8220,17 @@ export default function TestScreen() {
                       newMaxCol = Math.max(0, Math.min(newMaxCol, cols - 1));
 
                       if (isEditingHigherLayer && selectionBoundsLayerGrid && levelGridInfo && activeFile) {
-                        // Rotate editing-level tiles using layer-cell coordinates
+                        // Snapshot non-editing layers for undo side-effect.
+                        const rotatePre = snapshotOtherLayers(activeFile, editingLevel, maxDisplayLevel);
+                        const rotatePostTiles: Record<number, Tile[]> = {};
+
                         const { minRow: lyrMinRow, maxRow: lyrMaxRow, minCol: lyrMinCol, maxCol: lyrMaxCol } = selectionBoundsLayerGrid;
-                        rotateRegion(lyrMinRow, lyrMaxRow, lyrMinCol, lyrMaxCol, levelGridInfo.levelCols);
 
                         const fullCols = activeFile.grid.columns;
                         const fullRows = activeFile.grid.rows;
                         const emptyTile: Tile = { imageIndex: -1, rotation: 0, mirrorX: false, mirrorY: false };
 
-                        // Rotate L1 tiles (file.tiles)
+                        // Rotate L1 tiles (file.tiles) - compute post-tiles
                         if (fullCols > 0 && fullRows > 0) {
                           const l1Count = fullCols * fullRows;
                           const l1Src = normalizeTiles(activeFile.tiles, l1Count, tileSources.length);
@@ -8161,7 +8253,7 @@ export default function TestScreen() {
                                 nextL1[toR * fullCols + toC] = { ...tile, rotation: transformed.rotation, mirrorX: transformed.mirrorX, mirrorY: transformed.mirrorY };
                               }
                             });
-                            updateActiveFileTilesL1(nextL1);
+                            rotatePostTiles[1] = nextL1;
                           }
                         }
 
@@ -8217,7 +8309,26 @@ export default function TestScreen() {
                               nextM[toR * mCols + toC] = { ...tile, rotation: transformed.rotation, mirrorX: transformed.mirrorX, mirrorY: transformed.mirrorY };
                             }
                           });
-                          updateActiveFileLayer(M, nextM);
+                          rotatePostTiles[M] = nextM;
+                        }
+
+                        // Set side effect before rotateRegion pushes undo.
+                        if (Object.keys(rotatePre).length > 0) {
+                          const rotatePost: Record<number, Tile[]> = {};
+                          for (const levelStr of Object.keys(rotatePre)) {
+                            const lv = parseInt(levelStr, 10);
+                            rotatePost[lv] = rotatePostTiles[lv] ?? rotatePre[lv];
+                          }
+                          pendingUndoSideEffectRef.current = { preClear: rotatePre, postClear: rotatePost };
+                        }
+
+                        // Rotate editing-level tiles using layer-cell coordinates
+                        rotateRegion(lyrMinRow, lyrMaxRow, lyrMinCol, lyrMaxCol, levelGridInfo.levelCols);
+
+                        // Write computed post-tiles to file state.
+                        if (rotatePostTiles[1]) updateActiveFileTilesL1(rotatePostTiles[1]);
+                        for (let M = 2; M < editingLevel; M += 1) {
+                          if (rotatePostTiles[M]) updateActiveFileLayer(M, rotatePostTiles[M]);
                         }
                       } else {
                         // Level 1: rotate via hook (existing behavior)
@@ -8268,8 +8379,22 @@ export default function TestScreen() {
                           selectedPattern, editingLevel
                         )
                       : null;
+                  if (isEditingHigherLayer) {
+                    const pre = snapshotOtherLayers(activeFile, editingLevel, maxDisplayLevel);
+                    const postTilesMap = applyPatternFloodToAllLayers(false);
+                    if (Object.keys(pre).length > 0) {
+                      const postClear: Record<number, Tile[]> = {};
+                      for (const levelStr of Object.keys(pre)) {
+                        const lv = parseInt(levelStr, 10);
+                        postClear[lv] = postTilesMap[lv] ?? pre[lv];
+                      }
+                      pendingUndoSideEffectRef.current = { preClear: pre, postClear };
+                    }
+                  }
                   floodFill(_pfOrigin?.row, _pfOrigin?.col);
-                  applyPatternFloodToAllLayers(false);
+                  if (!isEditingHigherLayer) {
+                    applyPatternFloodToAllLayers(false);
+                  }
                 }, 0);
               }}
               onLongPress={() => {
@@ -8287,8 +8412,22 @@ export default function TestScreen() {
                         selectedPattern, editingLevel
                       )
                     : null;
+                if (isEditingHigherLayer) {
+                  const pre = snapshotOtherLayers(activeFile, editingLevel, maxDisplayLevel);
+                  const postTilesMap = applyPatternFloodToAllLayers(true);
+                  if (Object.keys(pre).length > 0) {
+                    const postClear: Record<number, Tile[]> = {};
+                    for (const levelStr of Object.keys(pre)) {
+                      const lv = parseInt(levelStr, 10);
+                      postClear[lv] = postTilesMap[lv] ?? pre[lv];
+                    }
+                    pendingUndoSideEffectRef.current = { preClear: pre, postClear };
+                  }
+                }
                 floodComplete(_pfOriginC?.row, _pfOriginC?.col);
-                applyPatternFloodToAllLayers(true);
+                if (!isEditingHigherLayer) {
+                  applyPatternFloodToAllLayers(true);
+                }
               }}
             />
             <ToolbarButton
@@ -8618,6 +8757,10 @@ export default function TestScreen() {
                   if (!isPartOfDragRef.current) {
                     pushUndoForDragStart();
                     isPartOfDragRef.current = true;
+                    if (isEditingHigherLayer && (brush.mode === 'pattern' || brush.mode === 'clone')) {
+                      dragLayerPreSnapshotRef.current = snapshotOtherLayers(activeFile, editingLevel, maxDisplayLevel);
+                      dragLayerAccumulatedRef.current = {};
+                    }
                   }
                   handlePaintAt(point.x, point.y);
                 }
@@ -8673,6 +8816,7 @@ export default function TestScreen() {
                 }
               }}
               onMouseLeave={() => {
+                finalizeDragLayerUndo();
                 isPartOfDragRef.current = false;
                 clearDrawStroke();
                 setInteracting(false);
@@ -8689,6 +8833,7 @@ export default function TestScreen() {
                   setInteracting(false);
                   return;
                 }
+                finalizeDragLayerUndo();
                 isPartOfDragRef.current = false;
                 clearDrawStroke();
                 setInteracting(false);
@@ -8824,6 +8969,10 @@ export default function TestScreen() {
                   if (!isPartOfDragRef.current) {
                     pushUndoForDragStart();
                     isPartOfDragRef.current = true;
+                    if (isEditingHigherLayer && (brush.mode === 'pattern' || brush.mode === 'clone')) {
+                      dragLayerPreSnapshotRef.current = snapshotOtherLayers(activeFile, editingLevel, maxDisplayLevel);
+                      dragLayerAccumulatedRef.current = {};
+                    }
                   }
                   handlePaintAt(point.x, point.y);
                 }
@@ -8851,6 +9000,10 @@ export default function TestScreen() {
                     if (!isPartOfDragRef.current) {
                       pushUndoForDragStart();
                       isPartOfDragRef.current = true;
+                      if (isEditingHigherLayer && (brush.mode === 'pattern' || brush.mode === 'clone')) {
+                        dragLayerPreSnapshotRef.current = snapshotOtherLayers(activeFile, editingLevel, maxDisplayLevel);
+                        dragLayerAccumulatedRef.current = {};
+                      }
                     }
                     handlePaintAt(pt.x, pt.y);
                   }
@@ -8912,6 +9065,10 @@ export default function TestScreen() {
                   if (!isPartOfDragRef.current) {
                     pushUndoForDragStart();
                     isPartOfDragRef.current = true;
+                    if (isEditingHigherLayer && (brush.mode === 'pattern' || brush.mode === 'clone')) {
+                      dragLayerPreSnapshotRef.current = snapshotOtherLayers(activeFile, editingLevel, maxDisplayLevel);
+                      dragLayerAccumulatedRef.current = {};
+                    }
                   }
                   handlePaintAt(pt.x, pt.y);
                 }
@@ -8941,6 +9098,7 @@ export default function TestScreen() {
                     return;
                   }
                 }
+                finalizeDragLayerUndo();
                 isPartOfDragRef.current = false;
                 clearDrawStroke();
                 isTouchDragActiveRef.current = false;
@@ -8974,6 +9132,7 @@ export default function TestScreen() {
                 pendingSingleTouchPointRef.current = null;
                 pendingSingleTouchStartTimeRef.current = 0;
                 multiFingerTouchCountRef.current = 0;
+                finalizeDragLayerUndo();
                 isPartOfDragRef.current = false;
                 clearDrawStroke();
                 isTouchDragActiveRef.current = false;
@@ -9759,6 +9918,10 @@ export default function TestScreen() {
                       if (!isPartOfDragRef.current) {
                         pushUndoForDragStart();
                         isPartOfDragRef.current = true;
+                        if (isEditingHigherLayer && brush.mode === 'pattern') {
+                          dragLayerPreSnapshotRef.current = snapshotOtherLayers(activeFile, editingLevel, maxDisplayLevel);
+                          dragLayerAccumulatedRef.current = {};
+                        }
                       }
                       paintCellIndex(cellIndex);
                     } else if (cloneSourceIndex === null) {
@@ -9827,6 +9990,7 @@ export default function TestScreen() {
                     setInteracting(false);
                     return;
                   }
+                  finalizeDragLayerUndo();
                   isPartOfDragRef.current = false;
                   clearDrawStroke();
                   setInteracting(false);
@@ -9863,6 +10027,7 @@ export default function TestScreen() {
                   lastPaintedRef.current = null;
                 }}
                 onResponderTerminate={() => {
+                  finalizeDragLayerUndo();
                   isPartOfDragRef.current = false;
                   clearDrawStroke();
                   setInteracting(false);
@@ -9972,6 +10137,10 @@ export default function TestScreen() {
                     <Pressable
                       onPress={() => {
                         if (isEditingHigherLayer && levelGridInfo && selectionBoundsLayerGrid) {
+                          // Snapshot non-editing layers for undo side-effect.
+                          const movePre = snapshotOtherLayers(activeFile, editingLevel, maxDisplayLevel);
+                          const movePostTiles: Record<number, Tile[]> = {};
+
                           // Higher layer (L2/L3): indices are layer-cell indices, not L1 indices.
                           const layerCols = levelGridInfo.levelCols;
                           const { minRow: lyrMinRow, maxRow: lyrMaxRow, minCol: lyrMinCol, maxCol: lyrMaxCol } = selectionBoundsLayerGrid;
@@ -9986,7 +10155,6 @@ export default function TestScreen() {
                             const c = i % layerCols;
                             return (r + pendingMoveOffset.dRow) * layerCols + (c + pendingMoveOffset.dCol);
                           });
-                          moveRegion(layerFromIndices, layerToIndices);
                           // Also move tiles on every higher-resolution layer (internal levels
                           // 1..editingLevel-1) whose L1 footprint is fully inside the selection.
                           const fullCols = activeFile!.grid.columns;
@@ -9996,7 +10164,7 @@ export default function TestScreen() {
                           const dColL1 = pendingMoveOffset.dCol * cellTilesN;
                           const { minRow: selMinRow, maxRow: selMaxRow, minCol: selMinCol, maxCol: selMaxCol } = selectionBoundsFullGrid;
                           const emptyTile = { imageIndex: -1, rotation: 0, mirrorX: false, mirrorY: false };
-                          // Level 1 (file.tiles)
+                          // Level 1 (file.tiles) - compute post-tiles
                           if (fullCols > 0 && fullRows > 0) {
                             const l1Count = fullCols * fullRows;
                             const l1Src = normalizeTiles(activeFile!.tiles, l1Count, tileSources.length);
@@ -10019,7 +10187,7 @@ export default function TestScreen() {
                                   nextL1[toR * fullCols + toC] = tile;
                                 }
                               });
-                              updateActiveFileTilesL1(nextL1);
+                              movePostTiles[1] = nextL1;
                             }
                           }
                           // Intermediate layers (internal levels 2..editingLevel-1)
@@ -10052,7 +10220,25 @@ export default function TestScreen() {
                                 nextM[toR * mCols + toC] = tile;
                               }
                             });
-                            updateActiveFileLayer(M, nextM);
+                            movePostTiles[M] = nextM;
+                          }
+
+                          // Set side effect before moveRegion pushes undo.
+                          if (Object.keys(movePre).length > 0) {
+                            const movePost: Record<number, Tile[]> = {};
+                            for (const levelStr of Object.keys(movePre)) {
+                              const lv = parseInt(levelStr, 10);
+                              movePost[lv] = movePostTiles[lv] ?? movePre[lv];
+                            }
+                            pendingUndoSideEffectRef.current = { preClear: movePre, postClear: movePost };
+                          }
+
+                          moveRegion(layerFromIndices, layerToIndices);
+
+                          // Write computed post-tiles to file state.
+                          if (movePostTiles[1]) updateActiveFileTilesL1(movePostTiles[1]);
+                          for (let M = 2; M < editingLevel; M += 1) {
+                            if (movePostTiles[M]) updateActiveFileLayer(M, movePostTiles[M]);
                           }
                           // Update selection in L1 coordinates (each layer cell spans cellTiles L1 cells).
                           const cellTiles = Math.pow(2, editingLevel - 1);
@@ -10150,13 +10336,35 @@ export default function TestScreen() {
                               ? { tiles: p.tiles, width: p.width, height: p.height }
                               : (p.layerTiles?.[editingLevel] ?? null);
 
-                          // Step 1: Write the current editing level via placeStamp so the hook's
-                          // live state is updated (and undo is pushed). The hook's autosave will
-                          // persist this; writing it any other way would be overwritten by autosave.
-                          // For editingLevel >= 2 we ALSO write directly to the file immediately
-                          // to close the 120ms onTilesChange debounce window: if the layer-sync
-                          // effect ever reads activeFile.layers[editingLevel] during that window,
-                          // it will see the already-stamped tiles rather than the stale pre-stamp ones.
+                          // Step 1: Snapshot non-editing layers for undo side-effect.
+                          const stampPre = isEditingHigherLayer
+                            ? snapshotOtherLayers(activeFile, editingLevel, maxDisplayLevel)
+                            : {};
+
+                          // Step 2: Write all OTHER levels directly to the file.
+                          // The hook only autosaves editingLevel, so these writes are safe.
+                          const stampAccumulated: Record<number, Record<number, Tile>> = {};
+                          if (mainLevel !== editingLevel) {
+                            const updates = applyStampToFileLevel(mainLevel, anchorRow_L1, anchorCol_L1, p.tiles, p.width, p.height, rotation, mirrorX);
+                            if (updates) stampAccumulated[mainLevel] = updates;
+                          }
+                          if (p.layerTiles) {
+                            for (const [levelStr, layerData] of Object.entries(p.layerTiles)) {
+                              const M = parseInt(levelStr, 10);
+                              if (M === editingLevel) continue;
+                              const updates = applyStampToFileLevel(M, anchorRow_L1, anchorCol_L1, layerData.tiles, layerData.width, layerData.height, rotation, mirrorX);
+                              if (updates) stampAccumulated[M] = updates;
+                            }
+                          }
+
+                          // Step 3: Set side effect before placeStamp pushes undo.
+                          if (isEditingHigherLayer && Object.keys(stampPre).length > 0) {
+                            const stampPost = applyAccumulatedUpdates(stampPre, stampAccumulated);
+                            pendingUndoSideEffectRef.current = { preClear: stampPre, postClear: stampPost };
+                          }
+
+                          // Step 4: Write the current editing level via placeStamp so the hook's
+                          // live state is updated (and undo is pushed).
                           if (editingLevelTileData) {
                             if (editingLevel === 1) {
                               placeStamp(anchorRow_L1, anchorCol_L1, editingLevelTileData.tiles, editingLevelTileData.width, editingLevelTileData.height, rotation, mirrorX);
@@ -10167,19 +10375,6 @@ export default function TestScreen() {
                               placeStamp(aRow, aCol, editingLevelTileData.tiles, editingLevelTileData.width, editingLevelTileData.height, rotation, mirrorX);
                               // Eagerly write to file so activeFile.layers[editingLevel] is up-to-date.
                               applyStampToFileLevel(editingLevel, anchorRow_L1, anchorCol_L1, editingLevelTileData.tiles, editingLevelTileData.width, editingLevelTileData.height, rotation, mirrorX);
-                            }
-                          }
-
-                          // Step 2: Write all OTHER levels directly to the file.
-                          // The hook only autosaves editingLevel, so these writes are safe.
-                          if (mainLevel !== editingLevel) {
-                            applyStampToFileLevel(mainLevel, anchorRow_L1, anchorCol_L1, p.tiles, p.width, p.height, rotation, mirrorX);
-                          }
-                          if (p.layerTiles) {
-                            for (const [levelStr, layerData] of Object.entries(p.layerTiles)) {
-                              const M = parseInt(levelStr, 10);
-                              if (M === editingLevel) continue; // Already handled above
-                              applyStampToFileLevel(M, anchorRow_L1, anchorCol_L1, layerData.tiles, layerData.width, layerData.height, rotation, mirrorX);
                             }
                           }
                         }

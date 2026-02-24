@@ -112,6 +112,8 @@ type Result = {
   redo: () => void;
   /** Call once at drag start so the whole stroke is one undo step. */
   pushUndoForDragStart: () => void;
+  /** Retroactively attach a side effect to the most recent undo entry (for drag strokes). */
+  patchLastUndoSideEffect: (sideEffect: UndoSideEffect) => void;
   canUndo: boolean;
   canRedo: boolean;
   clearCloneSource: () => void;
@@ -602,6 +604,14 @@ export const useTileGrid = ({
     setUndoCount(stack.length);
     setRedoCount(0);
     if (PERF_LOG) console.log(`[PERF] pushUndo: ${(performance.now() - t0).toFixed(2)}ms | ${snapshot.length} tiles`);
+  }, []);
+
+  /** Retroactively attach a side effect to the most recent undo entry. */
+  const patchLastUndoSideEffect = useCallback((sideEffect: UndoSideEffect) => {
+    const stack = undoStackRef.current;
+    if (stack.length > 0) {
+      stack[stack.length - 1].sideEffect = sideEffect;
+    }
   }, []);
 
   const applyTilesInternal = useCallback(
@@ -3153,6 +3163,7 @@ export const useTileGrid = ({
     undo,
     redo,
     pushUndoForDragStart: pushUndo,
+    patchLastUndoSideEffect,
     canUndo: undoCount > 0,
     canRedo: redoCount > 0,
     clearCloneSource,
