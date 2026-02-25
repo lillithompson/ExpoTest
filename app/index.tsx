@@ -2150,6 +2150,12 @@ export default function TestScreen() {
   const regionToolsOpacity = useRef(new Animated.Value(0)).current;
   const regionToolsScale = useRef(new Animated.Value(0.75)).current;
   const regionToolsTranslateY = useRef(new Animated.Value(-16)).current;
+
+  /** File menu toggle and animation state. */
+  const [fileToolOpen, setFileToolOpen] = useState(false);
+  const fileToolsOpacity = useRef(new Animated.Value(0)).current;
+  const fileToolsScale = useRef(new Animated.Value(0.75)).current;
+  const fileToolsTranslateY = useRef(new Animated.Value(-16)).current;
   useEffect(() => {
     if (regionToolsVisible && !prevRegionToolsVisibleRef.current) {
       prevRegionToolsVisibleRef.current = true;
@@ -2184,6 +2190,47 @@ export default function TestScreen() {
     }
     if (!regionToolsVisible) prevRegionToolsVisibleRef.current = false;
   }, [regionToolsVisible, regionToolsOpacity, regionToolsScale, regionToolsTranslateY]);
+
+  /** Animate File tools submenu when opened. */
+  useEffect(() => {
+    if (fileToolOpen) {
+      fileToolsOpacity.setValue(0);
+      fileToolsScale.setValue(0.75);
+      fileToolsTranslateY.setValue(-16);
+      const useNative = Platform.OS !== 'web';
+      Animated.parallel([
+        Animated.timing(fileToolsOpacity, {
+          toValue: 1,
+          duration: 220,
+          useNativeDriver: useNative,
+        }),
+        Animated.timing(fileToolsTranslateY, {
+          toValue: 0,
+          duration: 220,
+          useNativeDriver: useNative,
+        }),
+        Animated.sequence([
+          Animated.timing(fileToolsScale, {
+            toValue: 1.1,
+            duration: 120,
+            useNativeDriver: useNative,
+          }),
+          Animated.timing(fileToolsScale, {
+            toValue: 1,
+            duration: 100,
+            useNativeDriver: useNative,
+          }),
+        ]),
+      ]).start();
+    }
+  }, [fileToolOpen, fileToolsOpacity, fileToolsScale, fileToolsTranslateY]);
+
+  /** Close File menu when exiting modify mode. */
+  useEffect(() => {
+    if (viewMode !== 'modify') {
+      setFileToolOpen(false);
+    }
+  }, [viewMode]);
 
   /** Ephemeral "Undoing" / "Redoing" banner over the tile canvas. */
   const [undoRedoBanner, setUndoRedoBanner] = useState<'undoing' | 'redoing' | null>(null);
@@ -2702,6 +2749,12 @@ export default function TestScreen() {
     token?: number;
     preview?: boolean;
     sourceNames?: string[];
+  } | null>(null);
+  /** Snapshot of file state when first opened, for Revert functionality. */
+  const initialFileStateRef = useRef<{
+    fileId: string;
+    tiles: Tile[];
+    layers?: Record<number, Tile[]>;
   } | null>(null);
   /** When true, we have zoomed in this session so pending restore must not overwrite current grid on zoom out. */
   const hasZoomedInThisSessionRef = useRef(false);
@@ -3618,6 +3671,16 @@ export default function TestScreen() {
       token: nextToken,
       preview: Boolean(previewUri),
       sourceNames: fileSourceNames.length > 0 ? fileSourceNames : undefined,
+    };
+    // Capture initial file state for Revert functionality (update every time file is loaded)
+    initialFileStateRef.current = {
+      fileId: file.id,
+      tiles: file.tiles.map(t => ({ ...t })),
+      layers: file.layers
+        ? Object.fromEntries(
+            Object.entries(file.layers).map(([k, v]) => [k, v.map(t => ({ ...t }))])
+          )
+        : undefined,
     };
     // Only override gridResolutionLevel for files with a real grid. New files
     // start 0×0 and handleCreateNewFile already set the level to L1.
@@ -4634,6 +4697,44 @@ export default function TestScreen() {
       });
     });
   };
+
+  const revertFile = useCallback(() => {
+    const snap = initialFileStateRef.current;
+    if (!snap || snap.fileId !== activeFileId || !activeFile) return;
+
+    dismissModifyBanner();
+    if (pendingFloodCompleteRef.current) {
+      clearTimeout(pendingFloodCompleteRef.current);
+      pendingFloodCompleteRef.current = null;
+    }
+
+    const rows = activeFile.grid?.rows ?? 0;
+    const cols = activeFile.grid?.columns ?? 0;
+
+    // Restore all layers directly to the file store first
+    if (snap.layers) {
+      for (const levelStr of Object.keys(snap.layers)) {
+        const level = parseInt(levelStr, 10);
+        updateActiveFileLayer(level, snap.layers[level]);
+      }
+    }
+
+    // Update L1 in the file store with proper gridLayout
+    upsertActiveFile({
+      tiles: snap.tiles,
+      gridLayout: { rows, columns: cols, tileSize: activeFile.preferredTileSize },
+      category: activeFile.category,
+      categories: activeFile.categories,
+      preferredTileSize: activeFile.preferredTileSize,
+    });
+
+    // Finally, reload tiles into the grid hook for the current editing level (clears undo/redo)
+    const levelTiles =
+      editingLevel >= 2 && snap.layers?.[editingLevel]
+        ? snap.layers[editingLevel]
+        : snap.tiles;
+    loadTiles(normalizeTiles(levelTiles, levelGridInfo?.cells.length ?? 0, tileSources.length));
+  }, [activeFileId, activeFile, editingLevel, levelGridInfo, tileSources.length, loadTiles, upsertActiveFile, updateActiveFileLayer, dismissModifyBanner]);
 
   const handlePaintAt = (x: number, y: number) => {
     const cellIndex = getCellIndexForPoint(x, y);
@@ -8065,30 +8166,81 @@ export default function TestScreen() {
                 },
               ]}
             >
-            {!(isWeb && isMobileWeb) && (
-              <>
-                <ToolbarButton
-                  label="Undo"
-                  icon="undo"
-                  disabled={!canUndo}
-                  onPress={() => {
-                    dismissModifyBanner();
-                    showUndoRedoBanner('undoing');
-                    undo();
-                  }}
-                />
-                <ToolbarButton
-                  label="Redo"
-                  icon="redo"
-                  disabled={!canRedo}
-                  onPress={() => {
-                    dismissModifyBanner();
-                    showUndoRedoBanner('redoing');
-                    redo();
-                  }}
-                />
-              </>
+            {fileToolOpen && (
+              <Pressable
+                style={StyleSheet.absoluteFillObject}
+                onPress={() => setFileToolOpen(false)}
+              />
             )}
+            <View style={styles.fileToolWrapper}>
+              <ToolbarButton
+                label="File"
+                icon="file-document-outline"
+                active={fileToolOpen}
+                onPress={() => setFileToolOpen(prev => !prev)}
+              />
+              {fileToolOpen && (
+                <Animated.View
+                  style={[
+                    styles.fileToolsBarOuter,
+                    {
+                      opacity: fileToolsOpacity,
+                      transform: [
+                        { translateY: fileToolsTranslateY },
+                        { scale: fileToolsScale },
+                      ],
+                    },
+                  ]}
+                >
+                  <View style={styles.fileToolsBarInner}>
+                    <ToolbarButton
+                      label="Undo"
+                      icon="undo"
+                      disabled={!canUndo}
+                      onPress={() => {
+                        setFileToolOpen(false);
+                        dismissModifyBanner();
+                        showUndoRedoBanner('undoing');
+                        undo();
+                      }}
+                    />
+                    <ToolbarButton
+                      label="Redo"
+                      icon="redo"
+                      disabled={!canRedo}
+                      onPress={() => {
+                        setFileToolOpen(false);
+                        dismissModifyBanner();
+                        showUndoRedoBanner('redoing');
+                        redo();
+                      }}
+                    />
+                    <ToolbarButton
+                      label="Clear"
+                      icon="refresh"
+                      onPress={() => {
+                        setFileToolOpen(false);
+                        dismissModifyBanner();
+                        if (pendingFloodCompleteRef.current) {
+                          clearTimeout(pendingFloodCompleteRef.current);
+                          pendingFloodCompleteRef.current = null;
+                        }
+                        clearCanvas();
+                      }}
+                    />
+                    <ToolbarButton
+                      label="Revert"
+                      icon="history"
+                      disabled={initialFileStateRef.current?.fileId !== activeFileId}
+                      onPress={() => {
+                        setFileToolOpen(false);
+                        revertFile();
+                      }}
+                    />
+                  </View>
+                </Animated.View>
+              )}
+            </View>
             <View style={styles.selectionWithRegionToolsWrapper}>
               <ToolbarButton
                 key={`selection-${isSelectionMode}`}
@@ -8374,18 +8526,6 @@ export default function TestScreen() {
                 </Animated.View>
               )}
             </View>
-            <ToolbarButton
-              label="Reset"
-              icon="refresh"
-              onPress={() => {
-                dismissModifyBanner();
-                if (pendingFloodCompleteRef.current) {
-                  clearTimeout(pendingFloodCompleteRef.current);
-                  pendingFloodCompleteRef.current = null;
-                }
-                clearCanvas();
-              }}
-            />
             <ToolbarButton
               label="Flood"
               icon="format-color-fill"
@@ -11187,6 +11327,33 @@ const styles = StyleSheet.create({
     overflow: 'visible',
   },
   regionToolsBarInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+    backgroundColor: 'rgba(180, 180, 180, 0.9)',
+    borderTopLeftRadius: 0,
+    borderTopRightRadius: 0,
+    borderBottomLeftRadius: 8,
+    borderBottomRightRadius: 8,
+    paddingVertical: 0,
+    paddingHorizontal: 6,
+  },
+  fileToolWrapper: {
+    position: 'relative',
+    flexDirection: 'column',
+    alignItems: 'center',
+  },
+  fileToolsBarOuter: {
+    position: 'absolute',
+    top: TOOLBAR_BUTTON_SIZE + 4,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'visible',
+  },
+  fileToolsBarInner: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 2,
